@@ -51,6 +51,9 @@ on:
       core-logging:
         type: boolean
         default: true
+      networking:
+        type: boolean
+        default: true
 
 jobs:
   whatif:
@@ -320,6 +323,22 @@ jobs:
           deploymentType: 'subscription'
           firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          
+      - name: 'Plan: Networking - Hub'
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        if: ${{ inputs.networking }}
+        with:
+          name: 'networking-hub'
+          displayName: 'Networking - Hub'
+          templateFilePath: 'templates/networking/hubnetworking/main.bicep'
+          templateParametersFilePath: 'templates/networking/hubnetworking/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_CONNECTIVITY }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'subscription'
+          firstRunWhatIf: 'false'
+          whatIfEnabled: 'true'
+
 
 
   deploy:
@@ -555,4 +574,18 @@ jobs:
           resourceGroupName: ''
           location: '${{ env.LOCATION }}'
           deploymentType: 'subscription'
+
+      - name: 'Deploy: Networking - Hub'
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        if: ${{ inputs.networking }}
+        with:
+          name: 'networking-hub'
+          displayName: 'Networking - Hub'
+          templateFilePath: 'templates/networking/hubnetworking/main.bicep'
+          templateParametersFilePath: 'templates/networking/hubnetworking/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_CONNECTIVITY }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'subscription'
+
 
