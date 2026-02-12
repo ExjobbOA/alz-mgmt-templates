@@ -2,6 +2,12 @@
 name: Continuous Integration
 on:
   workflow_call:
+    inputs:
+      parameters_file_name:
+        description: "Path to JSON parameters file"
+        required: false
+        type: string
+        default: "parameters.json"
 
 jobs:
   validate:
@@ -50,7 +56,7 @@ jobs:
       id-token: write
       contents: read
     env:
-      PARAMETERS_FILE_NAME: parameters.json
+      PARAMETERS_FILE_NAME: ${{ inputs.parameters_file_name }}
 
     steps:
       - name: Checkout Bicep Module

@@ -3,6 +3,11 @@ name: Continuous Delivery
 on:
   workflow_call:
     inputs:
+      parameters_file_name:
+        description: "Path to JSON parameters file"
+        required: false
+        type: string
+        default: "parameters.json"
       skip_what_if:
         default: false
         type: boolean
@@ -67,7 +72,7 @@ jobs:
       contents: read
     if: ${{ !inputs.skip_what_if }}
     env:
-      PARAMETERS_FILE_NAME: parameters.json
+      PARAMETERS_FILE_NAME: ${{ inputs.parameters_file_name }}
 
     steps:
       - name: Show inputs
@@ -353,7 +358,7 @@ jobs:
       id-token: write
       contents: read
     env:
-      PARAMETERS_FILE_NAME: parameters.json
+      PARAMETERS_FILE_NAME: ${{ inputs.parameters_file_name }}
 
     steps:
       - name: Show inputs
