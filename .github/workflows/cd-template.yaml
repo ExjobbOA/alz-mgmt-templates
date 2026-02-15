@@ -3,6 +3,9 @@ name: Continuous Delivery
 on:
   workflow_call:
     inputs:
+      platform_ref:
+        type: string
+        default: main
       parameters_file_name:
         description: "Path to JSON parameters file"
         required: false
@@ -83,6 +86,13 @@ jobs:
       - name: Checkout Bicep Module
         uses: actions/checkout@v4
 
+      - name: Checkout platform templates
+        uses: actions/checkout@v4
+        with:
+          repository: ExjobbOA/alz-mgmt-templates
+          ref: ${{ inputs.platform_ref }}
+          path: platform
+
       - name: Get Bicep Variables
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-variables@main
         with:
@@ -110,7 +120,7 @@ jobs:
         with:
           name: 'governance-int-root'
           displayName: 'Governance-Intermediate Root'
-          templateFilePath: 'templates/core/governance/mgmt-groups/int-root/main.bicep'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/int-root/main.bicep'
           templateParametersFilePath: 'config/tenants/test/core/governance/mgmt-groups/int-root.bicepparam'
           subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
           resourceGroupName: ''
