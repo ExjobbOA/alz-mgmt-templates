@@ -110,6 +110,7 @@ jobs:
           enable-AzPSSession: true
 
       - name: Check for First Deployment
+        if: false
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-first-deployment-check@main
         with:
           managementGroupId: ${{ env.MANAGEMENT_GROUP_ID }}
