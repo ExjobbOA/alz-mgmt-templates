@@ -34,7 +34,10 @@ inputs:
     description: 'Enable what-if mode (validation only, no deployment)'
     required: false
     default: 'false'
-
+  managementGroupId:
+    description: 'Optional override for Management Group ID (scope) when deploymentType is managementGroup'
+    required: false
+    default: ''
 runs:
   using: "composite"
   steps:
@@ -63,7 +66,9 @@ runs:
           }
 
           # Generate deployment stack name
-          $intRootMgId = $env:MANAGEMENT_GROUP_ID_PREFIX + $env:INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID + $env:MANAGEMENT_GROUP_ID_POSTFIX
+          $defaultMgId = $env:MANAGEMENT_GROUP_ID_PREFIX + $env:INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID + $env:MANAGEMENT_GROUP_ID_POSTFIX
+          $mgIdOverride = $env:MANAGEMENT_GROUP_ID_OVERRIDE
+          $intRootMgId = if (-not [string]::IsNullOrWhiteSpace($mgIdOverride)) { $mgIdOverride } else { $defaultMgId }
           $deploymentPrefix = $intRootMgId
           $deploymentNameBase = ($env:NAME).Replace(" ", "-")
           $deploymentNameMaxLength = 64 - $deploymentPrefix.Length - 1
@@ -334,3 +339,4 @@ runs:
         DEPLOYMENT_TYPE: ${{ inputs.deploymentType }}
         FIRST_RUN_WHAT_IF: ${{ inputs.firstRunWhatIf }}
         WHAT_IF_ENABLED: ${{ inputs.whatIfEnabled }}
+        MANAGEMENT_GROUP_ID_OVERRIDE: ${{ inputs.managementGroupId }}
