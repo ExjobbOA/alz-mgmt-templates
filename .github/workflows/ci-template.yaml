@@ -3,6 +3,9 @@ name: Continuous Integration
 on:
   workflow_call:
     inputs:
+      platform_ref:
+        type: string
+        default: main
       parameters_file_name:
         description: "Path to JSON parameters file"
         required: false
@@ -18,16 +21,26 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout Bicep Module
+      - name: Checkout tenant repo (caller)
         uses: actions/checkout@v4
-
+        with:
+          repository: ${{ github.repository }}
+      
       - name: Checkout platform templates
         uses: actions/checkout@v4
         with:
           repository: ExjobbOA/alz-mgmt-templates
           ref: ${{ inputs.platform_ref }}
           path: platform
+          
+      - name: Debug workspace
+        run: |
+          ls -la
+          ls -la config || true
+          ls -la platform || true
+          ls -la platform/templates/core/governance/mgmt-groups/int-root || true
 
+         
       - name: Install Bicep and Update Az Module
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-installer@main
 
