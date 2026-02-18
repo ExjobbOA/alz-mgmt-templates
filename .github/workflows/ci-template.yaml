@@ -89,7 +89,7 @@ jobs:
           name: 'governance-int-root'
           displayName: 'Governance-Intermediate Root'
           templateFilePath: 'templates/core/governance/mgmt-groups/int-root/main.bicep'
-          templateParametersFilePath: 'config/tenants/test/core/governance/mgmt-groups/int-root.bicepparam'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/int-root.bicepparam'
           subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
           resourceGroupName: ''
           location: '${{ env.LOCATION }}'
