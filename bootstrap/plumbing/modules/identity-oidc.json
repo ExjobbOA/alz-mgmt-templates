@@ -1,0 +1,241 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.40.2.10011",
+      "templateHash": "12380262697824739557"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string"
+    },
+    "identityRgName": {
+      "type": "string"
+    },
+    "uamiPlanName": {
+      "type": "string"
+    },
+    "uamiApplyName": {
+      "type": "string"
+    },
+    "githubOrg": {
+      "type": "string"
+    },
+    "moduleRepo": {
+      "type": "string"
+    },
+    "templatesRepo": {
+      "type": "string"
+    },
+    "envPlan": {
+      "type": "string"
+    },
+    "envApply": {
+      "type": "string"
+    },
+    "workflowRefBranch": {
+      "type": "string"
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/resourceGroups",
+      "apiVersion": "2022-09-01",
+      "name": "[parameters('identityRgName')]",
+      "location": "[parameters('location')]"
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "uami-oidc",
+      "resourceGroup": "[parameters('identityRgName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "uamiPlanName": {
+            "value": "[parameters('uamiPlanName')]"
+          },
+          "uamiApplyName": {
+            "value": "[parameters('uamiApplyName')]"
+          },
+          "githubOrg": {
+            "value": "[parameters('githubOrg')]"
+          },
+          "moduleRepo": {
+            "value": "[parameters('moduleRepo')]"
+          },
+          "templatesRepo": {
+            "value": "[parameters('templatesRepo')]"
+          },
+          "envPlan": {
+            "value": "[parameters('envPlan')]"
+          },
+          "envApply": {
+            "value": "[parameters('envApply')]"
+          },
+          "workflowRefBranch": {
+            "value": "[parameters('workflowRefBranch')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.40.2.10011",
+              "templateHash": "12162058708552971458"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string"
+            },
+            "uamiPlanName": {
+              "type": "string"
+            },
+            "uamiApplyName": {
+              "type": "string"
+            },
+            "githubOrg": {
+              "type": "string"
+            },
+            "moduleRepo": {
+              "type": "string"
+            },
+            "templatesRepo": {
+              "type": "string"
+            },
+            "envPlan": {
+              "type": "string"
+            },
+            "envApply": {
+              "type": "string"
+            },
+            "workflowRefBranch": {
+              "type": "string"
+            }
+          },
+          "variables": {
+            "issuer": "https://token.actions.githubusercontent.com",
+            "audience": "api://AzureADTokenExchange",
+            "workflowCiPath": ".github/workflows/ci-template.yaml",
+            "workflowCdPath": ".github/workflows/cd-template.yaml",
+            "workflowRefCi": "[format('{0}/{1}/{2}@{3}', parameters('githubOrg'), parameters('templatesRepo'), variables('workflowCiPath'), parameters('workflowRefBranch'))]",
+            "workflowRefCd": "[format('{0}/{1}/{2}@{3}', parameters('githubOrg'), parameters('templatesRepo'), variables('workflowCdPath'), parameters('workflowRefBranch'))]",
+            "subjectCiPlan": "[format('repo:{0}/{1}:environment:{2}:job_workflow_ref:{3}', parameters('githubOrg'), parameters('moduleRepo'), parameters('envPlan'), variables('workflowRefCi'))]",
+            "subjectCdPlan": "[format('repo:{0}/{1}:environment:{2}:job_workflow_ref:{3}', parameters('githubOrg'), parameters('moduleRepo'), parameters('envPlan'), variables('workflowRefCd'))]",
+            "subjectCdApply": "[format('repo:{0}/{1}:environment:{2}:job_workflow_ref:{3}', parameters('githubOrg'), parameters('moduleRepo'), parameters('envApply'), variables('workflowRefCd'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+              "apiVersion": "2023-01-31",
+              "name": "[parameters('uamiPlanName')]",
+              "location": "[parameters('location')]"
+            },
+            {
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+              "apiVersion": "2023-01-31",
+              "name": "[parameters('uamiApplyName')]",
+              "location": "[parameters('location')]"
+            },
+            {
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials",
+              "apiVersion": "2023-01-31",
+              "name": "[format('{0}/{1}', parameters('uamiPlanName'), 'ci-plan')]",
+              "properties": {
+                "issuer": "[variables('issuer')]",
+                "audiences": [
+                  "[variables('audience')]"
+                ],
+                "subject": "[variables('subjectCiPlan')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('uamiPlanName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials",
+              "apiVersion": "2023-01-31",
+              "name": "[format('{0}/{1}', parameters('uamiPlanName'), 'cd-plan')]",
+              "properties": {
+                "issuer": "[variables('issuer')]",
+                "audiences": [
+                  "[variables('audience')]"
+                ],
+                "subject": "[variables('subjectCdPlan')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('uamiPlanName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials",
+              "apiVersion": "2023-01-31",
+              "name": "[format('{0}/{1}', parameters('uamiApplyName'), 'cd-apply')]",
+              "properties": {
+                "issuer": "[variables('issuer')]",
+                "audiences": [
+                  "[variables('audience')]"
+                ],
+                "subject": "[variables('subjectCdApply')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('uamiApplyName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "planClientId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('uamiPlanName')), '2023-01-31').clientId]"
+            },
+            "applyClientId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('uamiApplyName')), '2023-01-31').clientId]"
+            },
+            "planPrincipalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('uamiPlanName')), '2023-01-31').principalId]"
+            },
+            "applyPrincipalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('uamiApplyName')), '2023-01-31').principalId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('identityRgName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "planClientId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('identityRgName')), 'Microsoft.Resources/deployments', 'uami-oidc'), '2025-04-01').outputs.planClientId.value]"
+    },
+    "applyClientId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('identityRgName')), 'Microsoft.Resources/deployments', 'uami-oidc'), '2025-04-01').outputs.applyClientId.value]"
+    },
+    "planPrincipalId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('identityRgName')), 'Microsoft.Resources/deployments', 'uami-oidc'), '2025-04-01').outputs.planPrincipalId.value]"
+    },
+    "applyPrincipalId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('identityRgName')), 'Microsoft.Resources/deployments', 'uami-oidc'), '2025-04-01').outputs.applyPrincipalId.value]"
+    }
+  }
+}
