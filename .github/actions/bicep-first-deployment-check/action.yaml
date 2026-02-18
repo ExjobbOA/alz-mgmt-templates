@@ -16,32 +16,25 @@ runs:
         azPSVersion: 'latest'
         inlineScript: |
           $ErrorActionPreference = "Stop"
-
+        
           $mgId = $env:MG_TO_CHECK
           $firstDeployment = $true
-
+        
           try {
-            $managementGroup = Get-AzManagementGroup -GroupName $mgId -Expand -ErrorAction Stop
-            Write-Host "Found the '$mgId' Management Group."
-
-            $children = @($managementGroup.Children | Where-Object { $_.Type -eq "Microsoft.Management/managementGroups" })
-
-            if ($children.Count -gt 0) {
-              Write-Host "The '$mgId' Management Group has child management groups -> NOT first deployment."
-              $firstDeployment = $false
-            } else {
-              Write-Host "The '$mgId' Management Group has NO child management groups -> assuming first deployment."
-              $firstDeployment = $true
-            }
+            # If we can retrieve the MG, then the "intermediate root" exists -> not first deployment.
+            $null = Get-AzManagementGroup -GroupName $mgId -ErrorAction Stop
+            Write-Host "Found the '$mgId' Management Group -> NOT first deployment."
+            $firstDeployment = $false
           }
           catch {
             $msg = $_.Exception.Message
             Write-Warning "Could not read management group '$mgId'. Assuming first deployment. Error: $msg"
             $firstDeployment = $true
           }
-
+        
           echo "firstDeployment=$firstDeployment" >> $env:GITHUB_ENV
           echo "firstDeployment=$firstDeployment" >> $env:GITHUB_OUTPUT
+
       env:
         MG_TO_CHECK: ${{ inputs.managementGroupId }}
 
