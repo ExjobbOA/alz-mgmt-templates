@@ -70,7 +70,7 @@ module identity 'modules/identity-oidc.bicep' = {
 // RBAC på MG-scope (matchar acceleratorupplägget)
 // apply = Owner
 resource raApplyOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(managementGroup().id, identity.outputs.applyPrincipalId, roleOwnerId)
+  name: guid(managementGroup().id, effectiveUamiApplyName, roleOwnerId)
   scope: managementGroup()
   properties: {
     principalId: identity.outputs.applyPrincipalId
@@ -81,7 +81,7 @@ resource raApplyOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 
 // plan = Reader
 resource raPlanReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(managementGroup().id, identity.outputs.planPrincipalId, roleReaderId)
+  name: guid(managementGroup().id, effectiveUamiPlanName, roleReaderId)
   scope: managementGroup()
   properties: {
     principalId: identity.outputs.planPrincipalId
@@ -121,7 +121,7 @@ resource alzReaderRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
 
 // Assign custom role to plan identity
 resource raPlanAlzReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(managementGroup().id, identity.outputs.planPrincipalId, alzReaderRoleId)
+  name: guid(managementGroup().id, effectiveUamiPlanName, alzReaderRoleId)
   scope: managementGroup()
   properties: {
     principalId: identity.outputs.planPrincipalId
