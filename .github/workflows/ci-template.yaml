@@ -21,6 +21,13 @@ jobs:
       - name: Checkout Bicep Module
         uses: actions/checkout@v4
 
+      - name: Checkout platform templates
+        uses: actions/checkout@v4
+        with:
+          repository: ExjobbOA/alz-mgmt-templates
+          ref: ${{ inputs.platform_ref }}
+          path: platform
+
       - name: Install Bicep and Update Az Module
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-installer@main
 
