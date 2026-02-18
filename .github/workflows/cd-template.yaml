@@ -69,7 +69,7 @@ jobs:
     runs-on:
       ubuntu-latest
     concurrency: mgmt-tfstate
-    environment: alz-mgmt-plan_A
+    environment: alz-mgmt-plan
     permissions:
       id-token: write
       contents: read
@@ -365,7 +365,7 @@ jobs:
     runs-on:
       ubuntu-latest
     concurrency: mgmt-tfstate
-    environment: alz-mgmt-apply_A
+    environment: alz-mgmt-apply
     permissions:
       id-token: write
       contents: read
