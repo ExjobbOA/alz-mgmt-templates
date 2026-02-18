@@ -38,7 +38,12 @@ inputs:
     description: 'Optional override for Management Group ID (scope) when deploymentType is managementGroup'
     required: false
     default: ''
-  whatIfSkipIfTargetMissing:
+  targetManagementGroupId:
+    description: 'The management group that the template creates/targets (used to decide if What-If should run)'
+    required: false
+    default: ''
+  skipWhatIfIfTargetMgMissing:
+    description: 'If true, skip What-If when targetManagementGroupId does not exist yet'
     required: false
     default: 'false'
 runs:
