@@ -38,6 +38,9 @@ inputs:
     description: 'Optional override for Management Group ID (scope) when deploymentType is managementGroup'
     required: false
     default: ''
+  whatIfSkipIfTargetMissing:
+    required: false
+    default: 'false'
 runs:
   using: "composite"
   steps:
