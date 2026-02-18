@@ -79,8 +79,17 @@ jobs:
       PARAMETERS_FILE_NAME: ${{ inputs.parameters_file_name }}
 
     steps:
-      - name: Checkout Bicep Module
+      - name: Checkout tenant repo (caller)
         uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+      
+      - name: Checkout platform templates
+        uses: actions/checkout@v4
+        with:
+          repository: ExjobbOA/alz-mgmt-templates
+          ref: main   # or ${{ inputs.platform_ref }}
+          path: platform
 
       - name: Get Bicep Variables
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-variables@main
