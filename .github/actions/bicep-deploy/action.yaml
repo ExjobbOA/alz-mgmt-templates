@@ -56,7 +56,25 @@ runs:
         inlineScript: |
           $deploymentType = $env:DEPLOYMENT_TYPE
           $whatIfEnabled = $env:WHAT_IF_ENABLED -eq 'true'
-
+          $skipIfTargetMissing = $env:SKIP_WHATIF_IF_TARGET_MG_MISSING -eq 'true'
+          $targetMgId = $env:TARGET_MANAGEMENT_GROUP_ID
+          
+          if ($whatIfEnabled -and $deploymentType -eq 'managementGroup' -and $skipIfTargetMissing) {
+            if ([string]::IsNullOrWhiteSpace($targetMgId)) {
+              Write-Warning "skipWhatIfIfTargetMgMissing=true but TARGET_MANAGEMENT_GROUP_ID is empty. Will NOT auto-skip What-If."
+            }
+            else {
+              Write-Host "Checking existence of target management group '$targetMgId'..." -ForegroundColor Cyan
+              try {
+                Get-AzManagementGroup -GroupName $targetMgId -ErrorAction Stop | Out-Null
+                Write-Host "Target MG '$targetMgId' exists -> What-If will run." -ForegroundColor Green
+              }
+              catch {
+                Write-Warning "Target MG '$targetMgId' does not exist -> skipping What-If for this step."
+                exit 0
+              }
+            }
+          }
           # Check if we should skip what-if for first deployment
           $firstDeploymentString = $env:firstDeployment
           $firstDeployment = $true
@@ -348,3 +366,5 @@ runs:
         FIRST_RUN_WHAT_IF: ${{ inputs.firstRunWhatIf }}
         WHAT_IF_ENABLED: ${{ inputs.whatIfEnabled }}
         MANAGEMENT_GROUP_ID_OVERRIDE: ${{ inputs.managementGroupId }}
+        TARGET_MANAGEMENT_GROUP_ID: ${{ inputs.targetManagementGroupId }}
+        SKIP_WHATIF_IF_TARGET_MG_MISSING: ${{ inputs.skipWhatIfIfTargetMgMissing }}
