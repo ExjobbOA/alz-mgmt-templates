@@ -82,21 +82,42 @@ runs:
             }
             else {
               Write-Host "Checking whether target MG '$targetMgId' exists under intermediate root '$intRootMgId'..." -ForegroundColor Cyan
+
+              $targetMgExists = $true
+              $root = $null
+              $allNames = @()
+
               try {
                 $root = Get-AzManagementGroup -GroupName $intRootMgId -Expand -Recurse -ErrorAction Stop
                 $allNames = Get-MgNamesRecursive -Node $root
-          
-                if ($allNames -contains $targetMgId) {
-                  Write-Host "Target MG '$targetMgId' exists -> What-If will run." -ForegroundColor Green
-                }
-                else {
-                  Write-Warning "Target MG '$targetMgId' does not exist yet under '$intRootMgId' -> skipping What-If for this step."
-                  exit 0
-                }
               }
               catch {
-                Write-Error "Failed to read intermediate root MG '$intRootMgId' to determine target existence. $($_.Exception.Message)"
-                throw
+                # Cold-start safe behavior:
+                # If the intermediate root MG doesn't exist yet, do NOT crash the Plan phase.
+                $msg = $_.Exception.Message
+
+                # Treat common "missing MG / not found" cases as "MG does not exist yet"
+                if ($msg -match '(?i)not\s*found|could\s*not\s*be\s*found|ResourceNotFound|404') {
+                  Write-Warning "Intermediate root MG '$intRootMgId' not found yet. Cold-start behavior: skipping What-If for this step."
+                  $targetMgExists = $false
+                }
+                else {
+                  # Non-NotFound error (auth, throttling, bad request, etc.) should still fail fast.
+                  Write-Error "Failed to read intermediate root MG '$intRootMgId' for target existence check. $msg"
+                  throw
+                }
+              }
+
+              if (-not $targetMgExists) {
+                exit 0
+              }
+
+              if ($allNames -contains $targetMgId) {
+                Write-Host "Target MG '$targetMgId' exists -> What-If will run." -ForegroundColor Green
+              }
+              else {
+                Write-Warning "Target MG '$targetMgId' does not exist yet under '$intRootMgId' -> skipping What-If for this step."
+                exit 0
               }
             }
           }
