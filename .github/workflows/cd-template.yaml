@@ -555,4 +555,217 @@ jobs:
           location: '${{ env.LOCATION }}'
           deploymentType: 'managementGroup'
 
+  deploy-rest:
+    name: Deploy - Rest
+    needs: [governance-int-root, core-logging, governance-landingzones]
+    if: ${{ always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    runs-on: ubuntu-latest
+    concurrency: mgmt-tfstate
+    environment: alz-mgmt-apply
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      PARAMETERS_FILE_NAME: ${{ inputs.parameters_file_name }}
+
+    steps:
+      - name: Show inputs
+        run: |
+          Write-Host '${{ toJson(inputs) }}'
+        shell: pwsh
+
+      - name: Checkout Bicep Module
+        uses: actions/checkout@v4
+
+      - name: Checkout platform templates
+        uses: actions/checkout@v4
+        with:
+          repository: ExjobbOA/alz-mgmt-templates
+          ref: ${{ inputs.platform_ref }}
+          path: platform
+
+      - name: Get Bicep Variables
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-variables@main
+        with:
+          parameters_file_name: ${{ env.PARAMETERS_FILE_NAME }}
+
+      - name: Install Bicep and Update Az Module
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-installer@main
+
+      - name: OIDC Login to Tenant
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          enable-AzPSSession: true
+
+      - name: 'Deploy: Governance-Landing Zones Corp'
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        if: ${{ inputs.governance-landingzones-corp }}
+        with:
+          name: 'governance-landingzones-corp'
+          displayName: 'Governance-Landing Zones Corp'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/landingzones/landingzones-corp/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/landingzones/landingzones-corp/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+
+      - name: 'Deploy: Governance-Landing Zones Online'
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        if: ${{ inputs.governance-landingzones-online }}
+        with:
+          name: 'governance-landingzones-online'
+          displayName: 'Governance-Landing Zones Online'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/landingzones/landingzones-online/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/landingzones/landingzones-online/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+
+      - name: 'Deploy: Governance-Platform'
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        if: ${{ inputs.governance-platform }}
+        with:
+          name: 'governance-platform'
+          displayName: 'Governance-Platform'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+
+      - name: 'Deploy: Governance-Platform Connectivity'
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        if: ${{ inputs.governance-platform-connectivity }}
+        with:
+          name: 'governance-platform-connectivity'
+          displayName: 'Governance-Platform Connectivity'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/connectivity/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/connectivity/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+
+      - name: 'Deploy: Governance-Platform Identity'
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        if: ${{ inputs.governance-platform-identity }}
+        with:
+          name: 'governance-platform-identity'
+          displayName: 'Governance-Platform Identity'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/identity/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/identity/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+
+      - name: 'Deploy: Governance-Platform Management'
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        if: ${{ inputs.governance-platform-management }}
+        with:
+          name: 'governance-platform-management'
+          displayName: 'Governance-Platform Management'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/management/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/management/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+
+      - name: 'Deploy: Governance-Platform Security'
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        if: ${{ inputs.governance-platform-security }}
+        with:
+          name: 'governance-platform-security'
+          displayName: 'Governance-Platform Security'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/security/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/security/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+
+      - name: 'Deploy: Governance-Sandbox'
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        if: ${{ inputs.governance-sandbox }}
+        with:
+          name: 'governance-sandbox'
+          displayName: 'Governance-Sandbox'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/sandbox/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/sandbox/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+
+      - name: 'Deploy: Governance-Decommissioned'
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        if: ${{ inputs.governance-decommissioned }}
+        with:
+          name: 'governance-decommissioned'
+          displayName: 'Governance-Decommissioned'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/decommissioned/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/decommissioned/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+
+      - name: 'Deploy: Governance-Platform RBAC'
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        if: ${{ inputs.governance-platform-rbac }}
+        with:
+          name: 'governance-platform-rbac'
+          displayName: 'Governance-Platform RBAC'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/main-rbac.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/main-rbac.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+
+      - name: 'Deploy: Governance-Platform Connectivity RBAC'
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        if: ${{ inputs.governance-platform-connectivity-rbac }}
+        with:
+          name: 'governance-platform-connectivity-rbac'
+          displayName: 'Governance-Platform Connectivity RBAC'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/connectivity/main-rbac.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/connectivity/main-rbac.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+
+      - name: 'Deploy: Governance-Landing Zones RBAC'
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        if: ${{ inputs.governance-landingzones-rbac }}
+        with:
+          name: 'governance-landingzones-rbac'
+          displayName: 'Governance-Landing Zones RBAC'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/landingzones/main-rbac.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/landingzones/main-rbac.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+
+      - name: 'Deploy: Networking - Hub'
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        if: ${{ inputs.networking-hub }}
+        with:
+          name: 'networking-hub'
+          displayName: 'Networking - Hub'
+          templateFilePath: 'platform/templates/core/networking/hub/main.bicep'
+          templateParametersFilePath: 'config/core/networking/hub/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_CONNECTIVITY }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'subscription'
 
