@@ -53,6 +53,9 @@ resource ficCdPlan 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedId
     audiences: [ audience ]
     subject: subjectCdPlan
   }
+  dependsOn: [
+    ficCiPlan
+  ]
 }
 
 resource ficCdApply 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = {
