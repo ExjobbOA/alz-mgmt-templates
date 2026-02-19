@@ -145,6 +145,8 @@ jobs:
           deploymentType: 'managementGroup'
           firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          targetManagementGroupId: 'landingzones'
+          skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Landing Zones Corp'
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
@@ -160,6 +162,8 @@ jobs:
           deploymentType: 'managementGroup'
           firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          targetManagementGroupId: 'corp'
+          skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Landing Zones Online'
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
@@ -175,6 +179,8 @@ jobs:
           deploymentType: 'managementGroup'
           firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          targetManagementGroupId: 'online'
+          skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Platform'
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
@@ -190,6 +196,8 @@ jobs:
           deploymentType: 'managementGroup'
           firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          targetManagementGroupId: 'platform'
+          skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Platform Connectivity'
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
@@ -205,6 +213,8 @@ jobs:
           deploymentType: 'managementGroup'
           firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          targetManagementGroupId: 'connectivity'
+          skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Platform Identity'
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
@@ -220,6 +230,8 @@ jobs:
           deploymentType: 'managementGroup'
           firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          targetManagementGroupId: 'identity'
+          skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Platform Management'
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
@@ -235,6 +247,8 @@ jobs:
           deploymentType: 'managementGroup'
           firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          targetManagementGroupId: 'management'
+          skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Platform Security'
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
@@ -250,6 +264,8 @@ jobs:
           deploymentType: 'managementGroup'
           firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          targetManagementGroupId: 'security'
+          skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Sandbox'
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
@@ -265,6 +281,8 @@ jobs:
           deploymentType: 'managementGroup'
           firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          targetManagementGroupId: 'sandbox'
+          skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Decommissioned'
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
@@ -280,6 +298,8 @@ jobs:
           deploymentType: 'managementGroup'
           firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          targetManagementGroupId: 'decommissioned'
+          skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Platform RBAC'
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
@@ -295,6 +315,8 @@ jobs:
           deploymentType: 'managementGroup'
           firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          targetManagementGroupId: 'platform'
+          skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Platform Connectivity RBAC'
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
@@ -310,6 +332,8 @@ jobs:
           deploymentType: 'managementGroup'
           firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          targetManagementGroupId: 'connectivity'
+          skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Landing Zones RBAC'
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
@@ -325,6 +349,8 @@ jobs:
           deploymentType: 'managementGroup'
           firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          targetManagementGroupId: 'landingzones'
+          skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Core-Logging'
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
