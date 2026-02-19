@@ -49,6 +49,7 @@ resource policyAssignmentEnableDdosVnet 'Microsoft.Authorization/policyAssignmen
 //================================
 
 // Enable-DDoS-VNET role assignments to Platform MG
+@batchSize(1)
 module rbacEnableDdosVnet 'br/public:avm/ptn/authorization/role-assignment:0.2.4' = [
   for roleDefId in (!contains(parManagementGroupExcludedPolicyAssignments, 'Enable-DDoS-VNET') ? policyAssignmentsRequiringCrossMgRbac['Enable-DDoS-VNET'] : []): {
     name: 'rbac-ddosvnet-${substring(uniqueString(roleDefId), 0, 8)}'
