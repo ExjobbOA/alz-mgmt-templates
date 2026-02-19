@@ -59,22 +59,48 @@ runs:
           $skipIfTargetMissing = $env:SKIP_WHATIF_IF_TARGET_MG_MISSING -eq 'true'
           $targetMgId = $env:TARGET_MANAGEMENT_GROUP_ID
           
+          # Build intermediate root MG id (the scope your pipeline uses)
+          $defaultMgId = $env:MANAGEMENT_GROUP_ID_PREFIX + $env:INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID + $env:MANAGEMENT_GROUP_ID_POSTFIX
+          $mgIdOverride = $env:MANAGEMENT_GROUP_ID_OVERRIDE
+          $intRootMgId = if (-not [string]::IsNullOrWhiteSpace($mgIdOverride)) { $mgIdOverride } else { $defaultMgId }
+          
+          function Get-MgNamesRecursive {
+            param([object]$Node)
+            $names = @()
+            if ($null -ne $Node -and $null -ne $Node.Name) { $names += $Node.Name }
+            if ($null -ne $Node -and $null -ne $Node.Children) {
+              foreach ($c in $Node.Children) {
+                $names += Get-MgNamesRecursive -Node $c
+              }
+            }
+            return $names
+          }
+          
           if ($whatIfEnabled -and $deploymentType -eq 'managementGroup' -and $skipIfTargetMissing) {
             if ([string]::IsNullOrWhiteSpace($targetMgId)) {
               Write-Warning "skipWhatIfIfTargetMgMissing=true but TARGET_MANAGEMENT_GROUP_ID is empty. Will NOT auto-skip What-If."
             }
             else {
-              Write-Host "Checking existence of target management group '$targetMgId'..." -ForegroundColor Cyan
+              Write-Host "Checking whether target MG '$targetMgId' exists under intermediate root '$intRootMgId'..." -ForegroundColor Cyan
               try {
-                Get-AzManagementGroup -GroupName $targetMgId -ErrorAction Stop | Out-Null
-                Write-Host "Target MG '$targetMgId' exists -> What-If will run." -ForegroundColor Green
+                $root = Get-AzManagementGroup -GroupName $intRootMgId -Expand -Recurse -ErrorAction Stop
+                $allNames = Get-MgNamesRecursive -Node $root
+          
+                if ($allNames -contains $targetMgId) {
+                  Write-Host "Target MG '$targetMgId' exists -> What-If will run." -ForegroundColor Green
+                }
+                else {
+                  Write-Warning "Target MG '$targetMgId' does not exist yet under '$intRootMgId' -> skipping What-If for this step."
+                  exit 0
+                }
               }
               catch {
-                Write-Warning "Target MG '$targetMgId' does not exist -> skipping What-If for this step."
-                exit 0
+                Write-Error "Failed to read intermediate root MG '$intRootMgId' to determine target existence. $($_.Exception.Message)"
+                throw
               }
             }
           }
+
           # Check if we should skip what-if for first deployment
           $firstDeploymentString = $env:firstDeployment
           $firstDeployment = $true
@@ -368,3 +394,7 @@ runs:
         MANAGEMENT_GROUP_ID_OVERRIDE: ${{ inputs.managementGroupId }}
         TARGET_MANAGEMENT_GROUP_ID: ${{ inputs.targetManagementGroupId }}
         SKIP_WHATIF_IF_TARGET_MG_MISSING: ${{ inputs.skipWhatIfIfTargetMgMissing }}
+        MANAGEMENT_GROUP_ID_PREFIX: ${{ env.MANAGEMENT_GROUP_ID_PREFIX }}
+        INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID: ${{ env.INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID }}
+        MANAGEMENT_GROUP_ID_POSTFIX: ${{ env.MANAGEMENT_GROUP_ID_POSTFIX }}
+
