@@ -645,7 +645,7 @@ jobs:
         with:
           name: 'governance-platform-connectivity'
           displayName: 'Governance-Platform Connectivity'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/connectivity/main.bicep'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-connectivity/main.bicep'
           templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/connectivity/main.bicepparam'
           subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
           resourceGroupName: ''
@@ -658,7 +658,7 @@ jobs:
         with:
           name: 'governance-platform-identity'
           displayName: 'Governance-Platform Identity'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/identity/main.bicep'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-identity/main.bicep'
           templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/identity/main.bicepparam'
           subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
           resourceGroupName: ''
@@ -671,7 +671,7 @@ jobs:
         with:
           name: 'governance-platform-management'
           displayName: 'Governance-Platform Management'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/management/main.bicep'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-management/main.bicep'
           templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/management/main.bicepparam'
           subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
           resourceGroupName: ''
@@ -684,7 +684,7 @@ jobs:
         with:
           name: 'governance-platform-security'
           displayName: 'Governance-Platform Security'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/security/main.bicep'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-security/main.bicep'
           templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/security/main.bicepparam'
           subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
           resourceGroupName: ''
