@@ -136,6 +136,7 @@ resource policyAssignmentEnableDdosVnet 'Microsoft.Authorization/policyAssignmen
 }
 
 // Deploy-VM-ChangeTrack role assignments
+@batchSize(1)
 module rbacVmChangeTrack 'br/public:avm/ptn/authorization/role-assignment:0.2.4' = [
   for roleDefId in (!contains(parManagementGroupExcludedPolicyAssignments, 'Deploy-VM-ChangeTrack') ? policyAssignmentsRequiringCrossMgRbac['Deploy-VM-ChangeTrack'] : []): {
     name: 'rbac-vmchgtrk-${substring(uniqueString(roleDefId), 0, 8)}'
@@ -150,6 +151,7 @@ module rbacVmChangeTrack 'br/public:avm/ptn/authorization/role-assignment:0.2.4'
 ]
 
 // Deploy-VM-Monitoring role assignments
+@batchSize(1)
 module rbacVmMonitoring 'br/public:avm/ptn/authorization/role-assignment:0.2.4' = [
   for roleDefId in (!contains(parManagementGroupExcludedPolicyAssignments, 'Deploy-VM-Monitoring') ? policyAssignmentsRequiringCrossMgRbac['Deploy-VM-Monitoring'] : []): {
     name: 'rbac-vmmon-${substring(uniqueString(roleDefId), 0, 8)}'
@@ -164,6 +166,7 @@ module rbacVmMonitoring 'br/public:avm/ptn/authorization/role-assignment:0.2.4' 
 ]
 
 // Deploy-vmArc-ChangeTrack role assignments
+@batchSize(1)
 module rbacVmArcChangeTrack 'br/public:avm/ptn/authorization/role-assignment:0.2.4' = [
   for roleDefId in (!contains(parManagementGroupExcludedPolicyAssignments, 'Deploy-vmArc-ChangeTrack') ? policyAssignmentsRequiringCrossMgRbac['Deploy-vmArc-ChangeTrack'] : []): {
     name: 'rbac-vmarcchgtrk-${substring(uniqueString(roleDefId), 0, 8)}'
@@ -178,6 +181,7 @@ module rbacVmArcChangeTrack 'br/public:avm/ptn/authorization/role-assignment:0.2
 ]
 
 // Deploy-VMSS-ChangeTrack role assignments
+@batchSize(1)
 module rbacVmssChangeTrack 'br/public:avm/ptn/authorization/role-assignment:0.2.4' = [
   for roleDefId in (!contains(parManagementGroupExcludedPolicyAssignments, 'Deploy-VMSS-ChangeTrack') ? policyAssignmentsRequiringCrossMgRbac['Deploy-VMSS-ChangeTrack'] : []): {
     name: 'rbac-vmsschgtrk-${substring(uniqueString(roleDefId), 0, 8)}'
@@ -192,6 +196,7 @@ module rbacVmssChangeTrack 'br/public:avm/ptn/authorization/role-assignment:0.2.
 ]
 
 // Deploy-vmHybr-Monitoring role assignments
+@batchSize(1)
 module rbacVmHybrMonitoring 'br/public:avm/ptn/authorization/role-assignment:0.2.4' = [
   for roleDefId in (!contains(parManagementGroupExcludedPolicyAssignments, 'Deploy-vmHybr-Monitoring') ? policyAssignmentsRequiringCrossMgRbac['Deploy-vmHybr-Monitoring'] : []): {
     name: 'rbac-vmhybrmon-${substring(uniqueString(roleDefId), 0, 8)}'
@@ -206,6 +211,7 @@ module rbacVmHybrMonitoring 'br/public:avm/ptn/authorization/role-assignment:0.2
 ]
 
 // Deploy-VMSS-Monitoring role assignments
+@batchSize(1)
 module rbacVmssMonitoring 'br/public:avm/ptn/authorization/role-assignment:0.2.4' = [
   for roleDefId in (!contains(parManagementGroupExcludedPolicyAssignments, 'Deploy-VMSS-Monitoring') ? policyAssignmentsRequiringCrossMgRbac['Deploy-VMSS-Monitoring'] : []): {
     name: 'rbac-vmssmon-${substring(uniqueString(roleDefId), 0, 8)}'
@@ -220,6 +226,7 @@ module rbacVmssMonitoring 'br/public:avm/ptn/authorization/role-assignment:0.2.4
 ]
 
 // Deploy-MDFC-DefSQL-AMA role assignments
+@batchSize(1)
 module rbacMdfcDefSqlAma 'br/public:avm/ptn/authorization/role-assignment:0.2.4' = [
   for roleDefId in (!contains(parManagementGroupExcludedPolicyAssignments, 'Deploy-MDFC-DefSQL-AMA') ? policyAssignmentsRequiringCrossMgRbac['Deploy-MDFC-DefSQL-AMA'] : []): {
     name: 'rbac-mdfcdefsqlama-${substring(uniqueString(roleDefId), 0, 8)}'
@@ -234,6 +241,7 @@ module rbacMdfcDefSqlAma 'br/public:avm/ptn/authorization/role-assignment:0.2.4'
 ]
 
 // Enable-DDoS-VNET role assignments to Landing Zones MG
+@batchSize(1)
 module rbacEnableDdosVnet 'br/public:avm/ptn/authorization/role-assignment:0.2.4' = [
   for roleDefId in (!contains(parManagementGroupExcludedPolicyAssignments, 'Enable-DDoS-VNET') ? policyAssignmentsRequiringCrossMgRbac['Enable-DDoS-VNET'] : []): {
     name: 'rbac-ddosvnet-${substring(uniqueString(roleDefId), 0, 8)}'
