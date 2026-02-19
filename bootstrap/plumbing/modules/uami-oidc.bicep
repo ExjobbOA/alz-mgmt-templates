@@ -34,6 +34,8 @@ var workflowRefCd = '${githubOrg}/${templatesRepo}/${workflowCdPath}@${workflowR
 var subjectCiPlan  = 'repo:${githubOrg}/${moduleRepo}:environment:${envPlan}:job_workflow_ref:${workflowRefCi}'
 var subjectCdPlan  = 'repo:${githubOrg}/${moduleRepo}:environment:${envPlan}:job_workflow_ref:${workflowRefCd}'
 var subjectCdApply = 'repo:${githubOrg}/${moduleRepo}:environment:${envApply}:job_workflow_ref:${workflowRefCd}'
+var subjectPlanSimple  = 'repo:${githubOrg}/${moduleRepo}:environment:${envPlan}'
+var subjectApplySimple = 'repo:${githubOrg}/${moduleRepo}:environment:${envApply}'
 
 resource ficCiPlan 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = {
   name: 'ci-plan'
@@ -66,6 +68,32 @@ resource ficCdApply 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedI
     audiences: [ audience ]
     subject: subjectCdApply
   }
+}
+
+resource ficPlanSimple 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = {
+  name: 'plan-simple'
+  parent: uamiPlan
+  properties: {
+    issuer: issuer
+    audiences: [ audience ]
+    subject: subjectPlanSimple
+  }
+  dependsOn: [
+    ficCdPlan
+  ]
+}
+
+resource ficApplySimple 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = {
+  name: 'apply-simple'
+  parent: uamiApply
+  properties: {
+    issuer: issuer
+    audiences: [ audience ]
+    subject: subjectApplySimple
+  }
+  dependsOn: [
+    ficCdApply
+  ]
 }
 
 output planClientId string = uamiPlan.properties.clientId
