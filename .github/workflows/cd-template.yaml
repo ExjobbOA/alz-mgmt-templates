@@ -429,6 +429,17 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           enable-AzPSSession: true
+      - name: Precreate ALZ MG (tenant deploy)
+        uses: azure/powershell@v2
+        with:
+          azPSVersion: 'latest'
+          inlineScript: |
+            New-AzTenantDeployment `
+              -Name "precreate-alz" `
+              -Location "${{ env.LOCATION }}" `
+              -TemplateFile "platform/templates/core/governance/mgmt-groups/int-root/precreate-alz/main.bicep" `
+              -TemplateParameterFile "config/core/governance/mgmt-groups/int-root/precreate-alz.bicepparam" `
+              -Verbose
 
       - name: 'Deploy: Governance-Intermediate Root'
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
