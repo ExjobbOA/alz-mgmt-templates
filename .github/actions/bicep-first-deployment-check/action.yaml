@@ -28,8 +28,22 @@ runs:
           }
           catch {
             $msg = $_.Exception.Message
-            Write-Warning "Could not read management group '$mgId'. Assuming first deployment. Error: $msg"
-            $firstDeployment = $true
+          
+            $isNotFound = ($msg -match '(?i)not\s*found|could\s*not\s*be\s*found|ResourceNotFound|404')
+            $isAuthOrScope = ($msg -match '(?i)does not have authorization|AuthorizationFailed|Forbidden|403|scope is invalid')
+          
+            if ($isNotFound) {
+              Write-Warning "Management group '$mgId' not found. Treating as first deployment. Error: $msg"
+              $firstDeployment = $true
+            }
+            elseif ($isAuthOrScope) {
+              Write-Error "Cannot read management group '$mgId' due to missing permissions. This is NOT a valid first-deployment signal. Error: $msg"
+              throw
+            }
+            else {
+              Write-Error "Unexpected error reading management group '$mgId'. Error: $msg"
+              throw
+            }
           }
         
           echo "firstDeployment=$firstDeployment" >> $env:GITHUB_ENV
