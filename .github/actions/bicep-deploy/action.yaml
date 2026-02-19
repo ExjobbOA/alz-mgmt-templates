@@ -91,22 +91,28 @@ runs:
                 $root = Get-AzManagementGroup -GroupName $intRootMgId -Expand -Recurse -ErrorAction Stop
                 $allNames = Get-MgNamesRecursive -Node $root
               }
-              catch {
-                # Cold-start safe behavior:
-                # If the intermediate root MG doesn't exist yet, do NOT crash the Plan phase.
-                $msg = $_.Exception.Message
-
-                # Treat common "missing MG / not found" cases as "MG does not exist yet"
-                if ($msg -match '(?i)not\s*found|could\s*not\s*be\s*found|ResourceNotFound|404') {
-                  Write-Warning "Intermediate root MG '$intRootMgId' not found yet. Cold-start behavior: skipping What-If for this step."
-                  $targetMgExists = $false
-                }
-                else {
-                  # Non-NotFound error (auth, throttling, bad request, etc.) should still fail fast.
-                  Write-Error "Failed to read intermediate root MG '$intRootMgId' for target existence check. $msg"
-                  throw
-                }
-              }
+          catch {
+            $msg = $_.Exception.Message
+          
+            $isNotFound = ($msg -match '(?i)not\s*found|could\s*not\s*be\s*found|ResourceNotFound|404')
+            $isAuthOrScope = ($msg -match '(?i)does not have authorization|AuthorizationFailed|Forbidden|403|scope is invalid')
+          
+            # firstDeployment is exported by bicep-first-deployment-check into GITHUB_ENV
+            $firstDeploymentBool = ($env:firstDeployment -eq 'True' -or $env:firstDeployment -eq 'true')
+          
+            if ($isNotFound) {
+              Write-Warning "Intermediate root MG '$intRootMgId' not found yet. Cold-start behavior: skipping What-If for this step."
+              $targetMgExists = $false
+            }
+            elseif ($isAuthOrScope -and $firstDeploymentBool) {
+              Write-Warning "No permission to read intermediate root MG '$intRootMgId' during first deployment. Skipping What-If for this step. Error: $msg"
+              $targetMgExists = $false
+            }
+            else {
+              Write-Error "Failed to read intermediate root MG '$intRootMgId' for target existence check. $msg"
+              throw
+            }
+          }
 
               if (-not $targetMgExists) {
                 exit 0
