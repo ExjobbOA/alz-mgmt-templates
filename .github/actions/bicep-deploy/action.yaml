@@ -129,13 +129,8 @@ runs:
           }
 
           # Check if we should skip what-if for first deployment
-          $firstDeploymentString = $env:firstDeployment
-          $firstDeployment = $true
-          if($firstDeploymentString -eq "") {
-            $firstDeployment = $false
-          } else {
-            $firstDeployment = [System.Convert]::ToBoolean($firstDeploymentString)
-          }
+          $firstDeployment = ($env:firstDeployment -eq 'True' -or $env:firstDeployment -eq 'true')
+
 
           $firstRunWhatIf = [System.Convert]::ToBoolean($env:FIRST_RUN_WHAT_IF)
 
