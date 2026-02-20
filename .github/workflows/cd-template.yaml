@@ -1,5 +1,5 @@
----
 name: Continuous Delivery
+
 on:
   workflow_call:
     inputs:
@@ -10,10 +10,11 @@ on:
         description: "Path to JSON parameters file"
         required: false
         type: string
-        default: "parameters.json"
+        default: "platform.json"   # <- align with your repo
       skip_what_if:
         default: false
         type: boolean
+
       governance-int-root:
         type: boolean
         default: true
@@ -47,6 +48,7 @@ on:
       governance-decommissioned:
         type: boolean
         default: true
+
       governance-platform-rbac:
         type: boolean
         default: true
@@ -56,18 +58,18 @@ on:
       governance-landingzones-rbac:
         type: boolean
         default: true
-      core-logging:
+
+      networking:
         type: boolean
         default: true
-      networking:
+      core-logging:
         type: boolean
         default: true
 
 jobs:
   whatif:
     name: What If
-    runs-on:
-      ubuntu-latest
+    runs-on: ubuntu-latest
     concurrency: mgmt-tfstate
     environment: alz-mgmt-plan
     permissions:
@@ -80,13 +82,12 @@ jobs:
     steps:
       - name: Show inputs
         run: |
-          Write-Host '${{ toJson(inputs) }}'
-        shell: pwsh
+          echo '${{ toJson(inputs) }}'
 
-      - name: Checkout Bicep Module
+      - name: Checkout Config Repo
         uses: actions/checkout@v4
 
-      - name: Checkout platform templates
+      - name: Checkout Engine Repo (platform templates)
         uses: actions/checkout@v4
         with:
           repository: ExjobbOA/alz-mgmt-templates
@@ -98,8 +99,12 @@ jobs:
         with:
           parameters_file_name: ${{ env.PARAMETERS_FILE_NAME }}
 
-      - name: Install Bicep and Update Az Module
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-installer@main
+      - name: Install Bicep v0.40.2 (pin)
+        shell: bash
+        run: |
+          az bicep uninstall || true
+          az bicep install --version 0.40.2
+          az bicep version
 
       - name: OIDC Login to Tenant
         uses: azure/login@v2
@@ -114,24 +119,11 @@ jobs:
         with:
           managementGroupId: ${{ env.INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID }}
 
-      - name: 'Plan: Core-Logging'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
-        if: ${{ inputs.core-logging }}
-        with:
-              name: 'core-logging'
-              displayName: 'Core-Logging'
-              templateFilePath: 'platform/templates/core/logging/main.bicep'
-              templateParametersFilePath: 'config/core/logging/main.bicepparam'
-              subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-              resourceGroupName: ''
-              location: '${{ env.LOCATION }}'
-              deploymentType: 'subscription'
-              firstRunWhatIf: 'false'
-              whatIfEnabled: 'true'
+      # ---- WHAT-IF in proven order (same as Apply order below) ----
 
       - name: 'Plan: Governance-Intermediate Root'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         if: ${{ inputs.governance-int-root }}
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'governance-int-root'
           displayName: 'Governance-Intermediate Root'
@@ -141,13 +133,13 @@ jobs:
           resourceGroupName: ''
           location: '${{ env.LOCATION }}'
           deploymentType: 'managementGroup'
-          firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          firstRunWhatIf: 'false'
           managementGroupId: ${{ env.MANAGEMENT_GROUP_ID }}
 
       - name: 'Plan: Governance-Landing Zones'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         if: ${{ inputs.governance-landingzones }}
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'governance-landingzones'
           displayName: 'Governance-Landing Zones'
@@ -157,14 +149,14 @@ jobs:
           resourceGroupName: ''
           location: '${{ env.LOCATION }}'
           deploymentType: 'managementGroup'
-          firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          firstRunWhatIf: 'false'
           targetManagementGroupId: 'landingzones'
           skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Landing Zones Corp'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         if: ${{ inputs.governance-landingzones-corp }}
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'governance-landingzones-corp'
           displayName: 'Governance-Landing Zones Corp'
@@ -174,14 +166,14 @@ jobs:
           resourceGroupName: ''
           location: '${{ env.LOCATION }}'
           deploymentType: 'managementGroup'
-          firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          firstRunWhatIf: 'false'
           targetManagementGroupId: 'corp'
           skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Landing Zones Online'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         if: ${{ inputs.governance-landingzones-online }}
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'governance-landingzones-online'
           displayName: 'Governance-Landing Zones Online'
@@ -191,14 +183,14 @@ jobs:
           resourceGroupName: ''
           location: '${{ env.LOCATION }}'
           deploymentType: 'managementGroup'
-          firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          firstRunWhatIf: 'false'
           targetManagementGroupId: 'online'
           skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Platform'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         if: ${{ inputs.governance-platform }}
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'governance-platform'
           displayName: 'Governance-Platform'
@@ -208,14 +200,14 @@ jobs:
           resourceGroupName: ''
           location: '${{ env.LOCATION }}'
           deploymentType: 'managementGroup'
-          firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          firstRunWhatIf: 'false'
           targetManagementGroupId: 'platform'
           skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Platform Connectivity'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         if: ${{ inputs.governance-platform-connectivity }}
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'governance-platform-connectivity'
           displayName: 'Governance-Platform Connectivity'
@@ -225,14 +217,14 @@ jobs:
           resourceGroupName: ''
           location: '${{ env.LOCATION }}'
           deploymentType: 'managementGroup'
-          firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          firstRunWhatIf: 'false'
           targetManagementGroupId: 'connectivity'
           skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Platform Identity'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         if: ${{ inputs.governance-platform-identity }}
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'governance-platform-identity'
           displayName: 'Governance-Platform Identity'
@@ -242,14 +234,14 @@ jobs:
           resourceGroupName: ''
           location: '${{ env.LOCATION }}'
           deploymentType: 'managementGroup'
-          firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          firstRunWhatIf: 'false'
           targetManagementGroupId: 'identity'
           skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Platform Management'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         if: ${{ inputs.governance-platform-management }}
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'governance-platform-management'
           displayName: 'Governance-Platform Management'
@@ -259,14 +251,14 @@ jobs:
           resourceGroupName: ''
           location: '${{ env.LOCATION }}'
           deploymentType: 'managementGroup'
-          firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          firstRunWhatIf: 'false'
           targetManagementGroupId: 'management'
           skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Platform Security'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         if: ${{ inputs.governance-platform-security }}
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'governance-platform-security'
           displayName: 'Governance-Platform Security'
@@ -276,14 +268,14 @@ jobs:
           resourceGroupName: ''
           location: '${{ env.LOCATION }}'
           deploymentType: 'managementGroup'
-          firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          firstRunWhatIf: 'false'
           targetManagementGroupId: 'security'
           skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Sandbox'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         if: ${{ inputs.governance-sandbox }}
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'governance-sandbox'
           displayName: 'Governance-Sandbox'
@@ -293,14 +285,14 @@ jobs:
           resourceGroupName: ''
           location: '${{ env.LOCATION }}'
           deploymentType: 'managementGroup'
-          firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          firstRunWhatIf: 'false'
           targetManagementGroupId: 'sandbox'
           skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Decommissioned'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         if: ${{ inputs.governance-decommissioned }}
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'governance-decommissioned'
           displayName: 'Governance-Decommissioned'
@@ -310,14 +302,14 @@ jobs:
           resourceGroupName: ''
           location: '${{ env.LOCATION }}'
           deploymentType: 'managementGroup'
-          firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          firstRunWhatIf: 'false'
           targetManagementGroupId: 'decommissioned'
           skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Platform RBAC'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         if: ${{ inputs.governance-platform-rbac }}
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'governance-platform-rbac'
           displayName: 'Governance-Platform RBAC'
@@ -327,14 +319,14 @@ jobs:
           resourceGroupName: ''
           location: '${{ env.LOCATION }}'
           deploymentType: 'managementGroup'
-          firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          firstRunWhatIf: 'false'
           targetManagementGroupId: 'platform'
           skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Platform Connectivity RBAC'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         if: ${{ inputs.governance-platform-connectivity-rbac }}
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'governance-platform-connectivity-rbac'
           displayName: 'Governance-Platform Connectivity RBAC'
@@ -344,14 +336,14 @@ jobs:
           resourceGroupName: ''
           location: '${{ env.LOCATION }}'
           deploymentType: 'managementGroup'
-          firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          firstRunWhatIf: 'false'
           targetManagementGroupId: 'connectivity'
           skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Landing Zones RBAC'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         if: ${{ inputs.governance-landingzones-rbac }}
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'governance-landingzones-rbac'
           displayName: 'Governance-Landing Zones RBAC'
@@ -361,14 +353,14 @@ jobs:
           resourceGroupName: ''
           location: '${{ env.LOCATION }}'
           deploymentType: 'managementGroup'
-          firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          firstRunWhatIf: 'false'
           targetManagementGroupId: 'landingzones'
           skipWhatIfIfTargetMgMissing: 'true'
-          
+
       - name: 'Plan: Networking - Hub'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         if: ${{ inputs.networking }}
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'networking-hub'
           displayName: 'Networking - Hub'
@@ -378,115 +370,11 @@ jobs:
           resourceGroupName: ''
           location: '${{ env.LOCATION }}'
           deploymentType: 'subscription'
-          firstRunWhatIf: 'false'
           whatIfEnabled: 'true'
+          firstRunWhatIf: 'false'
 
-
-
-  governance-int-root:
-    name: Deploy - Governance Intermediate Root
-    needs: whatif
-    if: ${{ always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && inputs.governance-int-root }}
-    runs-on: ubuntu-latest
-    concurrency: mgmt-tfstate
-    environment: alz-mgmt-apply
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      PARAMETERS_FILE_NAME: ${{ inputs.parameters_file_name }}
-
-    steps:
-      - name: Show inputs
-        run: |
-          Write-Host '${{ toJson(inputs) }}'
-        shell: pwsh
-
-      - name: Checkout Bicep Module
-        uses: actions/checkout@v4
-
-      - name: Checkout platform templates
-        uses: actions/checkout@v4
-        with:
-          repository: ExjobbOA/alz-mgmt-templates
-          ref: ${{ inputs.platform_ref }}
-          path: platform
-
-      - name: Get Bicep Variables
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-variables@main
-        with:
-          parameters_file_name: ${{ env.PARAMETERS_FILE_NAME }}
-
-      - name: Install Bicep and Update Az Module
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-installer@main
-
-      - name: OIDC Login to Tenant
-        uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          enable-AzPSSession: true
-
-      - name: 'Deploy: Governance-Intermediate Root'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
-        with:
-          name: 'governance-int-root'
-          displayName: 'Governance-Intermediate Root'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/int-root/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/int-root.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          managementGroupId: ${{ env.MANAGEMENT_GROUP_ID }}
-
-  core-logging:
-    name: Deploy - Core Logging
-    needs: governance-int-root
-    if: ${{ always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && inputs.core-logging }}
-    runs-on: ubuntu-latest
-    concurrency: mgmt-tfstate
-    environment: alz-mgmt-apply
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      PARAMETERS_FILE_NAME: ${{ inputs.parameters_file_name }}
-
-    steps:
-      - name: Show inputs
-        run: |
-          Write-Host '${{ toJson(inputs) }}'
-        shell: pwsh
-
-      - name: Checkout Bicep Module
-        uses: actions/checkout@v4
-
-      - name: Checkout platform templates
-        uses: actions/checkout@v4
-        with:
-          repository: ExjobbOA/alz-mgmt-templates
-          ref: ${{ inputs.platform_ref }}
-          path: platform
-
-      - name: Get Bicep Variables
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-variables@main
-        with:
-          parameters_file_name: ${{ env.PARAMETERS_FILE_NAME }}
-
-      - name: Install Bicep and Update Az Module
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-installer@main
-
-      - name: OIDC Login to Tenant
-        uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          enable-AzPSSession: true
-
-      - name: 'Deploy: Core-Logging'
+      - name: 'Plan: Core-Logging'
+        if: ${{ inputs.core-logging }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'core-logging'
@@ -497,67 +385,12 @@ jobs:
           resourceGroupName: ''
           location: '${{ env.LOCATION }}'
           deploymentType: 'subscription'
+          whatIfEnabled: 'true'
+          firstRunWhatIf: 'false'
 
-  governance-landingzones:
-    name: Deploy - Governance Landing Zones
-    needs: [governance-int-root, core-logging]
-    if: ${{ always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && inputs.governance-landingzones }}
-    runs-on: ubuntu-latest
-    concurrency: mgmt-tfstate
-    environment: alz-mgmt-apply
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      PARAMETERS_FILE_NAME: ${{ inputs.parameters_file_name }}
-
-    steps:
-      - name: Show inputs
-        run: |
-          Write-Host '${{ toJson(inputs) }}'
-        shell: pwsh
-
-      - name: Checkout Bicep Module
-        uses: actions/checkout@v4
-
-      - name: Checkout platform templates
-        uses: actions/checkout@v4
-        with:
-          repository: ExjobbOA/alz-mgmt-templates
-          ref: ${{ inputs.platform_ref }}
-          path: platform
-
-      - name: Get Bicep Variables
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-variables@main
-        with:
-          parameters_file_name: ${{ env.PARAMETERS_FILE_NAME }}
-
-      - name: Install Bicep and Update Az Module
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-installer@main
-
-      - name: OIDC Login to Tenant
-        uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          enable-AzPSSession: true
-
-      - name: 'Deploy: Governance-Landing Zones'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
-        with:
-          name: 'governance-landingzones'
-          displayName: 'Governance-Landing Zones'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/landingzones/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/landingzones/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-
-  deploy-rest:
-    name: Deploy - Rest
-    needs: [governance-int-root, core-logging, governance-landingzones]
+  deploy:
+    name: Deploy - Sequential Monolith (Stacks)
+    needs: [whatif]
     if: ${{ always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     runs-on: ubuntu-latest
     concurrency: mgmt-tfstate
@@ -571,13 +404,12 @@ jobs:
     steps:
       - name: Show inputs
         run: |
-          Write-Host '${{ toJson(inputs) }}'
-        shell: pwsh
+          echo '${{ toJson(inputs) }}'
 
-      - name: Checkout Bicep Module
+      - name: Checkout Config Repo
         uses: actions/checkout@v4
 
-      - name: Checkout platform templates
+      - name: Checkout Engine Repo (platform templates)
         uses: actions/checkout@v4
         with:
           repository: ExjobbOA/alz-mgmt-templates
@@ -589,8 +421,12 @@ jobs:
         with:
           parameters_file_name: ${{ env.PARAMETERS_FILE_NAME }}
 
-      - name: Install Bicep and Update Az Module
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-installer@main
+      - name: Install Bicep v0.40.2 (pin)
+        shell: bash
+        run: |
+          az bicep uninstall || true
+          az bicep install --version 0.40.2
+          az bicep version
 
       - name: OIDC Login to Tenant
         uses: azure/login@v2
@@ -598,174 +434,283 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          enable-AzPSSession: true
 
-      - name: 'Deploy: Governance-Landing Zones Corp'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+      # Helper: stack name = prefix + short name
+      - name: Set stack name prefix
+        shell: bash
+        run: |
+          echo "STACK_PREFIX=${DEPLOYMENT_STACK_NAME_PREFIX:-}" >> $GITHUB_ENV
+
+      # 1) Intermediate Root (MG stack at Tenant Root MG)
+      - name: Deploy Stack - Intermediate Root
+        if: ${{ inputs.governance-int-root }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          az stack mg create \
+            --name "${STACK_PREFIX}governance-int-root" \
+            --management-group-id "${MANAGEMENT_GROUP_ID}" \
+            --location "${LOCATION}" \
+            --template-file "platform/templates/core/governance/mgmt-groups/int-root/main.bicep" \
+            --parameters "config/core/governance/mgmt-groups/int-root.bicepparam" \
+            --action-on-unmanage detachAll \
+            --deny-settings-mode none \
+            --yes
+
+      # 2) Landing Zones (MG stacks at Intermediate Root MG)
+      - name: Deploy Stack - Landing Zones
+        if: ${{ inputs.governance-landingzones }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          az stack mg create \
+            --name "${STACK_PREFIX}governance-landingzones" \
+            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
+            --location "${LOCATION}" \
+            --template-file "platform/templates/core/governance/mgmt-groups/landingzones/main.bicep" \
+            --parameters "config/core/governance/mgmt-groups/landingzones/main.bicepparam" \
+            --action-on-unmanage detachAll \
+            --deny-settings-mode none \
+            --yes
+
+      - name: Deploy Stack - Landing Zones Corp
         if: ${{ inputs.governance-landingzones-corp }}
-        with:
-          name: 'governance-landingzones-corp'
-          displayName: 'Governance-Landing Zones Corp'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/landingzones/landingzones-corp/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/landingzones/landingzones-corp/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
+        shell: bash
+        run: |
+          set -euo pipefail
+          az stack mg create \
+            --name "${STACK_PREFIX}governance-landingzones-corp" \
+            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
+            --location "${LOCATION}" \
+            --template-file "platform/templates/core/governance/mgmt-groups/landingzones/landingzones-corp/main.bicep" \
+            --parameters "config/core/governance/mgmt-groups/landingzones/landingzones-corp/main.bicepparam" \
+            --action-on-unmanage detachAll \
+            --deny-settings-mode none \
+            --yes
 
-      - name: 'Deploy: Governance-Landing Zones Online'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+      - name: Deploy Stack - Landing Zones Online
         if: ${{ inputs.governance-landingzones-online }}
-        with:
-          name: 'governance-landingzones-online'
-          displayName: 'Governance-Landing Zones Online'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/landingzones/landingzones-online/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/landingzones/landingzones-online/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
+        shell: bash
+        run: |
+          set -euo pipefail
+          az stack mg create \
+            --name "${STACK_PREFIX}governance-landingzones-online" \
+            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
+            --location "${LOCATION}" \
+            --template-file "platform/templates/core/governance/mgmt-groups/landingzones/landingzones-online/main.bicep" \
+            --parameters "config/core/governance/mgmt-groups/landingzones/landingzones-online/main.bicepparam" \
+            --action-on-unmanage detachAll \
+            --deny-settings-mode none \
+            --yes
 
-      - name: 'Deploy: Governance-Platform'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+      # 3) Platform (Base)
+      - name: Deploy Stack - Platform (Base)
         if: ${{ inputs.governance-platform }}
-        with:
-          name: 'governance-platform'
-          displayName: 'Governance-Platform'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
+        shell: bash
+        run: |
+          set -euo pipefail
+          az stack mg create \
+            --name "${STACK_PREFIX}governance-platform" \
+            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
+            --location "${LOCATION}" \
+            --template-file "platform/templates/core/governance/mgmt-groups/platform/main.bicep" \
+            --parameters "config/core/governance/mgmt-groups/platform/main.bicepparam" \
+            --action-on-unmanage detachAll \
+            --deny-settings-mode none \
+            --yes
 
-      - name: 'Deploy: Governance-Platform Connectivity'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+      # 4) Platform Connectivity (sub placement)
+      - name: Deploy Stack - Platform Connectivity
         if: ${{ inputs.governance-platform-connectivity }}
-        with:
-          name: 'governance-platform-connectivity'
-          displayName: 'Governance-Platform Connectivity'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-connectivity/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/platform-connectivity/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
+        shell: bash
+        run: |
+          set -euo pipefail
+          az stack mg create \
+            --name "${STACK_PREFIX}governance-platform-connectivity" \
+            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
+            --location "${LOCATION}" \
+            --template-file "platform/templates/core/governance/mgmt-groups/platform/platform-connectivity/main.bicep" \
+            --parameters "config/core/governance/mgmt-groups/platform/platform-connectivity/main.bicepparam" \
+            --action-on-unmanage detachAll \
+            --deny-settings-mode none \
+            --yes
 
-      - name: 'Deploy: Governance-Platform Identity'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+      # Wait-gate after subscription move (allow ARM + MG propagation)
+      - name: Wait Gate - Connectivity subscription visible under MG
+        if: ${{ inputs.governance-platform-connectivity }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Waiting for subscription to be visible under MG 'connectivity'..."
+          for i in $(seq 1 60); do
+            if az account management-group subscription show \
+              --name "connectivity" \
+              --subscription "${SUBSCRIPTION_ID_CONNECTIVITY}" \
+              --only-show-errors 1>/dev/null 2>&1; then
+              echo "OK: subscription is visible under 'connectivity'."
+              exit 0
+            fi
+            echo "Not yet (attempt $i/60). Sleeping 10s..."
+            sleep 10
+          done
+          echo "Timed out waiting for subscription move propagation."
+          exit 1
+        # CLI command exists in Azure CLI docs :contentReference[oaicite:1]{index=1}
+
+      # 5) Platform Identity
+      - name: Deploy Stack - Platform Identity
         if: ${{ inputs.governance-platform-identity }}
-        with:
-          name: 'governance-platform-identity'
-          displayName: 'Governance-Platform Identity'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-identity/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/platform-identity/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
+        shell: bash
+        run: |
+          set -euo pipefail
+          az stack mg create \
+            --name "${STACK_PREFIX}governance-platform-identity" \
+            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
+            --location "${LOCATION}" \
+            --template-file "platform/templates/core/governance/mgmt-groups/platform/platform-identity/main.bicep" \
+            --parameters "config/core/governance/mgmt-groups/platform/platform-identity/main.bicepparam" \
+            --action-on-unmanage detachAll \
+            --deny-settings-mode none \
+            --yes
 
-      - name: 'Deploy: Governance-Platform Management'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+      # 6) Platform Management
+      - name: Deploy Stack - Platform Management
         if: ${{ inputs.governance-platform-management }}
-        with:
-          name: 'governance-platform-management'
-          displayName: 'Governance-Platform Management'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-management/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/platform-management/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
+        shell: bash
+        run: |
+          set -euo pipefail
+          az stack mg create \
+            --name "${STACK_PREFIX}governance-platform-management" \
+            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
+            --location "${LOCATION}" \
+            --template-file "platform/templates/core/governance/mgmt-groups/platform/platform-management/main.bicep" \
+            --parameters "config/core/governance/mgmt-groups/platform/platform-management/main.bicepparam" \
+            --action-on-unmanage detachAll \
+            --deny-settings-mode none \
+            --yes
 
-      - name: 'Deploy: Governance-Platform Security'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+      # 7) Platform Security
+      - name: Deploy Stack - Platform Security
         if: ${{ inputs.governance-platform-security }}
-        with:
-          name: 'governance-platform-security'
-          displayName: 'Governance-Platform Security'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-security/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/platform-security/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
+        shell: bash
+        run: |
+          set -euo pipefail
+          az stack mg create \
+            --name "${STACK_PREFIX}governance-platform-security" \
+            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
+            --location "${LOCATION}" \
+            --template-file "platform/templates/core/governance/mgmt-groups/platform/platform-security/main.bicep" \
+            --parameters "config/core/governance/mgmt-groups/platform/platform-security/main.bicepparam" \
+            --action-on-unmanage detachAll \
+            --deny-settings-mode none \
+            --yes
 
-      - name: 'Deploy: Governance-Sandbox'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+      # 8) Sandbox & Decommissioned
+      - name: Deploy Stack - Sandbox
         if: ${{ inputs.governance-sandbox }}
-        with:
-          name: 'governance-sandbox'
-          displayName: 'Governance-Sandbox'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/sandbox/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/sandbox/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
+        shell: bash
+        run: |
+          set -euo pipefail
+          az stack mg create \
+            --name "${STACK_PREFIX}governance-sandbox" \
+            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
+            --location "${LOCATION}" \
+            --template-file "platform/templates/core/governance/mgmt-groups/sandbox/main.bicep" \
+            --parameters "config/core/governance/mgmt-groups/sandbox/main.bicepparam" \
+            --action-on-unmanage detachAll \
+            --deny-settings-mode none \
+            --yes
 
-      - name: 'Deploy: Governance-Decommissioned'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+      - name: Deploy Stack - Decommissioned
         if: ${{ inputs.governance-decommissioned }}
-        with:
-          name: 'governance-decommissioned'
-          displayName: 'Governance-Decommissioned'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/decommissioned/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/decommissioned/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
+        shell: bash
+        run: |
+          set -euo pipefail
+          az stack mg create \
+            --name "${STACK_PREFIX}governance-decommissioned" \
+            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
+            --location "${LOCATION}" \
+            --template-file "platform/templates/core/governance/mgmt-groups/decommissioned/main.bicep" \
+            --parameters "config/core/governance/mgmt-groups/decommissioned/main.bicepparam" \
+            --action-on-unmanage detachAll \
+            --deny-settings-mode none \
+            --yes
 
-      - name: 'Deploy: Governance-Platform RBAC'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+      # 9) RBAC stages
+      - name: Deploy Stack - Platform RBAC
         if: ${{ inputs.governance-platform-rbac }}
-        with:
-          name: 'governance-platform-rbac'
-          displayName: 'Governance-Platform RBAC'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/main-rbac.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/main-rbac.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
+        shell: bash
+        run: |
+          set -euo pipefail
+          az stack mg create \
+            --name "${STACK_PREFIX}governance-platform-rbac" \
+            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
+            --location "${LOCATION}" \
+            --template-file "platform/templates/core/governance/mgmt-groups/platform/main-rbac.bicep" \
+            --parameters "config/core/governance/mgmt-groups/platform/main-rbac.bicepparam" \
+            --action-on-unmanage detachAll \
+            --deny-settings-mode none \
+            --yes
 
-      - name: 'Deploy: Governance-Platform Connectivity RBAC'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+      - name: Deploy Stack - Connectivity RBAC
         if: ${{ inputs.governance-platform-connectivity-rbac }}
-        with:
-          name: 'governance-platform-connectivity-rbac'
-          displayName: 'Governance-Platform Connectivity RBAC'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/connectivity/main-rbac.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/connectivity/main-rbac.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
+        shell: bash
+        run: |
+          set -euo pipefail
+          az stack mg create \
+            --name "${STACK_PREFIX}governance-platform-connectivity-rbac" \
+            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
+            --location "${LOCATION}" \
+            --template-file "platform/templates/core/governance/mgmt-groups/platform/platform-connectivity/main-rbac.bicep" \
+            --parameters "config/core/governance/mgmt-groups/platform/platform-connectivity/main-rbac.bicepparam" \
+            --action-on-unmanage detachAll \
+            --deny-settings-mode none \
+            --yes
 
-      - name: 'Deploy: Governance-Landing Zones RBAC'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+      - name: Deploy Stack - Landing Zones RBAC
         if: ${{ inputs.governance-landingzones-rbac }}
-        with:
-          name: 'governance-landingzones-rbac'
-          displayName: 'Governance-Landing Zones RBAC'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/landingzones/main-rbac.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/landingzones/main-rbac.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
+        shell: bash
+        run: |
+          set -euo pipefail
+          az stack mg create \
+            --name "${STACK_PREFIX}governance-landingzones-rbac" \
+            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
+            --location "${LOCATION}" \
+            --template-file "platform/templates/core/governance/mgmt-groups/landingzones/main-rbac.bicep" \
+            --parameters "config/core/governance/mgmt-groups/landingzones/main-rbac.bicepparam" \
+            --action-on-unmanage detachAll \
+            --deny-settings-mode none \
+            --yes
 
-      - name: 'Deploy: Networking - Hub'
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
-        if: ${{ inputs.networking-hub }}
-        with:
-          name: 'networking-hub'
-          displayName: 'Networking - Hub'
-          templateFilePath: 'platform/templates/core/networking/hub/main.bicep'
-          templateParametersFilePath: 'config/core/networking/hub/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_CONNECTIVITY }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'subscription'
+      # 10) Networking (subscription stack)
+      - name: Deploy Stack - Networking Hub
+        if: ${{ inputs.networking }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          az stack sub create \
+            --name "${STACK_PREFIX}networking-hub" \
+            --subscription "${SUBSCRIPTION_ID_CONNECTIVITY}" \
+            --location "${LOCATION}" \
+            --template-file "platform/templates/networking/hubnetworking/main.bicep" \
+            --parameters "config/networking/hubnetworking/main.bicepparam" \
+            --action-on-unmanage detachAll \
+            --deny-settings-mode none \
+            --yes
+
+      # 11) Core-Logging (final step, subscription stack)
+      - name: Deploy Stack - Core Logging (Final)
+        if: ${{ inputs.core-logging }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          az stack sub create \
+            --name "${STACK_PREFIX}core-logging" \
+            --subscription "${SUBSCRIPTION_ID_MANAGEMENT}" \
+            --location "${LOCATION}" \
+            --template-file "platform/templates/core/logging/main.bicep" \
+            --parameters "config/core/logging/main.bicepparam" \
+            --action-on-unmanage detachAll \
+            --deny-settings-mode none \
+            --yes
 
