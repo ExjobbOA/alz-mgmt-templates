@@ -418,30 +418,30 @@ jobs:
       contents: read
     env:
       PARAMETERS_FILE_NAME: ${{ inputs.parameters_file_name }}
-
+  
     steps:
       - name: Show inputs
         run: |
           echo '${{ toJson(inputs) }}'
-
+  
       - name: Checkout Config Repo
         uses: actions/checkout@v4
-
+  
       - name: Checkout Engine Repo (platform templates)
         uses: actions/checkout@v4
         with:
           repository: ExjobbOA/alz-mgmt-templates
           ref: ${{ inputs.platform_ref }}
           path: platform
-
+  
       - name: Get Bicep Variables
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-variables@main
         with:
           parameters_file_name: ${{ env.PARAMETERS_FILE_NAME }}
-
+  
       - name: Install Bicep and Update Az Module
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-installer@main
-
+  
       - name: Bicep Build & Lint All Modules
         shell: pwsh
         run: |
@@ -463,114 +463,122 @@ jobs:
           if ($output.length -gt 0) {
             throw $output
           }
-
+  
       - name: OIDC Login to Tenant
         uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      # Helper: stack name = prefix + short name
-      - name: Set stack name prefix
-        shell: bash
-        run: |
-          echo "STACK_PREFIX=${DEPLOYMENT_STACK_NAME_PREFIX:-}" >> $GITHUB_ENV
-
+          enable-AzPSSession: true
+  
       # 1) Intermediate Root (MG stack at Tenant Root MG)
-      - name: Deploy Stack - Intermediate Root
+      - name: 'Apply: Governance-Intermediate Root'
         if: ${{ inputs.governance-int-root }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          az stack mg create \
-            --name "${STACK_PREFIX}governance-int-root" \
-            --management-group-id "${MANAGEMENT_GROUP_ID}" \
-            --location "${LOCATION}" \
-            --template-file "platform/templates/core/governance/mgmt-groups/int-root/main.bicep" \
-            --parameters "config/core/governance/mgmt-groups/int-root.bicepparam" \
-            --action-on-unmanage detachAll \
-            --deny-settings-mode none \
-            --yes
-
+        uses: ./platform/.github/actions/bicep-deploy
+        with:
+          name: 'governance-int-root'
+          displayName: 'Governance-Intermediate Root'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/int-root/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/int-root.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+          whatIfEnabled: 'false'
+          firstRunWhatIf: 'false'
+          managementGroupId: ${{ env.MANAGEMENT_GROUP_ID }}
+          denySettingsMode: 'None'
+          actionOnUnmanage: 'DetachAll'
+  
       # 2) Landing Zones (MG stacks at Intermediate Root MG)
-      - name: Deploy Stack - Landing Zones
+      - name: 'Apply: Governance-Landing Zones'
         if: ${{ inputs.governance-landingzones }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          az stack mg create \
-            --name "${STACK_PREFIX}governance-landingzones" \
-            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
-            --location "${LOCATION}" \
-            --template-file "platform/templates/core/governance/mgmt-groups/landingzones/main.bicep" \
-            --parameters "config/core/governance/mgmt-groups/landingzones/main.bicepparam" \
-            --action-on-unmanage detachAll \
-            --deny-settings-mode none \
-            --yes
-
-      - name: Deploy Stack - Landing Zones Corp
+        uses: ./platform/.github/actions/bicep-deploy
+        with:
+          name: 'governance-landingzones'
+          displayName: 'Governance-Landing Zones'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/landingzones/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/landingzones/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+          whatIfEnabled: 'false'
+          firstRunWhatIf: 'false'
+          denySettingsMode: 'None'
+          actionOnUnmanage: 'DetachAll'
+  
+      - name: 'Apply: Governance-Landing Zones Corp'
         if: ${{ inputs.governance-landingzones-corp }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          az stack mg create \
-            --name "${STACK_PREFIX}governance-landingzones-corp" \
-            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
-            --location "${LOCATION}" \
-            --template-file "platform/templates/core/governance/mgmt-groups/landingzones/landingzones-corp/main.bicep" \
-            --parameters "config/core/governance/mgmt-groups/landingzones/landingzones-corp/main.bicepparam" \
-            --action-on-unmanage detachAll \
-            --deny-settings-mode none \
-            --yes
-
-      - name: Deploy Stack - Landing Zones Online
+        uses: ./platform/.github/actions/bicep-deploy
+        with:
+          name: 'governance-landingzones-corp'
+          displayName: 'Governance-Landing Zones Corp'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/landingzones/landingzones-corp/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/landingzones/landingzones-corp/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+          whatIfEnabled: 'false'
+          firstRunWhatIf: 'false'
+          denySettingsMode: 'None'
+          actionOnUnmanage: 'DetachAll'
+  
+      - name: 'Apply: Governance-Landing Zones Online'
         if: ${{ inputs.governance-landingzones-online }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          az stack mg create \
-            --name "${STACK_PREFIX}governance-landingzones-online" \
-            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
-            --location "${LOCATION}" \
-            --template-file "platform/templates/core/governance/mgmt-groups/landingzones/landingzones-online/main.bicep" \
-            --parameters "config/core/governance/mgmt-groups/landingzones/landingzones-online/main.bicepparam" \
-            --action-on-unmanage detachAll \
-            --deny-settings-mode none \
-            --yes
-
+        uses: ./platform/.github/actions/bicep-deploy
+        with:
+          name: 'governance-landingzones-online'
+          displayName: 'Governance-Landing Zones Online'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/landingzones/landingzones-online/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/landingzones/landingzones-online/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+          whatIfEnabled: 'false'
+          firstRunWhatIf: 'false'
+          denySettingsMode: 'None'
+          actionOnUnmanage: 'DetachAll'
+  
       # 3) Platform (Base)
-      - name: Deploy Stack - Platform (Base)
+      - name: 'Apply: Governance-Platform'
         if: ${{ inputs.governance-platform }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          az stack mg create \
-            --name "${STACK_PREFIX}governance-platform" \
-            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
-            --location "${LOCATION}" \
-            --template-file "platform/templates/core/governance/mgmt-groups/platform/main.bicep" \
-            --parameters "config/core/governance/mgmt-groups/platform/main.bicepparam" \
-            --action-on-unmanage detachAll \
-            --deny-settings-mode none \
-            --yes
-
+        uses: ./platform/.github/actions/bicep-deploy
+        with:
+          name: 'governance-platform'
+          displayName: 'Governance-Platform'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+          whatIfEnabled: 'false'
+          firstRunWhatIf: 'false'
+          denySettingsMode: 'None'
+          actionOnUnmanage: 'DetachAll'
+  
       # 4) Platform Connectivity (sub placement)
-      - name: Deploy Stack - Platform Connectivity
+      - name: 'Apply: Governance-Platform Connectivity'
         if: ${{ inputs.governance-platform-connectivity }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          az stack mg create \
-            --name "${STACK_PREFIX}governance-platform-connectivity" \
-            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
-            --location "${LOCATION}" \
-            --template-file "platform/templates/core/governance/mgmt-groups/platform/platform-connectivity/main.bicep" \
-            --parameters "config/core/governance/mgmt-groups/platform/platform-connectivity/main.bicepparam" \
-            --action-on-unmanage detachAll \
-            --deny-settings-mode none \
-            --yes
-
+        uses: ./platform/.github/actions/bicep-deploy
+        with:
+          name: 'governance-platform-connectivity'
+          displayName: 'Governance-Platform Connectivity'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-connectivity/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/platform-connectivity/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+          whatIfEnabled: 'false'
+          firstRunWhatIf: 'false'
+          denySettingsMode: 'None'
+          actionOnUnmanage: 'DetachAll'
+  
       # Wait-gate after subscription move (allow ARM + MG propagation)
       - name: Wait Gate - Connectivity subscription visible under MG
         if: ${{ inputs.governance-platform-connectivity }}
@@ -580,15 +588,15 @@ jobs:
           $targetMg = "connectivity"
           $timeoutMinutes = 20
           $sleepSeconds = 30
-      
+  
           $deadline = (Get-Date).AddMinutes($timeoutMinutes)
           $uri = "https://management.azure.com/providers/Microsoft.Management/managementGroups/$targetMg/subscriptions/$subId?api-version=2020-05-01"
-      
+  
           Write-Host "Waiting for subscription $subId to be visible under management group '$targetMg' (timeout ${timeoutMinutes}m)..."
-      
+  
           while ((Get-Date) -lt $deadline) {
             $json = az rest --method get --uri $uri 2>$null
-      
+  
             if ($LASTEXITCODE -eq 0 -and $json) {
               try {
                 $resp = $json | ConvertFrom-Json
@@ -600,167 +608,186 @@ jobs:
                 # ignore parse errors
               }
             }
-      
+  
             Write-Host "Not visible yet. Sleeping $sleepSeconds seconds..."
             Start-Sleep -Seconds $sleepSeconds
           }
-      
+  
           throw "Timed out waiting for subscription placement propagation: $subId -> $targetMg"
-          
+  
       # 5) Platform Identity
-      - name: Deploy Stack - Platform Identity
+      - name: 'Apply: Governance-Platform Identity'
         if: ${{ inputs.governance-platform-identity }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          az stack mg create \
-            --name "${STACK_PREFIX}governance-platform-identity" \
-            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
-            --location "${LOCATION}" \
-            --template-file "platform/templates/core/governance/mgmt-groups/platform/platform-identity/main.bicep" \
-            --parameters "config/core/governance/mgmt-groups/platform/platform-identity/main.bicepparam" \
-            --action-on-unmanage detachAll \
-            --deny-settings-mode none \
-            --yes
-
+        uses: ./platform/.github/actions/bicep-deploy
+        with:
+          name: 'governance-platform-identity'
+          displayName: 'Governance-Platform Identity'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-identity/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/platform-identity/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+          whatIfEnabled: 'false'
+          firstRunWhatIf: 'false'
+          denySettingsMode: 'None'
+          actionOnUnmanage: 'DetachAll'
+  
       # 6) Platform Management
-      - name: Deploy Stack - Platform Management
+      - name: 'Apply: Governance-Platform Management'
         if: ${{ inputs.governance-platform-management }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          az stack mg create \
-            --name "${STACK_PREFIX}governance-platform-management" \
-            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
-            --location "${LOCATION}" \
-            --template-file "platform/templates/core/governance/mgmt-groups/platform/platform-management/main.bicep" \
-            --parameters "config/core/governance/mgmt-groups/platform/platform-management/main.bicepparam" \
-            --action-on-unmanage detachAll \
-            --deny-settings-mode none \
-            --yes
-
+        uses: ./platform/.github/actions/bicep-deploy
+        with:
+          name: 'governance-platform-management'
+          displayName: 'Governance-Platform Management'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-management/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/platform-management/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+          whatIfEnabled: 'false'
+          firstRunWhatIf: 'false'
+          denySettingsMode: 'None'
+          actionOnUnmanage: 'DetachAll'
+  
       # 7) Platform Security
-      - name: Deploy Stack - Platform Security
+      - name: 'Apply: Governance-Platform Security'
         if: ${{ inputs.governance-platform-security }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          az stack mg create \
-            --name "${STACK_PREFIX}governance-platform-security" \
-            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
-            --location "${LOCATION}" \
-            --template-file "platform/templates/core/governance/mgmt-groups/platform/platform-security/main.bicep" \
-            --parameters "config/core/governance/mgmt-groups/platform/platform-security/main.bicepparam" \
-            --action-on-unmanage detachAll \
-            --deny-settings-mode none \
-            --yes
-
+        uses: ./platform/.github/actions/bicep-deploy
+        with:
+          name: 'governance-platform-security'
+          displayName: 'Governance-Platform Security'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-security/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/platform-security/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+          whatIfEnabled: 'false'
+          firstRunWhatIf: 'false'
+          denySettingsMode: 'None'
+          actionOnUnmanage: 'DetachAll'
+  
       # 8) Sandbox & Decommissioned
-      - name: Deploy Stack - Sandbox
+      - name: 'Apply: Governance-Sandbox'
         if: ${{ inputs.governance-sandbox }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          az stack mg create \
-            --name "${STACK_PREFIX}governance-sandbox" \
-            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
-            --location "${LOCATION}" \
-            --template-file "platform/templates/core/governance/mgmt-groups/sandbox/main.bicep" \
-            --parameters "config/core/governance/mgmt-groups/sandbox/main.bicepparam" \
-            --action-on-unmanage detachAll \
-            --deny-settings-mode none \
-            --yes
-
-      - name: Deploy Stack - Decommissioned
+        uses: ./platform/.github/actions/bicep-deploy
+        with:
+          name: 'governance-sandbox'
+          displayName: 'Governance-Sandbox'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/sandbox/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/sandbox/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+          whatIfEnabled: 'false'
+          firstRunWhatIf: 'false'
+          denySettingsMode: 'None'
+          actionOnUnmanage: 'DetachAll'
+  
+      - name: 'Apply: Governance-Decommissioned'
         if: ${{ inputs.governance-decommissioned }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          az stack mg create \
-            --name "${STACK_PREFIX}governance-decommissioned" \
-            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
-            --location "${LOCATION}" \
-            --template-file "platform/templates/core/governance/mgmt-groups/decommissioned/main.bicep" \
-            --parameters "config/core/governance/mgmt-groups/decommissioned/main.bicepparam" \
-            --action-on-unmanage detachAll \
-            --deny-settings-mode none \
-            --yes
-
+        uses: ./platform/.github/actions/bicep-deploy
+        with:
+          name: 'governance-decommissioned'
+          displayName: 'Governance-Decommissioned'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/decommissioned/main.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/decommissioned/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+          whatIfEnabled: 'false'
+          firstRunWhatIf: 'false'
+          denySettingsMode: 'None'
+          actionOnUnmanage: 'DetachAll'
+  
       # 9) RBAC stages
-      - name: Deploy Stack - Platform RBAC
+      - name: 'Apply: Governance-Platform RBAC'
         if: ${{ inputs.governance-platform-rbac }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          az stack mg create \
-            --name "${STACK_PREFIX}governance-platform-rbac" \
-            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
-            --location "${LOCATION}" \
-            --template-file "platform/templates/core/governance/mgmt-groups/platform/main-rbac.bicep" \
-            --parameters "config/core/governance/mgmt-groups/platform/main-rbac.bicepparam" \
-            --action-on-unmanage detachAll \
-            --deny-settings-mode none \
-            --yes
-
-      - name: Deploy Stack - Connectivity RBAC
+        uses: ./platform/.github/actions/bicep-deploy
+        with:
+          name: 'governance-platform-rbac'
+          displayName: 'Governance-Platform RBAC'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/main-rbac.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/main-rbac.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+          whatIfEnabled: 'false'
+          firstRunWhatIf: 'false'
+          denySettingsMode: 'None'
+          actionOnUnmanage: 'DetachAll'
+  
+      - name: 'Apply: Governance-Platform Connectivity RBAC'
         if: ${{ inputs.governance-platform-connectivity-rbac }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          az stack mg create \
-            --name "${STACK_PREFIX}governance-platform-connectivity-rbac" \
-            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
-            --location "${LOCATION}" \
-            --template-file "platform/templates/core/governance/mgmt-groups/platform/platform-connectivity/main-rbac.bicep" \
-            --parameters "config/core/governance/mgmt-groups/platform/platform-connectivity/main-rbac.bicepparam" \
-            --action-on-unmanage detachAll \
-            --deny-settings-mode none \
-            --yes
-
-      - name: Deploy Stack - Landing Zones RBAC
+        uses: ./platform/.github/actions/bicep-deploy
+        with:
+          name: 'governance-platform-connectivity-rbac'
+          displayName: 'Governance-Platform Connectivity RBAC'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-connectivity/main-rbac.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/platform-connectivity/main-rbac.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+          whatIfEnabled: 'false'
+          firstRunWhatIf: 'false'
+          denySettingsMode: 'None'
+          actionOnUnmanage: 'DetachAll'
+  
+      - name: 'Apply: Governance-Landing Zones RBAC'
         if: ${{ inputs.governance-landingzones-rbac }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          az stack mg create \
-            --name "${STACK_PREFIX}governance-landingzones-rbac" \
-            --management-group-id "${INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID}" \
-            --location "${LOCATION}" \
-            --template-file "platform/templates/core/governance/mgmt-groups/landingzones/main-rbac.bicep" \
-            --parameters "config/core/governance/mgmt-groups/landingzones/main-rbac.bicepparam" \
-            --action-on-unmanage detachAll \
-            --deny-settings-mode none \
-            --yes
-
+        uses: ./platform/.github/actions/bicep-deploy
+        with:
+          name: 'governance-landingzones-rbac'
+          displayName: 'Governance-Landing Zones RBAC'
+          templateFilePath: 'platform/templates/core/governance/mgmt-groups/landingzones/main-rbac.bicep'
+          templateParametersFilePath: 'config/core/governance/mgmt-groups/landingzones/main-rbac.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'managementGroup'
+          whatIfEnabled: 'false'
+          firstRunWhatIf: 'false'
+          denySettingsMode: 'None'
+          actionOnUnmanage: 'DetachAll'
+  
       # 10) Networking (subscription stack)
-      - name: Deploy Stack - Networking Hub
+      - name: 'Apply: Networking - Hub'
         if: ${{ inputs.networking }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          az stack sub create \
-            --name "${STACK_PREFIX}networking-hub" \
-            --subscription "${SUBSCRIPTION_ID_CONNECTIVITY}" \
-            --location "${LOCATION}" \
-            --template-file "platform/templates/networking/hubnetworking/main.bicep" \
-            --parameters "config/networking/hubnetworking/main.bicepparam" \
-            --action-on-unmanage detachAll \
-            --deny-settings-mode none \
-            --yes
-
+        uses: ./platform/.github/actions/bicep-deploy
+        with:
+          name: 'networking-hub'
+          displayName: 'Networking - Hub'
+          templateFilePath: 'platform/templates/networking/hubnetworking/main.bicep'
+          templateParametersFilePath: 'config/networking/hubnetworking/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_CONNECTIVITY }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'subscription'
+          whatIfEnabled: 'false'
+          firstRunWhatIf: 'false'
+          denySettingsMode: 'None'
+          actionOnUnmanage: 'DetachAll'
+  
       # 11) Core-Logging (final step, subscription stack)
-      - name: Deploy Stack - Core Logging (Final)
+      - name: 'Apply: Core-Logging'
         if: ${{ inputs.core-logging }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          az stack sub create \
-            --name "${STACK_PREFIX}core-logging" \
-            --subscription "${SUBSCRIPTION_ID_MANAGEMENT}" \
-            --location "${LOCATION}" \
-            --template-file "platform/templates/core/logging/main.bicep" \
-            --parameters "config/core/logging/main.bicepparam" \
-            --action-on-unmanage detachAll \
-            --deny-settings-mode none \
-            --yes
-
+        uses: ./platform/.github/actions/bicep-deploy
+        with:
+          name: 'core-logging'
+          displayName: 'Core-Logging'
+          templateFilePath: 'platform/templates/core/logging/main.bicep'
+          templateParametersFilePath: 'config/core/logging/main.bicepparam'
+          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
+          resourceGroupName: ''
+          location: '${{ env.LOCATION }}'
+          deploymentType: 'subscription'
+          whatIfEnabled: 'false'
+          firstRunWhatIf: 'false'
+          denySettingsMode: 'None'
+          actionOnUnmanage: 'DetachAll'
