@@ -54,6 +54,14 @@ inputs:
     description: 'Deployment stack action on unmanage (DeleteAll, DetachAll, etc.)'
     required: false
     default: 'DeleteAll'
+  stackNamePrefix:
+    description: "Prefix prepended to the stack/deployment name (e.g. prod-)."
+    required: false
+    default: ""
+  stackNameOverride:
+    description: "If set, use this exact stack/deployment name (takes precedence)."
+    required: false
+    default: ""
     
 runs:
   using: "composite"
@@ -158,7 +166,24 @@ runs:
           if ($deploymentNameBase.Length -gt $deploymentNameMaxLength) {
             $deploymentNameBase = $deploymentNameBase.Substring(0, $deploymentNameMaxLength)
           }
-          $deploymentName = "$deploymentPrefix-$deploymentNameBase"
+          # If override is provided, use it as-is
+          if (-not [string]::IsNullOrWhiteSpace($env:STACK_NAME_OVERRIDE)) {
+            $deploymentName = $env:STACK_NAME_OVERRIDE
+          }
+          else {
+            # Prefer workflow-provided prefix; fall back to existing computed prefix
+            $prefix = $env:STACK_NAME_PREFIX
+            if ([string]::IsNullOrWhiteSpace($prefix)) {
+              $prefix = $deploymentPrefix
+            }
+          
+            # Normalize prefix so it ends with '-' if not empty
+            if (-not [string]::IsNullOrWhiteSpace($prefix) -and -not $prefix.EndsWith("-")) {
+              $prefix = "$prefix-"
+            }
+          
+            $deploymentName = "$prefix$deploymentNameBase"
+          }
 
           $modeText = if ($whatIfEnabled) { "What-If" } else { "Deployment Stack" }
 
@@ -430,4 +455,6 @@ runs:
         MANAGEMENT_GROUP_ID_POSTFIX: ${{ env.MANAGEMENT_GROUP_ID_POSTFIX }}
         DENY_SETTINGS_MODE: ${{ inputs.denySettingsMode }}
         ACTION_ON_UNMANAGE: ${{ inputs.actionOnUnmanage }}
+        STACK_NAME_PREFIX: ${{ inputs.stackNamePrefix }}
+        STACK_NAME_OVERRIDE: ${{ inputs.stackNameOverride }}
 
