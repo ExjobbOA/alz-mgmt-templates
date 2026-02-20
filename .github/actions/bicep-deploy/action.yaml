@@ -46,6 +46,15 @@ inputs:
     description: 'If true, skip What-If when targetManagementGroupId does not exist yet'
     required: false
     default: 'false'
+  denySettingsMode:
+    description: 'Deployment stack deny settings mode (None, DenyDelete, DenyWriteAndDelete)'
+    required: false
+    default: 'None'
+  actionOnUnmanage:
+    description: 'Deployment stack action on unmanage (DeleteAll, DetachAll, etc.)'
+    required: false
+    default: 'DeleteAll'
+    
 runs:
   using: "composite"
   steps:
@@ -248,8 +257,8 @@ runs:
               Name                  = $deploymentName
               TemplateFile          = $env:TEMPLATE_FILE_PATH
               TemplateParameterFile = $env:TEMPLATE_PARAMETERS_FILE_PATH
-              DenySettingsMode      = "None"
-              ActionOnUnmanage      = "DeleteAll"
+              DenySettingsMode      = $env:DENY_SETTINGS_MODE
+              ActionOnUnmanage      = $env:ACTION_ON_UNMANAGE
               Force                 = $true
               Verbose               = $true
             }
@@ -419,4 +428,6 @@ runs:
         MANAGEMENT_GROUP_ID_PREFIX: ${{ env.MANAGEMENT_GROUP_ID_PREFIX }}
         INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID: ${{ env.INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID }}
         MANAGEMENT_GROUP_ID_POSTFIX: ${{ env.MANAGEMENT_GROUP_ID_POSTFIX }}
+        DENY_SETTINGS_MODE: ${{ inputs.denySettingsMode }}
+        ACTION_ON_UNMANAGE: ${{ inputs.actionOnUnmanage }}
 
