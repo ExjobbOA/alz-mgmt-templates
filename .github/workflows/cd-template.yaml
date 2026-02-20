@@ -585,41 +585,6 @@ jobs:
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
   
-      # Wait-gate after subscription move (allow ARM + MG propagation)
-      - name: Wait Gate - Connectivity subscription visible under MG
-        if: ${{ inputs.governance-platform-connectivity }}
-        shell: pwsh
-        run: |
-          $subId = "${env:SUBSCRIPTION_ID_CONNECTIVITY}"
-          $targetMg = "connectivity"
-          $timeoutMinutes = 20
-          $sleepSeconds = 30
-  
-          $deadline = (Get-Date).AddMinutes($timeoutMinutes)
-          $uri = "https://management.azure.com/providers/Microsoft.Management/managementGroups/$targetMg/subscriptions/$subId?api-version=2020-05-01"
-  
-          Write-Host "Waiting for subscription $subId to be visible under management group '$targetMg' (timeout ${timeoutMinutes}m)..."
-  
-          while ((Get-Date) -lt $deadline) {
-            $json = az rest --method get --uri $uri 2>$null
-  
-            if ($LASTEXITCODE -eq 0 -and $json) {
-              try {
-                $resp = $json | ConvertFrom-Json
-                if ($resp -and $resp.name -eq $subId) {
-                  Write-Host "Subscription $subId is now visible under management group '$targetMg'."
-                  exit 0
-                }
-              } catch {
-                # ignore parse errors
-              }
-            }
-  
-            Write-Host "Not visible yet. Sleeping $sleepSeconds seconds..."
-            Start-Sleep -Seconds $sleepSeconds
-          }
-  
-          throw "Timed out waiting for subscription placement propagation: $subId -> $targetMg"
   
       # 5) Platform Identity
       - name: 'Apply: Governance-Platform Identity'
