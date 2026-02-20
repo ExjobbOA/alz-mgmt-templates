@@ -488,6 +488,7 @@ jobs:
           whatIfEnabled: 'false'
           firstRunWhatIf: 'false'
           managementGroupId: ${{ env.MANAGEMENT_GROUP_ID }}
+          stackNamePrefix: ${{ env.STACK_PREFIX }}
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
   
@@ -506,6 +507,7 @@ jobs:
           deploymentType: 'managementGroup'
           whatIfEnabled: 'false'
           firstRunWhatIf: 'false'
+          stackNamePrefix: ${{ env.STACK_PREFIX }}
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
   
@@ -523,6 +525,7 @@ jobs:
           deploymentType: 'managementGroup'
           whatIfEnabled: 'false'
           firstRunWhatIf: 'false'
+          stackNamePrefix: ${{ env.STACK_PREFIX }}
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
   
@@ -540,6 +543,7 @@ jobs:
           deploymentType: 'managementGroup'
           whatIfEnabled: 'false'
           firstRunWhatIf: 'false'
+          stackNamePrefix: ${{ env.STACK_PREFIX }}
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
   
@@ -558,6 +562,7 @@ jobs:
           deploymentType: 'managementGroup'
           whatIfEnabled: 'false'
           firstRunWhatIf: 'false'
+          stackNamePrefix: ${{ env.STACK_PREFIX }}
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
   
@@ -576,6 +581,7 @@ jobs:
           deploymentType: 'managementGroup'
           whatIfEnabled: 'false'
           firstRunWhatIf: 'false'
+          stackNamePrefix: ${{ env.STACK_PREFIX }}
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
   
@@ -630,6 +636,7 @@ jobs:
           deploymentType: 'managementGroup'
           whatIfEnabled: 'false'
           firstRunWhatIf: 'false'
+          stackNamePrefix: ${{ env.STACK_PREFIX }}
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
   
@@ -648,6 +655,7 @@ jobs:
           deploymentType: 'managementGroup'
           whatIfEnabled: 'false'
           firstRunWhatIf: 'false'
+          stackNamePrefix: ${{ env.STACK_PREFIX }}
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
   
@@ -666,6 +674,7 @@ jobs:
           deploymentType: 'managementGroup'
           whatIfEnabled: 'false'
           firstRunWhatIf: 'false'
+          stackNamePrefix: ${{ env.STACK_PREFIX }}
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
   
@@ -684,6 +693,7 @@ jobs:
           deploymentType: 'managementGroup'
           whatIfEnabled: 'false'
           firstRunWhatIf: 'false'
+          stackNamePrefix: ${{ env.STACK_PREFIX }}
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
   
@@ -701,6 +711,7 @@ jobs:
           deploymentType: 'managementGroup'
           whatIfEnabled: 'false'
           firstRunWhatIf: 'false'
+          stackNamePrefix: ${{ env.STACK_PREFIX }}
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
   
@@ -719,6 +730,7 @@ jobs:
           deploymentType: 'managementGroup'
           whatIfEnabled: 'false'
           firstRunWhatIf: 'false'
+          stackNamePrefix: ${{ env.STACK_PREFIX }}
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
   
@@ -736,6 +748,7 @@ jobs:
           deploymentType: 'managementGroup'
           whatIfEnabled: 'false'
           firstRunWhatIf: 'false'
+          stackNamePrefix: ${{ env.STACK_PREFIX }}
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
   
@@ -753,6 +766,7 @@ jobs:
           deploymentType: 'managementGroup'
           whatIfEnabled: 'false'
           firstRunWhatIf: 'false'
+          stackNamePrefix: ${{ env.STACK_PREFIX }}
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
   
@@ -771,6 +785,7 @@ jobs:
           deploymentType: 'subscription'
           whatIfEnabled: 'false'
           firstRunWhatIf: 'false'
+          stackNamePrefix: ${{ env.STACK_PREFIX }}
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
   
@@ -789,5 +804,6 @@ jobs:
           deploymentType: 'subscription'
           whatIfEnabled: 'false'
           firstRunWhatIf: 'false'
+          stackNamePrefix: ${{ env.STACK_PREFIX }}
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
