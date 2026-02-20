@@ -538,25 +538,39 @@ jobs:
       # Wait-gate after subscription move (allow ARM + MG propagation)
       - name: Wait Gate - Connectivity subscription visible under MG
         if: ${{ inputs.governance-platform-connectivity }}
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          echo "Waiting for subscription to be visible under MG 'connectivity'..."
-          for i in $(seq 1 60); do
-            if az account management-group subscription show \
-              --name "connectivity" \
-              --subscription "${SUBSCRIPTION_ID_CONNECTIVITY}" \
-              --only-show-errors 1>/dev/null 2>&1; then
-              echo "OK: subscription is visible under 'connectivity'."
-              exit 0
-            fi
-            echo "Not yet (attempt $i/60). Sleeping 10s..."
-            sleep 10
-          done
-          echo "Timed out waiting for subscription move propagation."
-          exit 1
-        # CLI command exists in Azure CLI docs :contentReference[oaicite:1]{index=1}
-
+          $subId = "${env:SUBSCRIPTION_ID_CONNECTIVITY}"
+          $targetMg = "connectivity"
+          $timeoutMinutes = 20
+          $sleepSeconds = 30
+      
+          $deadline = (Get-Date).AddMinutes($timeoutMinutes)
+          $uri = "https://management.azure.com/providers/Microsoft.Management/managementGroups/$targetMg/subscriptions/$subId?api-version=2020-05-01"
+      
+          Write-Host "Waiting for subscription $subId to be visible under management group '$targetMg' (timeout ${timeoutMinutes}m)..."
+      
+          while ((Get-Date) -lt $deadline) {
+            $json = az rest --method get --uri $uri 2>$null
+      
+            if ($LASTEXITCODE -eq 0 -and $json) {
+              try {
+                $resp = $json | ConvertFrom-Json
+                if ($resp -and $resp.name -eq $subId) {
+                  Write-Host "Subscription $subId is now visible under management group '$targetMg'."
+                  exit 0
+                }
+              } catch {
+                # ignore parse errors
+              }
+            }
+      
+            Write-Host "Not visible yet. Sleeping $sleepSeconds seconds..."
+            Start-Sleep -Seconds $sleepSeconds
+          }
+      
+          throw "Timed out waiting for subscription placement propagation: $subId -> $targetMg"
+          
       # 5) Platform Identity
       - name: Deploy Stack - Platform Identity
         if: ${{ inputs.governance-platform-identity }}
