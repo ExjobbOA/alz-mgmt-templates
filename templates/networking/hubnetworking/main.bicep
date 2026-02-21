@@ -159,21 +159,57 @@ module modPrivateDnsResolverResourceGroups 'br/public:avm/res/resources/resource
   }
 ]
 
+// Compute effective DDoS plan ids per hub (explicit > local plan > primary plan > null)
+var effectiveDdosIds = [
+  for (hub, i) in hubNetworks: hub.?ddosProtectionPlanResourceId ?? (
+    hub.ddosProtectionPlanSettings.deployDdosProtectionPlan
+      ? resDdosProtectionPlan[i].outputs.resourceId
+      : (hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
+          ? resDdosProtectionPlan[0].outputs.resourceId
+          : null)
+  )
+]
+
+// Base params object per hub
+var hubVnetParamsBase = [
+  for (hub, i) in hubNetworks: {
+    name: hub.name
+    location: hub.location
+    addressPrefixes: hub.addressPrefixes
+    dnsServers: hub.azureFirewallSettings.deployAzureFirewall && hub.privateDnsSettings.deployDnsPrivateResolver && hub.privateDnsSettings.deployPrivateDnsZones
+      ? [firewallPrivateIpAddresses[i]]
+      : (hub.?dnsServers ?? [])
+    vnetEncryption: hub.?vnetEncryption ?? false
+    vnetEncryptionEnforcement: hub.?vnetEncryptionEnforcement ?? 'AllowUnencrypted'
+    subnets: [
+      for subnet in hub.subnets: {
+        name: subnet.name
+        addressPrefix: subnet.addressPrefix
+        delegation: subnet.?delegation
+        networkSecurityGroupResourceId: (subnet.?name == 'AzureBastionSubnet' && hub.bastionHostSettings.deployBastion)
+          ? resBastionNsg[i].outputs.resourceId
+          : subnet.?networkSecurityGroupId
+      }
+    ]
+    lock: parGlobalResourceLock ?? hub.?lock
+    tags: hub.?tags ?? parTags
+    enableTelemetry: parEnableTelemetry
+  }
+]
+
+// Final params per hub (conditionally include ddosProtectionPlanResourceId)
+var hubVnetParams = [
+  for (hub, i) in hubNetworks: union(
+    hubVnetParamsBase[i],
+    effectiveDdosIds[i] != null ? { ddosProtectionPlanResourceId: effectiveDdosIds[i] } : {}
+  )
+]
+
 //=====================
 // Virtual Networks
 //=====================
 module resHubVirtualNetwork 'br/public:avm/res/network/virtual-network:0.7.2' = [
   for (hub, i) in hubNetworks: {
-
-    // Compute effective DDoS plan id (explicit > local plan > primary plan > null)
-    var effectiveDdosId = hub.?ddosProtectionPlanResourceId ?? (
-      hub.ddosProtectionPlanSettings.deployDdosProtectionPlan
-        ? resDdosProtectionPlan[i].?outputs.resourceId
-        : hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
-            ? resDdosProtectionPlan[0].?outputs.resourceId
-            : null
-    )
-
     name: 'vnet-${hub.name}-${uniqueString(parHubNetworkingResourceGroupNamePrefix, hub.location)}'
     scope: resourceGroup(hubResourceGroupNames[i])
     dependsOn: [
@@ -182,33 +218,7 @@ module resHubVirtualNetwork 'br/public:avm/res/network/virtual-network:0.7.2' = 
         ? [resDdosProtectionPlan[i]]
         : hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan ? [resDdosProtectionPlan[0]] : [])
     ]
-
-    // Build params and only include ddosProtectionPlanResourceId when non-null
-    params: union({
-      name: hub.name
-      location: hub.location
-      addressPrefixes: hub.addressPrefixes
-      dnsServers: hub.azureFirewallSettings.deployAzureFirewall && hub.privateDnsSettings.deployDnsPrivateResolver && hub.privateDnsSettings.deployPrivateDnsZones
-        ? [firewallPrivateIpAddresses[i]]
-        : (hub.?dnsServers ?? [])
-      vnetEncryption: hub.?vnetEncryption ?? false
-      vnetEncryptionEnforcement: hub.?vnetEncryptionEnforcement ?? 'AllowUnencrypted'
-      subnets: [
-        for subnet in hub.subnets: {
-          name: subnet.name
-          addressPrefix: subnet.addressPrefix
-          delegation: subnet.?delegation
-          networkSecurityGroupResourceId: (subnet.?name == 'AzureBastionSubnet' && hub.bastionHostSettings.deployBastion)
-            ? resBastionNsg[i].?outputs.resourceId
-            : subnet.?networkSecurityGroupId
-        }
-      ]
-      lock: parGlobalResourceLock ?? hub.?lock
-      tags: hub.?tags ?? parTags
-      enableTelemetry: parEnableTelemetry
-    }, effectiveDdosId != null ? {
-      ddosProtectionPlanResourceId: effectiveDdosId
-    } : {})
+    params: hubVnetParams[i]
   }
 ]
 
