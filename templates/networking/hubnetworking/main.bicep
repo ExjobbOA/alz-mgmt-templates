@@ -168,9 +168,8 @@ module modPrivateDnsResolverResourceGroups 'br/public:avm/res/resources/resource
 // - this hub will deploy a plan, OR
 // - the primary hub (index 0) will deploy a plan (shared fallback pattern)
 var ddosAssociationEnabled = [
-  for (hub, i) in hubNetworks: (hub.?ddosProtectionPlanResourceId != null) ||
-    hub.ddosProtectionPlanSettings.deployDdosProtectionPlan ||
-    hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
+  for (hub, i) in hubNetworks: (hub.?ddosProtectionPlanResourceId != null) || hub.ddosProtectionPlanSettings.deployDdosProtectionPlan || hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
+]
 ]
 
 // 1) NO DDoS association (keep the ORIGINAL name so the rest of the file still works)
@@ -232,9 +231,9 @@ module resHubVirtualNetwork_withDdos 'br/public:avm/res/network/virtual-network:
       ddosProtectionPlanResourceId: hub.?ddosProtectionPlanResourceId ?? (
         hub.ddosProtectionPlanSettings.deployDdosProtectionPlan
           ? resDdosProtectionPlan[i].?outputs.resourceId
-          : hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
+          : (hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
               ? resDdosProtectionPlan[0].?outputs.resourceId
-              : null
+              : null)
       )
 
       vnetEncryption: hub.?vnetEncryption ?? false
