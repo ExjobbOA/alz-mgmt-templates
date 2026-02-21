@@ -181,7 +181,7 @@ module resHubVirtualNetwork 'br/public:avm/res/network/virtual-network:0.7.2' = 
       
       // FIX: Vi klipper kopplingen till hubNetworks[0]. 
       // Antingen har hubben ett explicit ID, eller så skapar den en egen plan, annars null.
-      ddosProtectionPlanResourceId: hub.?ddosProtectionPlanResourceId ?? (hub.ddosProtectionPlanSettings.deployDdosProtectionPlan ? resDdosProtectionPlan[i].outputs.resourceId : null)
+      ddosProtectionPlanResourceId: hub.?ddosProtectionPlanResourceId ?? null
       
       vnetEncryption: hub.?vnetEncryption ?? false
       vnetEncryptionEnforcement: hub.?vnetEncryptionEnforcement ?? 'AllowUnencrypted'
