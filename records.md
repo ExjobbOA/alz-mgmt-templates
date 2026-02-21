@@ -108,10 +108,12 @@ module resHubVirtualNetwork 'br/public:avm/res/network/virtual-network:0.7.2' = 
   }
 ]
 
+```
 
 **Result:** Since the DDoS key is now physically absent from the JSON payload when disabled, Azure no longer triggers the `NotFound` validation for the Sweden Central plan. This successfully resolved the cross-region dependency bug.
 
-Issue: The GitHub "Cancel workflow" command is ineffective, and manual intervention via Azure CLI/Portal also fails to terminate the deployment sequence.
+
+**Issue:** The GitHub "Cancel workflow" command is ineffective, and manual intervention via Azure CLI/Portal also fails to terminate the deployment sequence.
 
 Technical Observations:
 
