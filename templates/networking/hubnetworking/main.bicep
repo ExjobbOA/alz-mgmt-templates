@@ -160,11 +160,19 @@ module modPrivateDnsResolverResourceGroups 'br/public:avm/res/resources/resource
 ]
 
 //=====================
-// Virtual Networks
+// Virtual Networks (NO DDoS association)
 //=====================
-module resHubVirtualNetwork 'br/public:avm/res/network/virtual-network:0.7.2' = [
-  for (hub, i) in hubNetworks: {
-    name: 'vnet-${hub.name}-${uniqueString(parHubNetworkingResourceGroupNamePrefix, hub.location)}'
+module resHubVirtualNetwork_noDdos 'br/public:avm/res/network/virtual-network:0.7.2' = [
+  for (hub, i) in hubNetworks: if ((
+    hub.?ddosProtectionPlanResourceId ?? (
+      hub.ddosProtectionPlanSettings.deployDdosProtectionPlan
+        ? resDdosProtectionPlan[i].outputs.resourceId
+        : hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
+            ? resDdosProtectionPlan[0].outputs.resourceId
+            : null
+    )
+  ) == null) {
+    name: 'vnet-${hub.name}-${uniqueString(parHubNetworkingResourceGroupNamePrefix, hub.location)}-noddo'
     scope: resourceGroup(hubResourceGroupNames[i])
     dependsOn: [
       modHubNetworkingResourceGroups[i]
@@ -179,11 +187,6 @@ module resHubVirtualNetwork 'br/public:avm/res/network/virtual-network:0.7.2' = 
       dnsServers: hub.azureFirewallSettings.deployAzureFirewall && hub.privateDnsSettings.deployDnsPrivateResolver && hub.privateDnsSettings.deployPrivateDnsZones
         ? [firewallPrivateIpAddresses[i]]
         : (hub.?dnsServers ?? [])
-      ddosProtectionPlanResourceId: hub.?ddosProtectionPlanResourceId ?? (hub.ddosProtectionPlanSettings.deployDdosProtectionPlan
-        ? resDdosProtectionPlan[i].?outputs.resourceId
-        : hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
-            ? resDdosProtectionPlan[0].?outputs.resourceId
-            : null)
       vnetEncryption: hub.?vnetEncryption ?? false
       vnetEncryptionEnforcement: hub.?vnetEncryptionEnforcement ?? 'AllowUnencrypted'
       subnets: [
@@ -192,7 +195,65 @@ module resHubVirtualNetwork 'br/public:avm/res/network/virtual-network:0.7.2' = 
           addressPrefix: subnet.addressPrefix
           delegation: subnet.?delegation
           networkSecurityGroupResourceId: (subnet.?name == 'AzureBastionSubnet' && hub.bastionHostSettings.deployBastion)
-            ? resBastionNsg[i].?outputs.resourceId
+            ? resBastionNsg[i].outputs.resourceId
+            : subnet.?networkSecurityGroupId
+        }
+      ]
+      lock: parGlobalResourceLock ?? hub.?lock
+      tags: hub.?tags ?? parTags
+      enableTelemetry: parEnableTelemetry
+    }
+  }
+]
+
+//=====================
+// Virtual Networks (WITH DDoS association)
+//=====================
+module resHubVirtualNetwork_withDdos 'br/public:avm/res/network/virtual-network:0.7.2' = [
+  for (hub, i) in hubNetworks: if ((
+    hub.?ddosProtectionPlanResourceId ?? (
+      hub.ddosProtectionPlanSettings.deployDdosProtectionPlan
+        ? resDdosProtectionPlan[i].outputs.resourceId
+        : hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
+            ? resDdosProtectionPlan[0].outputs.resourceId
+            : null
+    )
+  ) != null) {
+    name: 'vnet-${hub.name}-${uniqueString(parHubNetworkingResourceGroupNamePrefix, hub.location)}-ddos'
+    scope: resourceGroup(hubResourceGroupNames[i])
+    dependsOn: [
+      modHubNetworkingResourceGroups[i]
+      ...(hub.ddosProtectionPlanSettings.deployDdosProtectionPlan
+        ? [resDdosProtectionPlan[i]]
+        : hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan ? [resDdosProtectionPlan[0]] : [])
+    ]
+    params: {
+      name: hub.name
+      location: hub.location
+      addressPrefixes: hub.addressPrefixes
+      dnsServers: hub.azureFirewallSettings.deployAzureFirewall && hub.privateDnsSettings.deployDnsPrivateResolver && hub.privateDnsSettings.deployPrivateDnsZones
+        ? [firewallPrivateIpAddresses[i]]
+        : (hub.?dnsServers ?? [])
+
+      ddosProtectionPlanResourceId: (
+        hub.?ddosProtectionPlanResourceId ?? (
+          hub.ddosProtectionPlanSettings.deployDdosProtectionPlan
+            ? resDdosProtectionPlan[i].outputs.resourceId
+            : hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
+                ? resDdosProtectionPlan[0].outputs.resourceId
+                : null
+        )
+      )
+
+      vnetEncryption: hub.?vnetEncryption ?? false
+      vnetEncryptionEnforcement: hub.?vnetEncryptionEnforcement ?? 'AllowUnencrypted'
+      subnets: [
+        for subnet in hub.subnets: {
+          name: subnet.name
+          addressPrefix: subnet.addressPrefix
+          delegation: subnet.?delegation
+          networkSecurityGroupResourceId: (subnet.?name == 'AzureBastionSubnet' && hub.bastionHostSettings.deployBastion)
+            ? resBastionNsg[i].outputs.resourceId
             : subnet.?networkSecurityGroupId
         }
       ]
