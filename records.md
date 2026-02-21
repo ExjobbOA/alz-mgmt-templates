@@ -175,7 +175,7 @@ params: {
 * **Logic Perfection:** When DDoS is disabled, the expression evaluates to an empty object `{}`. When spread, it results in **no key being sent** to the Azure API.
 * **Deployment Status:** This eliminates the "Ghost" reference to the Sweden Central DDoS plan during the VNet creation/update phase.
 
-Här är loggposten för den pragmatiska lösningen. Vi går ifrån avancerad Bicep-syntax (som spread/union) och använder istället en **villkorlig logik med dubbla moduler**. Detta är ett klassiskt mönster för att hantera begränsningar i Bicep v0.40.2 där man vill garantera att en "property" inte ens skickas till Azure.
+
 
 ---
 
@@ -187,7 +187,7 @@ Even with object spreading, Bicep v0.40.2 can be unpredictable when trying to co
 
 Simply setting a flag to `false` in the parameters wasn't enough, as the template logic still generated a "null-key" that triggered validation against a non-existent DDoS plan in Sweden Central.
 
-### 🛠 The Solution: Parameter-Driven Module Switching
+### The Solution: Parameter-Driven Module Switching
 
 Instead of fighting with object-merging functions, the template was refactored to use two separate module blocks governed by an `if`-condition.
 
