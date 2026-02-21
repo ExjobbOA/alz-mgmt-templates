@@ -229,3 +229,37 @@ module resHubVirtualNetwork_withDdos 'br/public:avm/res/network/virtual-network:
 * **Robustness:** This bypasses the **BCP183** and **BCP182** errors by using standard Bicep patterns that are supported across all versions.
 
 ---
+Date: February 21, 2026
+Status: RESOLVED 
+System: Azure Landing Zone (ALZ) - Connectivity Hub
+
+Summary
+During the deployment of network hubs in swedencentral and northeurope, we encountered persistent NotFound errors related to a DDoS Protection Plan (ddos-alz-swedencentral). Even after manually deleting the resource and cleaning up Deployment Stacks, Azure continued to look for the resource during every new deployment attempt.
+
+Actions Taken (Code-level)
+We performed extensive code refactoring to isolate the issue from the Bicep logic:
+
+Parameter Sanitization: Removed hardcoded name strings from the .bicepparam file to prevent Bicep from constructing resource IDs for resources that were not intended for creation.
+
+Bicep Logic Hardening: Updated main.bicep using Safe Navigation and Null Coalescing (as discussed in the "above written" conversation). We modified the reference to:
+ddosProtectionPlanResourceId: hub.?ddosProtectionPlanResourceId ?? null
+This was done to force Azure to ignore the field instead of attempting to validate an empty or auto-generated string.
+
+The Final Resolution
+Despite the code-level fixes, the error persisted. Further analysis of logs and policy structures led us to the actual root cause, which matches the known bug described here:
+Not having a DDoS Protection Standard plan is causing deployment issues · Issue #3540 · Azure/Azure-Landing-Zones
+
+The Problem: An Azure Policy with a Modify effect was assigned at the Management Group level. This policy was configured to automatically "fix" VNets by injecting a specific DDoS resource ID. Since Policy evaluation happens during the deployment process, it was overwriting our Bicep "null" value with the broken ID, resulting in the NotFound error.
+
+The Fix:
+
+Identified the specific Policy Assignment in the Azure Portal.
+
+Disabled Policy Enforcement (set to Disabled).
+
+Reran the GitHub Actions pipeline, which successfully completed without errors.
+
+Key Takeaways
+Portal vs. Code: In an ALZ environment, Azure Policies often act as a "higher law" that can override perfectly written IaC. If a deployment fails due to a deleted resource, always check Policy Assignments.
+
+Modify Effects: Policies with Modify or DeployIfNotExists effects can cause "silent" deployment failures by injecting invalid data into the ARM template during runtime.
