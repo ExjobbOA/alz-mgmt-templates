@@ -59,6 +59,9 @@ param parTags object = {}
 @description('Optional. Enable or disable telemetry.')
 param parEnableTelemetry bool = true
 
+@description('Controls whether VNets should associate a DDoS Protection Plan.')
+param parEnableDdos bool = false
+
 //========================================
 // Variables
 //========================================
@@ -168,7 +171,11 @@ module modPrivateDnsResolverResourceGroups 'br/public:avm/res/resources/resource
 // - this hub will deploy a plan, OR
 // - the primary hub (index 0) will deploy a plan (shared fallback pattern)
 var ddosAssociationEnabled = [
-  for (hub, i) in hubNetworks: (hub.?ddosProtectionPlanResourceId != null) || hub.ddosProtectionPlanSettings.deployDdosProtectionPlan || hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
+  for (hub, i) in hubNetworks: parEnableDdos && (
+    (hub.?ddosProtectionPlanResourceId != null) ||
+    hub.ddosProtectionPlanSettings.deployDdosProtectionPlan ||
+    hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
+  )
 ]
 
 // 1) NO DDoS association (keep the ORIGINAL name so the rest of the file still works)
