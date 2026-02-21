@@ -174,3 +174,60 @@ params: {
 * **Syntax Compliance:** This approach satisfies **BCP183** (it is an object literal) and **BCP182** (outputs are accessed within the module scope).
 * **Logic Perfection:** When DDoS is disabled, the expression evaluates to an empty object `{}`. When spread, it results in **no key being sent** to the Azure API.
 * **Deployment Status:** This eliminates the "Ghost" reference to the Sweden Central DDoS plan during the VNet creation/update phase.
+
+Här är loggposten för den pragmatiska lösningen. Vi går ifrån avancerad Bicep-syntax (som spread/union) och använder istället en **villkorlig logik med dubbla moduler**. Detta är ett klassiskt mönster för att hantera begränsningar i Bicep v0.40.2 där man vill garantera att en "property" inte ens skickas till Azure.
+
+---
+
+## Feb 21: Bypassing Bicep v0.40.2 Limitations with Dual-Module Logic
+
+### The Problem (The Syntax Wall)
+
+Even with object spreading, Bicep v0.40.2 can be unpredictable when trying to completely omit a property (like `ddosProtectionPlanResourceId`) within a complex object that also contains a `for`-loop (subnets).
+
+Simply setting a flag to `false` in the parameters wasn't enough, as the template logic still generated a "null-key" that triggered validation against a non-existent DDoS plan in Sweden Central.
+
+### 🛠 The Solution: Parameter-Driven Module Switching
+
+Instead of fighting with object-merging functions, the template was refactored to use two separate module blocks governed by an `if`-condition.
+
+#### Strategy:
+
+* **Module A (`noDdos`):** Deploys the VNet **without** the DDoS property entirely.
+* **Module B (`withDdos`):** Deploys the VNet **with** the DDoS property included.
+* **Logic:** An `if` statement checks the calculated DDoS ID. If it's `null`, Module A runs; otherwise, Module B runs.
+
+#### Implementation:
+
+```bicep
+// Module A: Runs only if the calculated DDoS ID is NULL
+module resHubVirtualNetwork_noDdos 'br/public:avm/res/network/virtual-network:0.7.2' = [
+  for (hub, i) in hubNetworks: if (effectiveDdosId == null) {
+    name: 'vnet-${hub.name}-noddo'
+    params: {
+      // No ddosProtectionPlanResourceId key present here
+      ...
+    }
+  }
+]
+
+// Module B: Runs only if the calculated DDoS ID is NOT NULL
+module resHubVirtualNetwork_withDdos 'br/public:avm/res/network/virtual-network:0.7.2' = [
+  for (hub, i) in hubNetworks: if (effectiveDdosId != null) {
+    name: 'vnet-${hub.name}-ddos'
+    params: {
+      ddosProtectionPlanResourceId: effectiveDdosId
+      ...
+    }
+  }
+]
+
+```
+
+### Outcome & Practical Benefits
+
+* **Zero Ghost References:** Since the "No DDoS" module version doesn't even contain the key, Azure has nothing to validate. The `NotFound` error is physically impossible in this state.
+* **Clean UX:** The user (tenant) only needs to care about the simple `true/false` flag in their `.bicepparam` file.
+* **Robustness:** This bypasses the **BCP183** and **BCP182** errors by using standard Bicep patterns that are supported across all versions.
+
+---
