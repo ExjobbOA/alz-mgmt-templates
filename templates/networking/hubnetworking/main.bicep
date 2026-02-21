@@ -164,6 +164,16 @@ module modPrivateDnsResolverResourceGroups 'br/public:avm/res/resources/resource
 //=====================
 module resHubVirtualNetwork 'br/public:avm/res/network/virtual-network:0.7.2' = [
   for (hub, i) in hubNetworks: {
+
+    // Compute effective DDoS plan id (explicit > local plan > primary plan > null)
+    var effectiveDdosId = hub.?ddosProtectionPlanResourceId ?? (
+      hub.ddosProtectionPlanSettings.deployDdosProtectionPlan
+        ? resDdosProtectionPlan[i].?outputs.resourceId
+        : hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
+            ? resDdosProtectionPlan[0].?outputs.resourceId
+            : null
+    )
+
     name: 'vnet-${hub.name}-${uniqueString(parHubNetworkingResourceGroupNamePrefix, hub.location)}'
     scope: resourceGroup(hubResourceGroupNames[i])
     dependsOn: [
@@ -172,18 +182,15 @@ module resHubVirtualNetwork 'br/public:avm/res/network/virtual-network:0.7.2' = 
         ? [resDdosProtectionPlan[i]]
         : hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan ? [resDdosProtectionPlan[0]] : [])
     ]
-    params: {
+
+    // Build params and only include ddosProtectionPlanResourceId when non-null
+    params: union({
       name: hub.name
       location: hub.location
       addressPrefixes: hub.addressPrefixes
       dnsServers: hub.azureFirewallSettings.deployAzureFirewall && hub.privateDnsSettings.deployDnsPrivateResolver && hub.privateDnsSettings.deployPrivateDnsZones
         ? [firewallPrivateIpAddresses[i]]
         : (hub.?dnsServers ?? [])
-      ddosProtectionPlanResourceId: hub.?ddosProtectionPlanResourceId ?? (hub.ddosProtectionPlanSettings.deployDdosProtectionPlan
-        ? resDdosProtectionPlan[i].?outputs.resourceId
-        : hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
-            ? resDdosProtectionPlan[0].?outputs.resourceId
-            : null)
       vnetEncryption: hub.?vnetEncryption ?? false
       vnetEncryptionEnforcement: hub.?vnetEncryptionEnforcement ?? 'AllowUnencrypted'
       subnets: [
@@ -199,7 +206,9 @@ module resHubVirtualNetwork 'br/public:avm/res/network/virtual-network:0.7.2' = 
       lock: parGlobalResourceLock ?? hub.?lock
       tags: hub.?tags ?? parTags
       enableTelemetry: parEnableTelemetry
-    }
+    }, effectiveDdosId != null ? {
+      ddosProtectionPlanResourceId: effectiveDdosId
+    } : {})
   }
 ]
 
