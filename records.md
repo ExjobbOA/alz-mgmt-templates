@@ -122,3 +122,55 @@ Manual Intervention Failure: Attempts to manually cancel the deployment via az d
 The Idempotency Trap: The pipeline's resilience logic is "too effective." It treats a manual cancellation as a transient error, meaning the automation is essentially fighting against the developer's intent to stop.
 
 Locked Sequence: Because the script manages the entire lifecycle (Delete -> Create -> Retry), it creates a closed loop that cannot be interrupted until the maximum retry count (10) is reached or the GitHub Runner times out.
+
+Här är loggposten för den slutgiltiga Bicep-fixen, där vi använder "Object Spread" för att navigera runt språkets begränsningar.
+
+---
+
+
+## Feb 21: Bicep Compilation & The "Object Spread" Solution
+
+###  The Problem (Round 2)
+
+The previous attempt to move parameter logic into standalone variables failed due to a new set of Bicep compilation errors:
+
+1. **BCP183:** `module.params` must be a direct **object literal**. Referencing a pre-calculated variable (like `hubVnetParams[i]`) is not permitted in this context.
+2. **BCP182:** Variables using a `for`-body cannot reference `module.outputs`. Since our DDoS ID logic depends on `resDdosProtectionPlan[i].outputs.resourceId`, it cannot be stored in a variable outside the module loop.
+
+### 🛠 The Solution: Inline Object Spread (`...`)
+
+To resolve these conflicting rules, the logic was moved back inside the module's `params` block, using **Object Spread** to conditionally include the DDoS property.
+
+#### Implementation Detail
+
+By wrapping the logic in a spread operator `... (condition ? { key: value } : {})`, we ensure the code remains an **object literal** while still being dynamic.
+
+```bicep
+params: {
+  name: hub.name
+  location: hub.location
+  // ... other standard params
+
+  // Conditional inclusion via Object Spread
+  ...((
+    hub.?ddosProtectionPlanResourceId ?? (
+      hub.ddosProtectionPlanSettings.deployDdosProtectionPlan
+        ? resDdosProtectionPlan[i].outputs.resourceId
+        : hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
+            ? resDdosProtectionPlan[0].outputs.resourceId
+            : null
+    )
+  ) != null ? {
+    ddosProtectionPlanResourceId: (hub.?ddosProtectionPlanResourceId ?? (hub.ddosProtectionPlanSettings.deployDdosProtectionPlan ? resDdosProtectionPlan[i].outputs.resourceId : resDdosProtectionPlan[0].outputs.resourceId))
+  } : {})
+}
+
+```
+
+---
+
+###  Outcome
+
+* **Syntax Compliance:** This approach satisfies **BCP183** (it is an object literal) and **BCP182** (outputs are accessed within the module scope).
+* **Logic Perfection:** When DDoS is disabled, the expression evaluates to an empty object `{}`. When spread, it results in **no key being sent** to the Azure API.
+* **Deployment Status:** This eliminates the "Ghost" reference to the Sweden Central DDoS plan during the VNet creation/update phase.
