@@ -230,36 +230,62 @@ module resHubVirtualNetwork_withDdos 'br/public:avm/res/network/virtual-network:
 
 ---
 Date: February 21, 2026
-Status: RESOLVED 
-System: Azure Landing Zone (ALZ) - Connectivity Hub
+Status: RESOLVED ✅
+Environment: Azure Landing Zone (ALZ) - Connectivity Hub
+Subscription ID: 6f051987-3995-4c82-abb3-90ba101a0ab4
 
-Summary
-During the deployment of network hubs in swedencentral and northeurope, we encountered persistent NotFound errors related to a DDoS Protection Plan (ddos-alz-swedencentral). Even after manually deleting the resource and cleaning up Deployment Stacks, Azure continued to look for the resource during every new deployment attempt.
+1. Summary of Issue
 
-Actions Taken (Code-level)
-We performed extensive code refactoring to isolate the issue from the Bicep logic:
+The deployment of Hub Networking resources in swedencentral and northeurope failed consistently with a DeploymentFailed (Error Code: NotFound).
 
-Parameter Sanitization: Removed hardcoded name strings from the .bicepparam file to prevent Bicep from constructing resource IDs for resources that were not intended for creation.
+The error message specifically cited:
 
-Bicep Logic Hardening: Updated main.bicep using Safe Navigation and Null Coalescing (as discussed in the "above written" conversation). We modified the reference to:
+Resource /subscriptions/.../resourceGroups/rg-alz-conn-swedencentral/providers/Microsoft.Network/ddosProtectionPlans/ddos-alz-swedencentral not found.
+
+Despite deleting the deployment stack, clearing the target resource groups, and removing Bicep code references to the DDoS plan, the Azure Resource Manager (ARM) engine continued to search for a DDoS plan that no longer existed.
+
+2. Technical Investigation
+
+We determined that even when the Bicep parameter deployDdosProtectionPlan was set to false, the deployment was being interrupted by an external validation check.
+
+Code-Level Hardening
+
+To isolate the Bicep code from the failure, we implemented the following "Safe Navigation" logic in main.bicep:
+
+// Using null coalescing to ensure no invalid IDs are passed to the VNet resource
 ddosProtectionPlanResourceId: hub.?ddosProtectionPlanResourceId ?? null
-This was done to force Azure to ignore the field instead of attempting to validate an empty or auto-generated string.
 
-The Final Resolution
-Despite the code-level fixes, the error persisted. Further analysis of logs and policy structures led us to the actual root cause, which matches the known bug described here:
-Not having a DDoS Protection Standard plan is causing deployment issues · Issue #3540 · Azure/Azure-Landing-Zones
+We also sanitized the .bicepparam file by removing the name property under ddosProtectionPlanSettings, preventing the engine from constructing a resource ID string for a non-existent object.
 
-The Problem: An Azure Policy with a Modify effect was assigned at the Management Group level. This policy was configured to automatically "fix" VNets by injecting a specific DDoS resource ID. Since Policy evaluation happens during the deployment process, it was overwriting our Bicep "null" value with the broken ID, resulting in the NotFound error.
+3. Root Cause Identification
 
-The Fix:
+The breakthrough occurred when investigating Azure Policy Assignments. We discovered a policy assignment named:
 
-Identified the specific Policy Assignment in the Azure Portal.
+"Virtual networks should be protected by Azure DDoS Network Protection"
 
-Disabled Policy Enforcement (set to Disabled).
+This policy was set with a Modify effect. As documented in the community-reported issue Azure-Landing-Zones Issue #3540
+, this creates a specific conflict:
 
-Reran the GitHub Actions pipeline, which successfully completed without errors.
+The Bicep deployment sends a valid request for a VNet (with DDoS disabled).
 
-Key Takeaways
-Portal vs. Code: In an ALZ environment, Azure Policies often act as a "higher law" that can override perfectly written IaC. If a deployment fails due to a deleted resource, always check Policy Assignments.
+The Azure Policy engine intercepts the request during the "Pre-flight" or "In-flight" phase.
 
-Modify Effects: Policies with Modify or DeployIfNotExists effects can cause "silent" deployment failures by injecting invalid data into the ARM template during runtime.
+Because the policy effect is Modify, it attempts to inject the DDoS Plan ID stored in the policy's own parameters into the VNet resource.
+
+Since that specific DDoS Plan resource had been deleted from the subscription, the ARM engine throws a NotFound error, blocking the VNet creation.
+
+4. Final Resolution
+
+Manual Intervention: Navigated to the Policy Assignment at the Connectivity Management Group level in the Azure Portal.
+
+Disable Enforcement: Changed the Policy Enforcement toggle from Default to Disabled.
+
+Pipeline Execution: Reran the GitHub Actions deployment. Without the policy interference, the VNet creation succeeded using the clean Bicep configuration.
+
+5. Lessons Learned
+
+Policies Over Code: In an ALZ environment, platform governance (Azure Policy) acts as a "higher law" that can override IaC intent. A NotFound error for a resource you aren't deploying is a hallmark of a Modify or DeployIfNotExists policy.
+
+Pre-flight Validation: ARM validation includes evaluating policy compliance. If a policy points to a non-existent resource, it breaks the deployment contract.
+
+Accelerator Defaults: The ALZ Accelerator often deploys these policies by default; if a DDoS plan is removed after the initial setup, the corresponding policy assignment must be updated or disabled to prevent breaking future network changes.
