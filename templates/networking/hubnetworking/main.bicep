@@ -168,9 +168,8 @@ module resHubVirtualNetwork 'br/public:avm/res/network/virtual-network:0.7.2' = 
     scope: resourceGroup(hubResourceGroupNames[i])
     dependsOn: [
       modHubNetworkingResourceGroups[i]
-      ...(hub.ddosProtectionPlanSettings.deployDdosProtectionPlan
-        ? [resDdosProtectionPlan[i]]
-        : hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan ? [resDdosProtectionPlan[0]] : [])
+      // Vi tar bort fallback-beroendet till resDdosProtectionPlan[0] härifrån
+      ...(hub.ddosProtectionPlanSettings.deployDdosProtectionPlan ? [resDdosProtectionPlan[i]] : [])
     ]
     params: {
       name: hub.name
@@ -179,11 +178,11 @@ module resHubVirtualNetwork 'br/public:avm/res/network/virtual-network:0.7.2' = 
       dnsServers: hub.azureFirewallSettings.deployAzureFirewall && hub.privateDnsSettings.deployDnsPrivateResolver && hub.privateDnsSettings.deployPrivateDnsZones
         ? [firewallPrivateIpAddresses[i]]
         : (hub.?dnsServers ?? [])
-      ddosProtectionPlanResourceId: hub.?ddosProtectionPlanResourceId ?? (hub.ddosProtectionPlanSettings.deployDdosProtectionPlan
-        ? resDdosProtectionPlan[i].?outputs.resourceId
-        : hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
-            ? resDdosProtectionPlan[0].?outputs.resourceId
-            : null)
+      
+      // FIX: Vi klipper kopplingen till hubNetworks[0]. 
+      // Antingen har hubben ett explicit ID, eller så skapar den en egen plan, annars null.
+      ddosProtectionPlanResourceId: hub.?ddosProtectionPlanResourceId ?? (hub.ddosProtectionPlanSettings.deployDdosProtectionPlan ? resDdosProtectionPlan[i].outputs.resourceId : null)
+      
       vnetEncryption: hub.?vnetEncryption ?? false
       vnetEncryptionEnforcement: hub.?vnetEncryptionEnforcement ?? 'AllowUnencrypted'
       subnets: [
@@ -192,7 +191,7 @@ module resHubVirtualNetwork 'br/public:avm/res/network/virtual-network:0.7.2' = 
           addressPrefix: subnet.addressPrefix
           delegation: subnet.?delegation
           networkSecurityGroupResourceId: (subnet.?name == 'AzureBastionSubnet' && hub.bastionHostSettings.deployBastion)
-            ? resBastionNsg[i].?outputs.resourceId
+            ? resBastionNsg[i].outputs.resourceId
             : subnet.?networkSecurityGroupId
         }
       ]
