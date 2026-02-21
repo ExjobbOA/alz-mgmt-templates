@@ -170,7 +170,6 @@ module modPrivateDnsResolverResourceGroups 'br/public:avm/res/resources/resource
 var ddosAssociationEnabled = [
   for (hub, i) in hubNetworks: (hub.?ddosProtectionPlanResourceId != null) || hub.ddosProtectionPlanSettings.deployDdosProtectionPlan || hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
 ]
-]
 
 // 1) NO DDoS association (keep the ORIGINAL name so the rest of the file still works)
 module resHubVirtualNetwork 'br/public:avm/res/network/virtual-network:0.7.2' = [
@@ -230,9 +229,9 @@ module resHubVirtualNetwork_withDdos 'br/public:avm/res/network/virtual-network:
 
       ddosProtectionPlanResourceId: hub.?ddosProtectionPlanResourceId ?? (
         hub.ddosProtectionPlanSettings.deployDdosProtectionPlan
-          ? resDdosProtectionPlan[i].?outputs.resourceId
+          ? resDdosProtectionPlan[i].outputs.resourceId
           : (hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
-              ? resDdosProtectionPlan[0].?outputs.resourceId
+              ? resDdosProtectionPlan[0].outputs.resourceId
               : null)
       )
 
