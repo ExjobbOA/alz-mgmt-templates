@@ -171,11 +171,7 @@ module modPrivateDnsResolverResourceGroups 'br/public:avm/res/resources/resource
 // - this hub will deploy a plan, OR
 // - the primary hub (index 0) will deploy a plan (shared fallback pattern)
 var ddosAssociationEnabled = [
-  for (hub, i) in hubNetworks: parEnableDdos && (
-    (hub.?ddosProtectionPlanResourceId != null) ||
-    hub.ddosProtectionPlanSettings.deployDdosProtectionPlan ||
-    hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
-  )
+  for (hub, i) in hubNetworks: parEnableDdos && ((hub.?ddosProtectionPlanResourceId != null) || hub.ddosProtectionPlanSettings.deployDdosProtectionPlan || hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan)
 ]
 
 // 1) NO DDoS association (keep the ORIGINAL name so the rest of the file still works)
