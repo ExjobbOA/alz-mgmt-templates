@@ -227,13 +227,11 @@ module resHubVirtualNetwork_withDdos 'br/public:avm/res/network/virtual-network:
         ? [firewallPrivateIpAddresses[i]]
         : (hub.?dnsServers ?? [])
 
-      ddosProtectionPlanResourceId: hub.?ddosProtectionPlanResourceId ?? (
-        hub.ddosProtectionPlanSettings.deployDdosProtectionPlan
-          ? resDdosProtectionPlan[i].outputs.resourceId
-          : (hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
-              ? resDdosProtectionPlan[0].outputs.resourceId
-              : null)
-      )
+      ddosProtectionPlanResourceId: hub.?ddosProtectionPlanResourceId ?? (hub.ddosProtectionPlanSettings.deployDdosProtectionPlan
+        ? resDdosProtectionPlan[i].outputs.resourceId
+        : (hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
+            ? resDdosProtectionPlan[0].outputs.resourceId
+            : null))
 
       vnetEncryption: hub.?vnetEncryption ?? false
       vnetEncryptionEnforcement: hub.?vnetEncryptionEnforcement ?? 'AllowUnencrypted'
