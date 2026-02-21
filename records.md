@@ -123,8 +123,6 @@ The Idempotency Trap: The pipeline's resilience logic is "too effective." It tre
 
 Locked Sequence: Because the script manages the entire lifecycle (Delete -> Create -> Retry), it creates a closed loop that cannot be interrupted until the maximum retry count (10) is reached or the GitHub Runner times out.
 
-Här är loggposten för den slutgiltiga Bicep-fixen, där vi använder "Object Spread" för att navigera runt språkets begränsningar.
-
 ---
 
 
