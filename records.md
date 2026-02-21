@@ -43,3 +43,70 @@
 * **Error Message: The system reports NotFound and points specifically to a resource named ddos-alz-swedencentral.
 * **What is happening: Even though I have explicitly turned off DDoS in my settings (deployDdosProtectionPlan: false), Azure is still trying to verify if that plan exists. The pipeline completely stops when it tries to build the Virtual Network.
 * **The weird part: It doesn't matter if I clear my "deployment stacks" or update the config files—Azure seems to "remember" or force a search for this plan anyway. It creates a total bottleneck because the build is waiting for a resource I have specifically said I don't want to use.
+
+
+## Feb 21: Refactoring Bicep Logic to Solve "Ghost" Parameters
+
+###  The Problem
+
+The deployment of the Networking Hub stack (`alz-networking-hub`) failed repeatedly because the Azure Resource Manager (ARM) engine attempted to validate a **DDoS Protection Plan** reference, even when the feature was disabled.
+
+Initial attempts to fix this within the module block failed due to strict Bicep syntax rules:
+
+1. **Scope Restriction:** Variables cannot be declared inside a `module` object within a `for`-loop.
+2. **BCP183 Error:** The `params:` property in a module requires a direct **object literal**. It does not allow function calls like `union()` directly within the assignment.
+
+
+### 🛠 The Solution: Three-Step Array Transformation
+
+To bypass these language restrictions, the parameter logic was refactored into standalone variables outside the module declaration.
+
+#### 1. Pre-calculating Effective IDs
+
+Created an `effectiveDdosIds` array to determine if a hub should use a local plan, a primary plan, or no plan at all (`null`).
+
+```bicep
+var effectiveDdosIds = [
+  for (hub, i) in hubNetworks: hub.?ddosProtectionPlanResourceId ?? (
+    hub.ddosProtectionPlanSettings.deployDdosProtectionPlan
+      ? resDdosProtectionPlan[i].outputs.resourceId
+      : (hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
+          ? resDdosProtectionPlan[0].outputs.resourceId
+          : null)
+  )
+]
+
+```
+
+#### 2. Defining Base Parameters
+
+A base object `hubVnetParamsBase` was created to hold all mandatory networking configurations (Address prefixes, subnets, encryption, etc.).
+
+#### 3. Conditional Merging with `union()`
+
+A final variable `hubVnetParams` was created. By using `union()` here (which is allowed in variable declarations), the `ddosProtectionPlanResourceId` key is **completely omitted** from the object if the value is null.
+
+```bicep
+var hubVnetParams = [
+  for (hub, i) in hubNetworks: union(
+    hubVnetParamsBase[i],
+    effectiveDdosIds[i] != null ? { ddosProtectionPlanResourceId: effectiveDdosIds[i] } : {}
+  )
+]
+
+```
+
+###  Outcome & Implementation
+
+The `resHubVirtualNetwork` module now references the pre-calculated objects:
+
+```bicep
+module resHubVirtualNetwork 'br/public:avm/res/network/virtual-network:0.7.2' = [
+  for (hub, i) in hubNetworks: {
+    name: 'vnet-${hub.name}-${uniqueString(parHubNetworkingResourceGroupNamePrefix, hub.location)}'
+    params: hubVnetParams[i] // Reference to the clean object
+  }
+]
+
+
+**Result:** Since the DDoS key is now physically absent from the JSON payload when disabled, Azure no longer triggers the `NotFound` validation for the Sweden Central plan. This successfully resolved the cross-region dependency bug.
