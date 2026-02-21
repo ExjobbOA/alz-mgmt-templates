@@ -59,9 +59,6 @@ param parTags object = {}
 @description('Optional. Enable or disable telemetry.')
 param parEnableTelemetry bool = true
 
-@description('Controls whether VNets should associate a DDoS Protection Plan.')
-param parEnableDdos bool = false
-
 //========================================
 // Variables
 //========================================
@@ -165,18 +162,8 @@ module modPrivateDnsResolverResourceGroups 'br/public:avm/res/resources/resource
 //=====================
 // Virtual Networks
 //=====================
-
-// DDoS association is considered enabled if:
-// - explicit ddosProtectionPlanResourceId is provided, OR
-// - this hub will deploy a plan, OR
-// - the primary hub (index 0) will deploy a plan (shared fallback pattern)
-var ddosAssociationEnabled = [
-  for (hub, i) in hubNetworks: parEnableDdos && ((hub.?ddosProtectionPlanResourceId != null) || hub.ddosProtectionPlanSettings.deployDdosProtectionPlan || hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan)
-]
-
-// 1) NO DDoS association (keep the ORIGINAL name so the rest of the file still works)
 module resHubVirtualNetwork 'br/public:avm/res/network/virtual-network:0.7.2' = [
-  for (hub, i) in hubNetworks: if (!ddosAssociationEnabled[i]) {
+  for (hub, i) in hubNetworks: {
     name: 'vnet-${hub.name}-${uniqueString(parHubNetworkingResourceGroupNamePrefix, hub.location)}'
     scope: resourceGroup(hubResourceGroupNames[i])
     dependsOn: [
@@ -192,50 +179,11 @@ module resHubVirtualNetwork 'br/public:avm/res/network/virtual-network:0.7.2' = 
       dnsServers: hub.azureFirewallSettings.deployAzureFirewall && hub.privateDnsSettings.deployDnsPrivateResolver && hub.privateDnsSettings.deployPrivateDnsZones
         ? [firewallPrivateIpAddresses[i]]
         : (hub.?dnsServers ?? [])
-      vnetEncryption: hub.?vnetEncryption ?? false
-      vnetEncryptionEnforcement: hub.?vnetEncryptionEnforcement ?? 'AllowUnencrypted'
-      subnets: [
-        for subnet in hub.subnets: {
-          name: subnet.name
-          addressPrefix: subnet.addressPrefix
-          delegation: subnet.?delegation
-          networkSecurityGroupResourceId: (subnet.?name == 'AzureBastionSubnet' && hub.bastionHostSettings.deployBastion)
-            ? resBastionNsg[i].?outputs.resourceId
-            : subnet.?networkSecurityGroupId
-        }
-      ]
-      lock: parGlobalResourceLock ?? hub.?lock
-      tags: hub.?tags ?? parTags
-      enableTelemetry: parEnableTelemetry
-    }
-  }
-]
-
-// 2) WITH DDoS association (only runs when enabled)
-module resHubVirtualNetwork_withDdos 'br/public:avm/res/network/virtual-network:0.7.2' = [
-  for (hub, i) in hubNetworks: if (ddosAssociationEnabled[i]) {
-    name: 'vnet-${hub.name}-${uniqueString(parHubNetworkingResourceGroupNamePrefix, hub.location)}-ddos'
-    scope: resourceGroup(hubResourceGroupNames[i])
-    dependsOn: [
-      modHubNetworkingResourceGroups[i]
-      ...(hub.ddosProtectionPlanSettings.deployDdosProtectionPlan
-        ? [resDdosProtectionPlan[i]]
-        : hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan ? [resDdosProtectionPlan[0]] : [])
-    ]
-    params: {
-      name: hub.name
-      location: hub.location
-      addressPrefixes: hub.addressPrefixes
-      dnsServers: hub.azureFirewallSettings.deployAzureFirewall && hub.privateDnsSettings.deployDnsPrivateResolver && hub.privateDnsSettings.deployPrivateDnsZones
-        ? [firewallPrivateIpAddresses[i]]
-        : (hub.?dnsServers ?? [])
-
       ddosProtectionPlanResourceId: hub.?ddosProtectionPlanResourceId ?? (hub.ddosProtectionPlanSettings.deployDdosProtectionPlan
-        ? resDdosProtectionPlan[i].outputs.resourceId
-        : (hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
-            ? resDdosProtectionPlan[0].outputs.resourceId
-            : null))
-
+        ? resDdosProtectionPlan[i].?outputs.resourceId
+        : hubNetworks[0].ddosProtectionPlanSettings.deployDdosProtectionPlan
+            ? resDdosProtectionPlan[0].?outputs.resourceId
+            : null)
       vnetEncryption: hub.?vnetEncryption ?? false
       vnetEncryptionEnforcement: hub.?vnetEncryptionEnforcement ?? 'AllowUnencrypted'
       subnets: [
