@@ -229,6 +229,17 @@ module resHubVirtualNetwork_withDdos 'br/public:avm/res/network/virtual-network:
 * **Robustness:** This bypasses the **BCP183** and **BCP182** errors by using standard Bicep patterns that are supported across all versions.
 
 ---
+
+### Feb 25: Centralized Parameters Architecture
+
+* **Problem**: Configuration was scattered across 18 `.bicepparam` files with heavy duplication — the subscription ID appeared 100+ times, `parLocations` was copy-pasted into every file, and resource IDs were hardcoded per scope. Naming was also inconsistent (`uami-alz-` vs `mi-alz-`, `dcr-alz-changetracking-` vs `dcr-ct-alz-`).
+* **Design Decision**: Established `config/platform.json` as the single source of truth for all tenant-specific values. The `bicep-variables` action already exports every key in `platform.json` as environment variables before any deployment step, and `readEnvironmentVariable()` is supported in `.bicepparam` files — making this a zero-overhead solution.
+* **Pattern**: Each `.bicepparam` file now opens with a `var` block that reads scalar values from env vars and derives compound resource IDs via Bicep string interpolation. No generation scripts, no template files — just direct references.
+* **Goal**: A tenant operator configures a deployment by editing only `platform.json`. The `.bicepparam` files are structural wiring and do not need to be touched for standard deployments.
+* **Naming conventions resolved**: `law-alz-{location}`, `uami-alz-{location}`, `dcr-alz-{type}-{location}`, `rg-alz-{purpose}-{location}` applied consistently across all scopes.
+
+---
+
 # Log Entry: Connectivity Deployment Failure — DDoS Plan Reference (ALZ)
 
 **Date:** February 21, 2026
