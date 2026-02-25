@@ -85,7 +85,7 @@ resource raPlanReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: managementGroup()
   properties: {
     principalId: identity.outputs.planPrincipalId
-    roleDefinitionId: tenantResourceId('Microsoft.Authorization/roleDefinitions', roleOwnerId)
+    roleDefinitionId: tenantResourceId('Microsoft.Authorization/roleDefinitions', roleReaderId)
     principalType: 'ServicePrincipal'
   }
 }
