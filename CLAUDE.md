@@ -60,8 +60,7 @@ alz-mgmt-templates/
 │   │   │   │   └── sandbox/
 │   │   │   ├── mgmt-groups/                  # Bicep templates per MG scope
 │   │   │   │   ├── int-root/
-│   │   │   │   │   ├── main.bicep            # THE core module — deploys intermediate root + all policies
-│   │   │   │   │   └── precreate-alz/main.bicep
+│   │   │   │   │   └── main.bicep            # THE core module — deploys intermediate root + all policies
 │   │   │   │   ├── landingzones/
 │   │   │   │   │   ├── main.bicep
 │   │   │   │   │   ├── main-rbac.bicep
