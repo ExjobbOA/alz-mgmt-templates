@@ -230,16 +230,6 @@ module resHubVirtualNetwork_withDdos 'br/public:avm/res/network/virtual-network:
 
 ---
 
-### Feb 25: Centralized Parameters Architecture
-
-* **Problem**: Configuration was scattered across 18 `.bicepparam` files with heavy duplication — the subscription ID appeared 100+ times, `parLocations` was copy-pasted into every file, and resource IDs were hardcoded per scope. Naming was also inconsistent (`uami-alz-` vs `mi-alz-`, `dcr-alz-changetracking-` vs `dcr-ct-alz-`).
-* **Design Decision**: Established `config/platform.json` as the single source of truth for all tenant-specific values. The `bicep-variables` action already exports every key in `platform.json` as environment variables before any deployment step, and `readEnvironmentVariable()` is supported in `.bicepparam` files — making this a zero-overhead solution.
-* **Pattern**: Each `.bicepparam` file now opens with a `var` block that reads scalar values from env vars and derives compound resource IDs via Bicep string interpolation. No generation scripts, no template files — just direct references.
-* **Goal**: A tenant operator configures a deployment by editing only `platform.json`. The `.bicepparam` files are structural wiring and do not need to be touched for standard deployments.
-* **Naming conventions resolved**: `law-alz-{location}`, `uami-alz-{location}`, `dcr-alz-{type}-{location}`, `rg-alz-{purpose}-{location}` applied consistently across all scopes.
-
----
-
 # Log Entry: Connectivity Deployment Failure — DDoS Plan Reference (ALZ)
 
 **Date:** February 21, 2026
@@ -313,4 +303,22 @@ Result: VNet creation completed successfully and the overall connectivity deploy
 * If the policy is kept, its parameters must be updated to point to an existing DDoS plan, or changed so it does not try to add one.
 * Leaving the policy enabled while it references a deleted DDoS plan will block future VNet deployments.
 * Keeping the null-safe Bicep logic reduces the chance of accidentally passing invalid values in future changes.
+---
+### Feb 25: Centralized Parameters — Design & Implementation Plan
 
+* **Problem**: Configuration is scattered across 18 `.bicepparam` files with heavy
+  duplication — the subscription ID appears 100+ times, `parLocations` is copy-pasted
+  into every file, and resource IDs are hardcoded per scope. Naming is also inconsistent
+  (`uami-alz-` vs `mi-alz-`, `dcr-alz-changetracking-` vs `dcr-ct-alz-`).
+* **Approach**: Use `readEnvironmentVariable()` in `.bicepparam` files to read directly
+  from `config/platform.json`, which is already exported as environment variables by the
+  `bicep-variables` action before any deployment step. No generation scripts or template
+  files required.
+* **Pattern**: Each `.bicepparam` file will open with a `var` block that reads scalar
+  values from env vars and derives compound resource IDs via Bicep string interpolation.
+* **Goal**: `platform.json` becomes the only file a tenant operator needs to touch for
+  a standard deployment. `.bicepparam` files are structural wiring only.
+* **Naming conventions to enforce**: `law-alz-{location}`, `uami-alz-{location}`,
+  `dcr-alz-{type}-{location}`, `rg-alz-{purpose}-{location}` applied consistently
+  across all scopes.
+---
