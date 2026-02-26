@@ -350,4 +350,68 @@ Result: VNet creation completed successfully and the overall connectivity deploy
 * If the policy is kept, its parameters must be updated to point to an existing DDoS plan, or changed so it does not try to add one.
 * Leaving the policy enabled while it references a deleted DDoS plan will block future VNet deployments.
 * Keeping the null-safe Bicep logic reduces the chance of accidentally passing invalid values in future changes.
+---
+### Feb 25: Centralized Parameters — Design & Implementation Plan
 
+* **Problem**: Configuration is scattered across 18 `.bicepparam` files with heavy
+  duplication — the subscription ID appears 100+ times, `parLocations` is copy-pasted
+  into every file, and resource IDs are hardcoded per scope. Naming is also inconsistent
+  (`uami-alz-` vs `mi-alz-`, `dcr-alz-changetracking-` vs `dcr-ct-alz-`).
+* **Approach**: Use `readEnvironmentVariable()` in `.bicepparam` files to read directly
+  from `config/platform.json`, which is already exported as environment variables by the
+  `bicep-variables` action before any deployment step. No generation scripts or template
+  files required.
+* **Pattern**: Each `.bicepparam` file will open with a `var` block that reads scalar
+  values from env vars and derives compound resource IDs via Bicep string interpolation.
+* **Goal**: `platform.json` becomes the only file a tenant operator needs to touch for
+  a standard deployment. `.bicepparam` files are structural wiring only.
+* **Naming conventions to enforce**: `law-alz-{location}`, `uami-alz-{location}`,
+  `dcr-alz-{type}-{location}`, `rg-alz-{purpose}-{location}` applied consistently
+  across all scopes.
+---
+
+## Feb 25: Centralized Parameters Refactoring
+
+### The Problem
+
+All 18 `.bicepparam` files in `alz-mgmt` contained heavily duplicated values. The subscription ID appeared 100+ times across the codebase, `parLocations` was copy-pasted into every file, and resource name strings like `law-alz-swedencentral` were hardcoded at every scope. Naming conventions were also inconsistent (`mi-alz-` vs `uami-alz-`, `dcr-ct-alz-` vs `dcr-alz-changetracking-`, etc.). Any change to the primary region or subscription ID required editing every file by hand.
+
+### The Solution: platform.json as Single Source of Truth
+
+The `bicep-variables` CI action already exported every key in `platform.json` as environment variables before deployment steps. Since `readEnvironmentVariable()` in `.bicepparam` files resolves at Bicep compile time, `platform.json` could serve as the single source of truth without needing a generation script or template files.
+
+All 18 `.bicepparam` files were refactored to:
+1. Declare a `var` block reading from `readEnvironmentVariable()` calls
+2. Derive all compound resource identifiers (workspace IDs, DCR IDs, etc.) from those vars
+3. Reference only vars in `param` assignments — zero hardcoded subscription IDs or location strings
+
+New fields added to `platform.json`: `ENABLE_TELEMETRY`, `SECURITY_CONTACT_EMAIL`, and `LOCATION_SECONDARY` set to `northeurope`.
+
+### Naming Convention Normalization
+
+Standardized all resource names across files:
+
+| Old name | New name |
+|----------|----------|
+| `mi-alz-{location}` | `uami-alz-{location}` |
+| `dcr-ct-alz-{location}` | `dcr-alz-changetracking-{location}` |
+| `dcr-vmi-alz-{location}` | `dcr-alz-vminsights-{location}` |
+| `dcr-mdfcsql-alz-{location}` | `dcr-alz-mdfcsql-{location}` |
+
+### VS Code False Positives
+
+The VS Code Bicep extension reports errors on `var` blocks and `readEnvironmentVariable()` in `.bicepparam` files. These are false positives — the extension language server can't resolve the `using` target path (which requires the templates repo to be checked out at `./platform/`). The Bicep CLI (0.40.2+) compiles these files correctly; verified with `az bicep build-params` against all files with env vars set.
+
+### Key Pattern: DNS Zone Prefix Variable
+
+The `landingzones-corp` policy overrides previously repeated a 100-character resource ID path 45 times (once per private DNS zone). Solved by computing a `dnsPrefixId` var:
+
+```bicep
+var dnsPrefixId = '/subscriptions/${subIdConn}/resourceGroups/${rgDns}/providers/Microsoft.Network/privateDnsZones/'
+// Each zone then becomes:
+azureKeyVaultPrivateDnsZoneId: { value: '${dnsPrefixId}privatelink.vaultcore.azure.net' }
+```
+
+### Outcome
+
+`platform.json` is now the only file a tenant operator needs to edit. Changing the primary region or subscription ID propagates automatically to all deployment scopes at compile time.

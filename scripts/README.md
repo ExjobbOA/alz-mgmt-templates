@@ -1,12 +1,5 @@
 # scripts/
 
-| Script | Purpose |
-|--------|---------|
-| [onboard.ps1](#onboardps1--tenant-onboarding) | Bootstrap a new tenant — one command |
-| [cleanup.ps1](#cleanupps1--tenant-cleanup) | Tear down a previous deployment so you can re-onboard |
-
----
-
 ## onboard.ps1 — Tenant Onboarding
 
 Bootstraps a new Azure Landing Zone tenant end-to-end in a single command.
