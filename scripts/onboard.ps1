@@ -258,13 +258,22 @@ function Invoke-Bootstrap {
     Write-Info "  Deploying to management group: $Script:ManagementGroupId"
     Write-Info "  (This may take 2–5 minutes)"
 
-    $result = az deployment mg create `
-        --name            'alz-bootstrap' `
-        --management-group-id $Script:ManagementGroupId `
-        --location        $Script:Location `
-        --template-file   $templateFile `
-        --parameters      $paramsJson `
-        --output json | ConvertFrom-Json
+    # Write params to a temp file to avoid PowerShell quote-stripping when passing
+    # JSON strings to native commands on Windows.
+    $tempParamsFile = [System.IO.Path]::ChangeExtension([System.IO.Path]::GetTempFileName(), '.json')
+    $paramsJson | Set-Content -Path $tempParamsFile -Encoding UTF8
+
+    try {
+        $result = az deployment mg create `
+            --name            'alz-bootstrap' `
+            --management-group-id $Script:ManagementGroupId `
+            --location        $Script:Location `
+            --template-file   $templateFile `
+            --parameters      "@$tempParamsFile" `
+            --output json | ConvertFrom-Json
+    } finally {
+        Remove-Item $tempParamsFile -ErrorAction SilentlyContinue
+    }
 
     if ($LASTEXITCODE -ne 0) { Write-Fail 'Bootstrap deployment failed.'; exit 1 }
 
