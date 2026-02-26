@@ -3,57 +3,57 @@ name: Run Bicep Deploy with Deployment Stack
 description: Run Bicep Deployment using Azure Deployment Stacks
 inputs:
   name:
-    description: 'Name'
+    description: "Name"
     required: true
   displayName:
-    description: 'Display Name'
+    description: "Display Name"
     required: true
   templateFilePath:
-    description: 'The path to the Bicep file'
+    description: "The path to the Bicep file"
     required: true
   templateParametersFilePath:
-    description: 'The path to the parameters file'
+    description: "The path to the parameters file"
     required: true
   subscriptionId:
-    description: 'The subscription id'
+    description: "The subscription id"
     required: true
   resourceGroupName:
-    description: 'The resource group name'
+    description: "The resource group name"
     required: true
   location:
-    description: 'The location'
+    description: "The location"
     required: true
   deploymentType:
-    description: 'The deployment type (managementGroup, subscription, resourceGroup)'
+    description: "The deployment type (managementGroup, subscription, resourceGroup)"
     required: true
   firstRunWhatIf:
-    description: 'Run a what-if on the first run'
+    description: "Run a what-if on the first run"
     required: false
-    default: 'false'
+    default: "false"
   whatIfEnabled:
-    description: 'Enable what-if mode (validation only, no deployment)'
+    description: "Enable what-if mode (validation only, no deployment)"
     required: false
-    default: 'false'
+    default: "false"
   managementGroupId:
-    description: 'Optional override for Management Group ID (scope) when deploymentType is managementGroup'
+    description: "Optional override for Management Group ID (scope) when deploymentType is managementGroup"
     required: false
-    default: ''
+    default: ""
   targetManagementGroupId:
-    description: 'The management group that the template creates/targets (used to decide if What-If should run)'
+    description: "The management group that the template creates/targets (used to decide if What-If should run)"
     required: false
-    default: ''
+    default: ""
   skipWhatIfIfTargetMgMissing:
-    description: 'If true, skip What-If when targetManagementGroupId does not exist yet'
+    description: "If true, skip What-If when targetManagementGroupId does not exist yet"
     required: false
-    default: 'false'
+    default: "false"
   denySettingsMode:
-    description: 'Deployment stack deny settings mode (None, DenyDelete, DenyWriteAndDelete)'
+    description: "Deployment stack deny settings mode (None, DenyDelete, DenyWriteAndDelete)"
     required: false
-    default: 'None'
+    default: "None"
   actionOnUnmanage:
-    description: 'Deployment stack action on unmanage (DeleteAll, DetachAll, etc.)'
+    description: "Deployment stack action on unmanage (DeleteAll, DetachAll, etc.)"
     required: false
-    default: 'DeleteAll'
+    default: "DeleteAll"
   stackNamePrefix:
     description: "Prefix prepended to the stack/deployment name (e.g. prod-)."
     required: false
@@ -62,25 +62,25 @@ inputs:
     description: "If set, use this exact stack/deployment name (takes precedence)."
     required: false
     default: ""
-    
+
 runs:
   using: "composite"
   steps:
     - name: Run Bicep Deploy with Deployment Stack
       uses: azure/powershell@v2
       with:
-        azPSVersion: 'latest'
+        azPSVersion: "latest"
         inlineScript: |
           $deploymentType = $env:DEPLOYMENT_TYPE
           $whatIfEnabled = $env:WHAT_IF_ENABLED -eq 'true'
           $skipIfTargetMissing = $env:SKIP_WHATIF_IF_TARGET_MG_MISSING -eq 'true'
           $targetMgId = $env:TARGET_MANAGEMENT_GROUP_ID
-          
-          # Build intermediate root MG id (the scope your pipeline uses)
+
+          # Build intermediate root MG id 
           $defaultMgId = $env:MANAGEMENT_GROUP_ID_PREFIX + $env:INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID + $env:MANAGEMENT_GROUP_ID_POSTFIX
           $mgIdOverride = $env:MANAGEMENT_GROUP_ID_OVERRIDE
           $intRootMgId = if (-not [string]::IsNullOrWhiteSpace($mgIdOverride)) { $mgIdOverride } else { $defaultMgId }
-          
+
           function Get-MgNamesRecursive {
             param([object]$Node)
             $names = @()
@@ -92,7 +92,7 @@ runs:
             }
             return $names
           }
-          
+
           if ($whatIfEnabled -and $deploymentType -eq 'managementGroup' -and $skipIfTargetMissing) {
             if ([string]::IsNullOrWhiteSpace($targetMgId)) {
               Write-Warning "skipWhatIfIfTargetMgMissing=true but TARGET_MANAGEMENT_GROUP_ID is empty. Will NOT auto-skip What-If."
@@ -110,13 +110,13 @@ runs:
               }
           catch {
             $msg = $_.Exception.Message
-          
+
             $isNotFound = ($msg -match '(?i)not\s*found|could\s*not\s*be\s*found|ResourceNotFound|404')
             $isAuthOrScope = ($msg -match '(?i)does not have authorization|AuthorizationFailed|Forbidden|403|scope is invalid')
-          
+
             # firstDeployment is exported by bicep-first-deployment-check into GITHUB_ENV
             $firstDeploymentBool = ($env:firstDeployment -eq 'True' -or $env:firstDeployment -eq 'true')
-          
+
             if ($isNotFound) {
               Write-Warning "Intermediate root MG '$intRootMgId' not found yet. Cold-start behavior: skipping What-If for this step."
               $targetMgExists = $false
@@ -176,12 +176,12 @@ runs:
             if ([string]::IsNullOrWhiteSpace($prefix)) {
               $prefix = $deploymentPrefix
             }
-          
+
             # Normalize prefix so it ends with '-' if not empty
             if (-not [string]::IsNullOrWhiteSpace($prefix) -and -not $prefix.EndsWith("-")) {
               $prefix = "$prefix-"
             }
-          
+
             $deploymentName = "$prefix$deploymentNameBase"
           }
 
@@ -457,4 +457,3 @@ runs:
         ACTION_ON_UNMANAGE: ${{ inputs.actionOnUnmanage }}
         STACK_NAME_PREFIX: ${{ inputs.stackNamePrefix }}
         STACK_NAME_OVERRIDE: ${{ inputs.stackNameOverride }}
-
