@@ -31,8 +31,8 @@ var workflowCdPath = '.github/workflows/cd-template.yaml'
 var workflowRefCi = '${githubOrg}/${templatesRepo}/${workflowCiPath}@${workflowRefBranch}'
 var workflowRefCd = '${githubOrg}/${templatesRepo}/${workflowCdPath}@${workflowRefBranch}'
 
-var subjectCiPlan  = 'repo:${githubOrg}/${moduleRepo}:environment:${envPlan}:job_workflow_ref:${workflowRefCi}'
-var subjectCdPlan  = 'repo:${githubOrg}/${moduleRepo}:environment:${envPlan}:job_workflow_ref:${workflowRefCd}'
+var subjectCiPlan = 'repo:${githubOrg}/${moduleRepo}:environment:${envPlan}:job_workflow_ref:${workflowRefCi}'
+var subjectCdPlan = 'repo:${githubOrg}/${moduleRepo}:environment:${envPlan}:job_workflow_ref:${workflowRefCd}'
 var subjectCdApply = 'repo:${githubOrg}/${moduleRepo}:environment:${envApply}:job_workflow_ref:${workflowRefCd}'
 
 resource ficCiPlan 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = {
@@ -40,7 +40,7 @@ resource ficCiPlan 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedId
   parent: uamiPlan
   properties: {
     issuer: issuer
-    audiences: [ audience ]
+    audiences: [audience]
     subject: subjectCiPlan
   }
 }
@@ -50,7 +50,7 @@ resource ficCdPlan 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedId
   parent: uamiPlan
   properties: {
     issuer: issuer
-    audiences: [ audience ]
+    audiences: [audience]
     subject: subjectCdPlan
   }
   dependsOn: [
@@ -63,9 +63,12 @@ resource ficCdApply 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedI
   parent: uamiApply
   properties: {
     issuer: issuer
-    audiences: [ audience ]
+    audiences: [audience]
     subject: subjectCdApply
   }
+  dependsOn: [
+    ficCdPlan
+  ]
 }
 
 output planClientId string = uamiPlan.properties.clientId
