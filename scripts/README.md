@@ -4,6 +4,12 @@
 
 Bootstraps a new Azure Landing Zone tenant end-to-end in a single command.
 
+> **Scope:** The script handles the Azure identity setup and GitHub wiring.
+> It assumes the config repo (`alz-mgmt`) already exists on GitHub and is cloned locally.
+> See [Before you run](#before-you-run) below.
+>
+> ⚠️ *Automatic repo creation (from template) is planned but not yet implemented.*
+
 ### What it does
 
 | Step | Action |
@@ -18,6 +24,24 @@ Bootstraps a new Azure Landing Zone tenant end-to-end in a single command.
 | 8 | Updates `config/bootstrap/plumbing.bicepparam` in the config repo |
 
 After the script finishes, commit the updated config files, push, and run the CD workflow.
+
+### Before you run
+
+The script expects the tenant config repo to **already exist** locally and on GitHub.
+If you're onboarding from scratch:
+
+```powershell
+# 1. Create a new config repo from the alz-mgmt template
+gh repo create <org>/<new-repo-name> --template ExjobbOA/alz-mgmt --private
+
+# 2. Clone it next to the templates repo
+gh repo clone <org>/<new-repo-name> ../alz-mgmt   # or your chosen path
+
+# 3. Run the onboarding script
+./scripts/onboard.ps1 -ConfigRepoPath '../alz-mgmt' ...
+```
+
+> Future: `-CreateRepo` flag will automate steps 1–2.
 
 ### Prerequisites
 
@@ -111,3 +135,61 @@ git push
 # Open a PR → CI will validate all What-If deployments
 # Once CI passes, run the CD workflow with governance-int-root=true
 ```
+
+---
+
+## cleanup.ps1 — Tenant Cleanup
+
+Tears down all resources created by a previous bootstrap + governance deployment
+so the tenant can be onboarded fresh with `onboard.ps1`.
+
+### What it deletes
+
+| Step | What |
+|------|------|
+| 1 | Governance **Deployment Stacks** at the intermediate root MG scope, in reverse dependency order. Each stack was created with `ActionOnUnmanage=DeleteAll`, so its managed resources (policy assignments, role assignments, child MGs) are deleted with it. |
+| 2 | Any **management groups** still present under the intermediate root (bottom-up), then the intermediate root MG itself. |
+| 3 | The **identity resource group** (contains plan + apply UAMIs and their federated identity credentials). |
+| 4 | **Role assignments** for the UAMIs at the tenant root management group. |
+| 5 | The custom **'Landing Zone Reader (WhatIf/Validate)'** role definition. |
+
+It does **not** delete: the tenant root MG, any subscriptions, or GitHub environments.
+
+### Usage
+
+```powershell
+# Preview — no changes
+./scripts/cleanup.ps1 -DryRun
+
+# Auto-loads values from ../alz-mgmt/config/platform.json
+./scripts/cleanup.ps1
+
+# Explicit values (if config repo is elsewhere)
+./scripts/cleanup.ps1 `
+    -IntRootMgId             'alz' `
+    -TenantRootMgId          'yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy' `
+    -BootstrapSubscriptionId 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' `
+    -Location                'swedencentral'
+```
+
+The script asks you to type `YES` before making any changes.
+
+### Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `-ConfigRepoPath` | `../alz-mgmt` | Config repo path — used to load defaults from `platform.json` |
+| `-IntRootMgId` | `platform.json` | Intermediate root MG name (e.g. `alz`) |
+| `-TenantRootMgId` | `platform.json` | Tenant root MG GUID |
+| `-BootstrapSubscriptionId` | `platform.json` | Subscription where identity RG lives |
+| `-Location` | `platform.json` | Azure region — used to derive identity RG / UAMI names |
+| `-IdentityRgName` | derived | Override identity RG name (default: `rg-alz-mgmt-identity-<location>-1`) |
+| `-DryRun` | — | Print every action; make no changes |
+
+### Notes on stack deletion
+
+- Stacks are deleted in reverse dependency order: RBAC → child MGs → intermediate MGs → int-root.
+- After each stack delete with `DeleteAll`, Azure removes all resources the stack owned.
+- If a stack was only partially deployed, the script silently skips missing stacks.
+- If the identity RG was already gone when cleanup runs, the script falls back to listing
+  orphaned (Unknown) role assignments at the tenant root MG so you can remove them manually.
