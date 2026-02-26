@@ -1,5 +1,58 @@
 # scripts/
 
+| Script | Purpose |
+|--------|---------|
+| [onboard.ps1](#onboardps1--tenant-onboarding) | Bootstrap a new tenant — one command |
+| [cleanup.ps1](#cleanupps1--tenant-cleanup) | Tear down a previous deployment so you can re-onboard |
+
+---
+
+## Tool requirements
+
+The two scripts have different dependencies. Install everything once, then use as needed.
+
+```powershell
+# Runtime
+winget install Microsoft.PowerShell   # PS 7+ — required by both scripts
+
+# Azure CLI  (used by onboard.ps1 for the bootstrap ARM deployment)
+winget install Microsoft.AzureCLI
+
+# Az PowerShell module  (used by cleanup.ps1 for Deployment Stack cmdlets)
+# Run in a pwsh window after installing PS7:
+Install-Module -Name Az -Force -AllowClobber -Scope CurrentUser
+
+# GitHub CLI  (used by onboard.ps1 only — not needed for cleanup)
+winget install GitHub.cli
+```
+
+> **Reopen your terminal after winget installs** so the PATH update takes effect.
+
+### Authentication — two separate sessions
+
+`az` CLI and the `Az` PowerShell module maintain their own login state independently.
+
+| Script | Auth required |
+|--------|--------------|
+| `onboard.ps1` | `az login --tenant <id>` **+** `gh auth login` |
+| `cleanup.ps1` | `Connect-AzAccount -Tenant <id>` |
+
+```powershell
+# For onboard.ps1
+az login --tenant <tenant-guid>
+az account set --subscription <subscription-id>
+gh auth login
+
+# For cleanup.ps1
+Connect-AzAccount -Tenant <tenant-guid>
+Set-AzContext -Subscription <subscription-id>
+```
+
+If your tenant enforces MFA, use `az login --tenant <id>` (not plain `az login`) to force the
+interactive browser flow where the MFA prompt will appear.
+
+---
+
 ## onboard.ps1 — Tenant Onboarding
 
 Bootstraps a new Azure Landing Zone tenant end-to-end in a single command.
@@ -42,15 +95,6 @@ gh repo clone <org>/<new-repo-name> ../alz-mgmt   # or your chosen path
 ```
 
 > Future: `-CreateRepo` flag will automate steps 1–2.
-
-### Prerequisites
-
-| Tool | Purpose |
-|------|---------|
-| PowerShell 7+ (`pwsh`) | Script runtime |
-| Azure CLI (`az`) | Authenticated via `az login`; needs Owner (or equivalent) on the root management group |
-| GitHub CLI (`gh`) | Authenticated via `gh auth login`; needs admin access to the config repo |
-| Git | Used to auto-detect org/repo names from remotes |
 
 ### Usage
 
