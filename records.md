@@ -415,3 +415,17 @@ azureKeyVaultPrivateDnsZoneId: { value: '${dnsPrefixId}privatelink.vaultcore.azu
 ### Outcome
 
 `platform.json` is now the only file a tenant operator needs to edit. Changing the primary region or subscription ID propagates automatically to all deployment scopes at compile time.
+
+---
+
+## Feb 26: Onboarding + Cleanup script
+
+We have created two scripts: 
+- cleanup.ps1 cleans up management group hierarchis and resource groups etc, to make a "dirty" tenant clean
+- onboard.ps1 creates fidcs, github environments etc, everything needed for a deploy
+
+We are currently encountering issues with the tenant onboarding process due to concurrency limitations when creating Federated Identity Credentials (FICs) on Azure user-assigned managed identities.
+
+During onboarding, the bootstrap deployment provisions the managed identities and configures GitHub OIDC federated identity credentials. Azure does not support concurrent writes of multiple federated identity credentials under the same managed identity, and we intermittently receive an error indicating that too many FICs are being written concurrently. This results in failed deployments and blocks the onboarding flow until the deployment is retried.
+
+---
