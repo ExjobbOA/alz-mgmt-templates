@@ -30,10 +30,14 @@ At CI/CD time, this repo is checked out to `./platform/` inside the tenant repo 
 ```
 alz-mgmt-templates/
 ├── records.md                                # Architecture Decision Records / logbook
+├── scripts/
+│   ├── onboard.ps1                           # One-command tenant onboarding (az + gh CLI)
+│   ├── cleanup.ps1                           # Tears down a tenant back to blank slate (Az PS module)
+│   └── README.md                             # Prerequisites, auth, and usage instructions
 ├── bootstrap/
 │   ├── plumbing/
 │   │   ├── main.bicep                        # MG-scoped bootstrap: creates UAMI + OIDC FIC + RBAC
-│   │   ├── main.json                         # ARM compiled version
+│   │   ├── main.json                         # ARM compiled version — keep in sync with Bicep source
 │   │   ├── modules/
 │   │   │   ├── identity-oidc.bicep           # Sub-scoped: RG + UAMI + federated credentials
 │   │   │   └── uami-oidc.bicep              # Individual UAMI + FIC pairs
@@ -162,11 +166,33 @@ Built-in role GUIDs are hardcoded as variables in each template. Policy assignme
 
 ## Bootstrap Process
 
-The bootstrap is a one-time Cloud Shell operation:
-1. Run `plumbing/main.bicep` at management group scope
-2. Creates: Resource Group → 2 UAMIs (plan + apply) → Federated Identity Credentials for GitHub OIDC
-3. Assigns RBAC: `apply` gets Owner at MG root, `plan` gets Reader at MG root
-4. After bootstrap, all deployments are automated via GitHub Actions
+The bootstrap creates the GitHub OIDC identity foundation for a new tenant. Use `scripts/onboard.ps1` — it wraps the full flow:
+
+```powershell
+./scripts/onboard.ps1 `
+    -ConfigRepoPath          '../<tenant-config-repo>' `
+    -ModuleRepo              '<tenant-config-repo-name>' `
+    -BootstrapSubscriptionId '<subscription-guid>' `
+    -ManagementGroupId       '<tenant-root-mg-guid>' `
+    -Location                'swedencentral'
+```
+
+What `onboard.ps1` does:
+1. Creates GitHub environments (`alz-mgmt-plan`, `alz-mgmt-apply`) via `gh api`
+2. Runs `bootstrap/plumbing/main.json` as an `az deployment mg create` at tenant root MG scope
+3. Captures `planClientId`, `applyClientId`, `identityResourceGroup` from deployment outputs
+4. Writes `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` as GitHub env variables per environment
+5. Updates `config/platform.json` and `config/bootstrap/plumbing.bicepparam` in the tenant config repo
+
+**Auth requirements for `onboard.ps1`:** `az login --tenant <id>` (MFA may require the `--tenant` flag to force browser flow) + `gh auth login`.
+
+**`cleanup.ps1`** tears a tenant back to a blank slate (deletes Deployment Stacks, MGs, identity RG, role assignments). Uses the `Az` PowerShell module only — does NOT need `az` CLI or `gh`. Run `Connect-AzAccount` + `Set-AzContext -Subscription <id>` before running.
+
+**Important:** `onboard.ps1` and `cleanup.ps1` require separate auth flows. `az login` and `Connect-AzAccount` are independent — logging into one does not log into the other.
+
+### Bootstrap template: main.json vs main.bicep
+
+`onboard.ps1` deploys `bootstrap/plumbing/main.json` (the compiled ARM JSON), not the `.bicep` source. If you modify any `.bicep` files under `bootstrap/plumbing/`, you must recompile and update `main.json` to pick up the changes. The Bicep compiler does not always preserve explicit `dependsOn` chains in child resources correctly — verify the compiled JSON after recompiling.
 
 ## Bicep Conventions
 
@@ -220,3 +246,5 @@ Run `tooling/Update-AlzLibraryReferences.ps1` which references `alz_library_meta
 2. **BCP183/BCP182**: Bicep doesn't allow function calls or output refs in module `params` outside object literals. Workaround: object spread (`...`) or dual-module pattern.
 3. **Deployment cancellation trap**: The retry logic treats cancellation as failure. Must kill the GitHub Runner to truly stop.
 4. **ARM eventual consistency**: Entra ID propagation causes transient RBAC errors. Use `waitForConsistencyCounter*` params and `@batchSize(1)`.
+5. **Concurrent Federated Identity Credential writes**: Azure rejects parallel writes of multiple FICs to the same UAMI (`ConcurrentFederatedIdentityCredentialsWritesForSingleManagedIdentity`). The Bicep compiler may not preserve `dependsOn` chains for child resources in the compiled `main.json`. Fix: verify the compiled JSON has sequential dependencies (`cd-plan` → `ci-plan`, `cd-apply` → `cd-plan`) and patch manually if needed. See `records.md` Feb 26 entry.
+6. **PowerShell quote-stripping with `az`**: Passing a JSON string directly to `az --parameters` on Windows causes PowerShell to strip quotes, producing `{key:{value:...}}` which `az` cannot parse. Fix: write JSON to a temp file and pass `@<path>` instead of an inline string.
