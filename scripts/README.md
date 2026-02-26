@@ -1,5 +1,12 @@
 # scripts/
 
+| Script | Purpose |
+|--------|---------|
+| [onboard.ps1](#onboardps1--tenant-onboarding) | Bootstrap a new tenant — one command |
+| [cleanup.ps1](#cleanupps1--tenant-cleanup) | Tear down a previous deployment so you can re-onboard |
+
+---
+
 ## onboard.ps1 — Tenant Onboarding
 
 Bootstraps a new Azure Landing Zone tenant end-to-end in a single command.
@@ -135,3 +142,61 @@ git push
 # Open a PR → CI will validate all What-If deployments
 # Once CI passes, run the CD workflow with governance-int-root=true
 ```
+
+---
+
+## cleanup.ps1 — Tenant Cleanup
+
+Tears down all resources created by a previous bootstrap + governance deployment
+so the tenant can be onboarded fresh with `onboard.ps1`.
+
+### What it deletes
+
+| Step | What |
+|------|------|
+| 1 | Governance **Deployment Stacks** at the intermediate root MG scope, in reverse dependency order. Each stack was created with `ActionOnUnmanage=DeleteAll`, so its managed resources (policy assignments, role assignments, child MGs) are deleted with it. |
+| 2 | Any **management groups** still present under the intermediate root (bottom-up), then the intermediate root MG itself. |
+| 3 | The **identity resource group** (contains plan + apply UAMIs and their federated identity credentials). |
+| 4 | **Role assignments** for the UAMIs at the tenant root management group. |
+| 5 | The custom **'Landing Zone Reader (WhatIf/Validate)'** role definition. |
+
+It does **not** delete: the tenant root MG, any subscriptions, or GitHub environments.
+
+### Usage
+
+```powershell
+# Preview — no changes
+./scripts/cleanup.ps1 -DryRun
+
+# Auto-loads values from ../alz-mgmt/config/platform.json
+./scripts/cleanup.ps1
+
+# Explicit values (if config repo is elsewhere)
+./scripts/cleanup.ps1 `
+    -IntRootMgId             'alz' `
+    -TenantRootMgId          'yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy' `
+    -BootstrapSubscriptionId 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' `
+    -Location                'swedencentral'
+```
+
+The script asks you to type `YES` before making any changes.
+
+### Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `-ConfigRepoPath` | `../alz-mgmt` | Config repo path — used to load defaults from `platform.json` |
+| `-IntRootMgId` | `platform.json` | Intermediate root MG name (e.g. `alz`) |
+| `-TenantRootMgId` | `platform.json` | Tenant root MG GUID |
+| `-BootstrapSubscriptionId` | `platform.json` | Subscription where identity RG lives |
+| `-Location` | `platform.json` | Azure region — used to derive identity RG / UAMI names |
+| `-IdentityRgName` | derived | Override identity RG name (default: `rg-alz-mgmt-identity-<location>-1`) |
+| `-DryRun` | — | Print every action; make no changes |
+
+### Notes on stack deletion
+
+- Stacks are deleted in reverse dependency order: RBAC → child MGs → intermediate MGs → int-root.
+- After each stack delete with `DeleteAll`, Azure removes all resources the stack owned.
+- If a stack was only partially deployed, the script silently skips missing stacks.
+- If the identity RG was already gone when cleanup runs, the script falls back to listing
+  orphaned (Unknown) role assignments at the tenant root MG so you can remove them manually.
