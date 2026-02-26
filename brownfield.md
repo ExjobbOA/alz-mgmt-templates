@@ -2,6 +2,25 @@
 
 > How to bring an existing Azure environment (ClickOps or otherwise drifted) under platform management.
 
+## Mental Model: It's a Merge Conflict
+
+Brownfield integration is structurally identical to resolving a merge conflict in git.
+
+| Git | Azure Brownfield |
+|-----|-----------------|
+| `git diff` | Discovery script — what exists vs what the platform expects |
+| Merge conflict | Drift between ClickOps reality and reference architecture |
+| Conflict markers `<<<<` / `>>>>` | Per-resource delta: "exists in Azure but not in template" / "in template but doesn't exist yet" |
+| Resolve by accepting ours / theirs / both | Reconciliation decision: adopt as-is, replace, or exclude from platform scope |
+| `git add` after resolving | Config alignment — updating `.bicepparam` to reflect accepted reality |
+| Clean merge commit | `DetachAll` → `DeleteAll` transition: environment now under platform control |
+
+The discovery script's job is `git status` before the merge — surface everything that's in Azure but not captured in code, so the operator makes a conscious decision on each conflict before a single deployment runs. Deploying without this is the equivalent of blindly accepting "theirs" on every conflict: fast, but you will lose things that only existed in the working tree.
+
+The analogy holds in the hard cases too. A tenant whose MG hierarchy is fundamentally different from ALZ is like two branches that have diverged so far the merge is no longer meaningful — you're choosing between rebase (migrate to ALZ structure, disruptive) or a new branch from scratch (fork the templates, maintainability cost).
+
+---
+
 ## The Problem
 
 This platform is designed greenfield-first: `ActionOnUnmanage=DeleteAll`, the ALZ management group hierarchy assumed to not exist yet, and What-If running against empty scopes. A brownfield tenant — one set up manually through the portal, or that ran partial ALZ deployments, or that has evolved away from the reference architecture — breaks every one of these assumptions.
@@ -138,6 +157,48 @@ The platform as-is hardcodes `ActionOnUnmanage=DeleteAll` in `bicep-deploy/actio
 1. **A `brownfieldMode` input on `cd.yaml`** — switches all stacks to `DetachAll` for the duration of the adoption phase
 2. **A What-If-only CD run** — triggers all What-If steps without deploying, to get a full diff across all scopes before committing
 3. **Per-scope `actionOnUnmanage` override** — e.g. conservative (`DetachAll`) on networking, strict (`DeleteAll`) on governance
+
+---
+
+## The Policy Blind Spot
+
+Policy-related resources are the most dangerous category of "uncommitted working tree changes" — they exist only in Azure, are rarely documented, and are silently deleted by `DeleteAll` stacks without any warning.
+
+### What can disappear
+
+**Custom policy definitions** at the tenant root or child MGs. The governance stack deploys the ALZ policy library. If the tenant has custom definitions with the same name, ARM overwrites them. Different names: they get detached or deleted depending on stack mode.
+
+**Custom policy assignments** on MGs or subscriptions not covered by the template. Any manually assigned policy at any scope inside the stack's management boundary is removed by `DeleteAll`.
+
+**Policy exemptions** — the most invisible risk. An exemption was created to allow a resource that would otherwise be non-compliant. It's not scoped to a deployment, it's not in any parameter file, and no one thinks to audit it. It disappears silently, the resource becomes non-compliant, and depending on the policy effect, it may be blocked or modified on the next ARM operation.
+
+**Initiative assignments with custom parameters** — if someone tuned an initiative's parameters (e.g. pointed a DINE policy at a specific Log Analytics workspace), that configuration lives only in the assignment object in Azure. The platform will replace it with its own defaults.
+
+### Why this is worse than other drift
+
+With networking or RBAC drift, the impact is usually visible immediately (something stops working). With policy drift, the impact is delayed: the resource still exists, it just loses its governance guardrails. You won't know until an audit, a compliance report, or a production incident reveals that a `Deny` policy that was supposed to block public endpoints was quietly removed during platform adoption.
+
+### What the discovery script must capture
+
+Before any deployment, the discovery phase must enumerate at every relevant scope:
+
+```powershell
+# All policy assignments (including manual ones not in the template)
+Get-AzPolicyAssignment -Scope $mgScope -WarningAction SilentlyContinue
+
+# All custom policy definitions
+Get-AzPolicyDefinition -Custom -ManagementGroupName $mgId
+
+# All policy exemptions — these are almost never audited
+Get-AzPolicyExemption -Scope $mgScope
+
+# All initiative (policy set) assignments
+Get-AzPolicySetDefinition -Custom -ManagementGroupName $mgId
+```
+
+Each of these that doesn't have a corresponding entry in the platform templates is an unresolved conflict. The operator must decide: capture it in code, accept that it disappears, or block the deployment until it's resolved.
+
+> Note: the discovery phase does not prevent deletions — it prevents *silent* deletions. An operator may look at a legacy exemption and consciously decide to let it go. That's fine. The problem being solved is unknowing loss, not loss itself.
 
 ---
 
