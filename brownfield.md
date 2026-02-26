@@ -198,6 +198,8 @@ Get-AzPolicySetDefinition -Custom -ManagementGroupName $mgId
 
 Each of these that doesn't have a corresponding entry in the platform templates is an unresolved conflict. The operator must decide: capture it in code, accept that it disappears, or block the deployment until it's resolved.
 
+> Note: the discovery phase does not prevent deletions — it prevents *silent* deletions. An operator may look at a legacy exemption and consciously decide to let it go. That's fine. The problem being solved is unknowing loss, not loss itself.
+
 ---
 
 ## The Unsolvable Cases
