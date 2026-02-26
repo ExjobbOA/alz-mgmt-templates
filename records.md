@@ -229,6 +229,54 @@ module resHubVirtualNetwork_withDdos 'br/public:avm/res/network/virtual-network:
 * **Robustness:** This bypasses the **BCP183** and **BCP182** errors by using standard Bicep patterns that are supported across all versions.
 
 ---
+
+## Feb 25: Centralized Parameters Refactoring
+
+### The Problem
+
+All 18 `.bicepparam` files in `alz-mgmt` contained heavily duplicated values. The subscription ID appeared 100+ times across the codebase, `parLocations` was copy-pasted into every file, and resource name strings like `law-alz-swedencentral` were hardcoded at every scope. Naming conventions were also inconsistent (`mi-alz-` vs `uami-alz-`, `dcr-ct-alz-` vs `dcr-alz-changetracking-`, etc.). Any change to the primary region or subscription ID required editing every file by hand.
+
+### The Solution: platform.json as Single Source of Truth
+
+The `bicep-variables` CI action already exported every key in `platform.json` as environment variables before deployment steps. Since `readEnvironmentVariable()` in `.bicepparam` files resolves at Bicep compile time, `platform.json` could serve as the single source of truth without needing a generation script or template files.
+
+All 18 `.bicepparam` files were refactored to:
+1. Declare a `var` block reading from `readEnvironmentVariable()` calls
+2. Derive all compound resource identifiers (workspace IDs, DCR IDs, etc.) from those vars
+3. Reference only vars in `param` assignments — zero hardcoded subscription IDs or location strings
+
+New fields added to `platform.json`: `ENABLE_TELEMETRY`, `SECURITY_CONTACT_EMAIL`, and `LOCATION_SECONDARY` set to `northeurope`.
+
+### Naming Convention Normalization
+
+Standardized all resource names across files:
+
+| Old name | New name |
+|----------|----------|
+| `mi-alz-{location}` | `uami-alz-{location}` |
+| `dcr-ct-alz-{location}` | `dcr-alz-changetracking-{location}` |
+| `dcr-vmi-alz-{location}` | `dcr-alz-vminsights-{location}` |
+| `dcr-mdfcsql-alz-{location}` | `dcr-alz-mdfcsql-{location}` |
+
+### VS Code False Positives
+
+The VS Code Bicep extension reports errors on `var` blocks and `readEnvironmentVariable()` in `.bicepparam` files. These are false positives — the extension language server can't resolve the `using` target path (which requires the templates repo to be checked out at `./platform/`). The Bicep CLI (0.40.2+) compiles these files correctly; verified with `az bicep build-params` against all files with env vars set.
+
+### Key Pattern: DNS Zone Prefix Variable
+
+The `landingzones-corp` policy overrides previously repeated a 100-character resource ID path 45 times (once per private DNS zone). Solved by computing a `dnsPrefixId` var:
+
+```bicep
+var dnsPrefixId = '/subscriptions/${subIdConn}/resourceGroups/${rgDns}/providers/Microsoft.Network/privateDnsZones/'
+// Each zone then becomes:
+azureKeyVaultPrivateDnsZoneId: { value: '${dnsPrefixId}privatelink.vaultcore.azure.net' }
+```
+
+### Outcome
+
+`platform.json` is now the only file a tenant operator needs to edit. Changing the primary region or subscription ID propagates automatically to all deployment scopes at compile time. `CLAUDE.md` updated with local dev workflow instructions and documentation of the VS Code false-positive issue.
+
+---
 # Log Entry: Connectivity Deployment Failure — DDoS Plan Reference (ALZ)
 
 **Date:** February 21, 2026
