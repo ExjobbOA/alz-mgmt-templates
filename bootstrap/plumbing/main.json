@@ -377,7 +377,7 @@
                         "subject": "[variables('subjectCdPlan')]"
                       },
                       "dependsOn": [
-                        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('uamiPlanName'))]"
+                        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials', parameters('uamiPlanName'), 'ci-plan')]"
                       ]
                     },
                     {
@@ -392,7 +392,7 @@
                         "subject": "[variables('subjectCdApply')]"
                       },
                       "dependsOn": [
-                        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('uamiApplyName'))]"
+                        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials', parameters('uamiPlanName'), 'cd-plan')]"
                       ]
                     }
                   ],
