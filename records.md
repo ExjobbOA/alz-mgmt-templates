@@ -418,14 +418,31 @@ azureKeyVaultPrivateDnsZoneId: { value: '${dnsPrefixId}privatelink.vaultcore.azu
 
 ---
 
-## Feb 26: Onboarding + Cleanup script
+## Feb 26: Onboarding + Cleanup Scripts
 
-We have created two scripts: 
-- cleanup.ps1 cleans up management group hierarchis and resource groups etc, to make a "dirty" tenant clean
-- onboard.ps1 creates fidcs, github environments etc, everything needed for a deploy
+Two scripts added to `scripts/`:
 
-We are currently encountering issues with the tenant onboarding process due to concurrency limitations when creating Federated Identity Credentials (FICs) on Azure user-assigned managed identities.
+- **`cleanup.ps1`** — tears down management group hierarchies, deployment stacks, identity resources, and role assignments to return a tenant to a clean state before re-onboarding.
+- **`onboard.ps1`** — end-to-end tenant bootstrapping: creates GitHub environments, runs the bootstrap ARM deployment, captures the UAMI client IDs from outputs, and writes them back as GitHub environment variables and into `platform.json` / `plumbing.bicepparam`.
 
-During onboarding, the bootstrap deployment provisions the managed identities and configures GitHub OIDC federated identity credentials. Azure does not support concurrent writes of multiple federated identity credentials under the same managed identity, and we intermittently receive an error indicating that too many FICs are being written concurrently. This results in failed deployments and blocks the onboarding flow until the deployment is retried.
+### Bug 1: PowerShell quote-stripping when calling `az`
+
+**Symptom:** `az deployment mg create --parameters <json>` returned `Unable to parse parameter: {key:{value:...}}` — keys and string values were unquoted.
+
+**Root cause:** PowerShell strips quotes from JSON strings when passing them as arguments to native executables. The inline `$paramsJson` string lost its double-quotes before `az` received it.
+
+**Fix:** Write the parameters object to a temp `.json` file and pass `@<path>` to `--parameters` instead of an inline string. The `@file` syntax bypasses shell quoting entirely.
+
+### Bug 2: Concurrent Federated Identity Credential writes
+
+**Error:** `ConcurrentFederatedIdentityCredentialsWritesForSingleManagedIdentity` — Azure rejects parallel writes of multiple federated credentials under the same managed identity.
+
+**Root cause:** The compiled `bootstrap/plumbing/main.json` did not preserve the Bicep `dependsOn` chain from `uami-oidc.bicep`. In the ARM JSON, `ci-plan` and `cd-plan` (both children of `uamiPlan`) each depended only on the parent UAMI — not on each other — so ARM deployed them in parallel.
+
+**Fix:** Updated `main.json` directly to serialize all three credential writes:
+- `cd-plan` now `dependsOn` `ci-plan`
+- `cd-apply` now `dependsOn` `cd-plan`
+
+Also updated `uami-oidc.bicep` source with the same chain so future recompiles stay correct.
 
 ---
