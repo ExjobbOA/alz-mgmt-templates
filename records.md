@@ -446,3 +446,30 @@ Two scripts added to `scripts/`:
 Also updated `uami-oidc.bicep` source with the same chain so future recompiles stay correct.
 
 ---
+
+## Feb 27: OIDC Subject Mismatch + Cold-Start Deployment Stack Failure
+
+### Bug 3: OIDC subject claim mismatch (`AADSTS700213`)
+
+**Symptom:** First CD run for a new tenant (alz-mgmt-3) failed with `AADSTS700213: No matching federated identity record found for presented assertion subject 'repo:ExjobbOA/alz-mgmt-3:environment:alz-mgmt-apply'`.
+
+**Root cause:** The Federated Identity Credentials created by `onboard.ps1` include `job_workflow_ref` in the subject string (per the subject contract). However, GitHub's default OIDC `sub` claim for environment-based jobs is only `repo:ORG/REPO:environment:ENV` — `job_workflow_ref` is a separate JWT claim, NOT included in `sub` unless explicitly opted-in via the GitHub API.
+
+**Fix:** Added `Set-OidcSubjectClaim` step to `onboard.ps1` that calls `PUT /repos/{org}/{repo}/actions/oidc/customization/sub` with `{"use_default":false,"include_claim_keys":["repo","context","job_workflow_ref"]}`. This makes GitHub include `job_workflow_ref` in the OIDC `sub`, matching the FIC subject format.
+
+**Note:** Existing repos also need this configured manually once:
+```powershell
+'{"use_default":false,"include_claim_keys":["repo","context","job_workflow_ref"]}' | gh api --method PUT repos/ExjobbOA/alz-mgmt/actions/oidc/customization/sub --input -
+```
+
+### Bug 4: Deployment Stack cold-start authorization failure (re-discovery)
+
+**Symptom:** `governance-int-root` Deployment Stack failed on every attempt with `Authorization failed ... does not have permission to perform action 'Microsoft.Resources/deployments/write' at scope '/providers/Microsoft.Management/managementGroups/alz/...'`. Persisted for hours — not a propagation delay.
+
+**Root cause:** Azure Deployment Stacks evaluate permissions for **all target scopes in the template before executing any resources**. The `int-root` stack deploys policy definitions and nested deployments at the `alz` MG scope. On a clean tenant, `alz` doesn't exist yet, so ARM cannot resolve RBAC inheritance at that scope → fails before the stack can create `alz` → circular deadlock on every run.
+
+**Fix:** Added a "Pre-create Intermediate Root MG (cold-start)" step in the `deploy` job of `cd-template.yaml`, before the `governance-int-root` stack step. Uses `New-AzManagementGroup` to create the empty `alz` shell (idempotent). Waits 60s for RBAC inheritance to propagate when newly created.
+
+**Note:** This is a re-implementation of a previously removed step. Deployment Stacks always require the target scope to exist before they can evaluate permissions.
+
+---

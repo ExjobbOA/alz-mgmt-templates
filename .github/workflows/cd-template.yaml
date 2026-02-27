@@ -472,6 +472,31 @@ jobs:
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           enable-AzPSSession: true
   
+      # 0) Pre-create Intermediate Root MG (cold-start safety)
+      # Deployment Stacks evaluate permissions for ALL scopes in the template before executing.
+      # On a clean tenant, the intermediate root MG doesn't exist yet, so ARM cannot resolve
+      # inherited RBAC at that scope → the stack fails before it can create the MG.
+      # Fix: pre-create the empty MG shell via a plain ARM call (not a stack), so the scope
+      # exists and RBAC inheritance is resolvable when the stack runs. Idempotent.
+      - name: 'Pre-create Intermediate Root MG (cold-start)'
+        if: ${{ inputs.governance-int-root }}
+        shell: pwsh
+        run: |
+          $mgId     = $env:INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID
+          $parentId = $env:MANAGEMENT_GROUP_ID
+          $existing = Get-AzManagementGroup -GroupName $mgId -ErrorAction SilentlyContinue
+          if ($null -ne $existing) {
+            Write-Host "Management group '$mgId' already exists — skipping pre-create."
+          } else {
+            Write-Host "Management group '$mgId' not found. Pre-creating under '$parentId'..."
+            New-AzManagementGroup -GroupName $mgId `
+              -ParentId "/providers/Microsoft.Management/managementGroups/$parentId" `
+              -ErrorAction Stop
+            Write-Host "Waiting 60s for RBAC inheritance to propagate to the new scope..."
+            Start-Sleep -Seconds 60
+            Write-Host "Done."
+          }
+
       # 1) Intermediate Root (MG stack at Tenant Root MG)
       - name: 'Apply: Governance-Intermediate Root'
         if: ${{ inputs.governance-int-root }}
