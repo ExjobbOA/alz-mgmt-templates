@@ -99,7 +99,7 @@
       "name": "[guid(managementGroup().id, variables('effectiveUamiApplyName'), variables('roleOwnerId'))]",
       "properties": {
         "principalId": "[reference(subscriptionResourceId(parameters('bootstrapSubscriptionId'), 'Microsoft.Resources/deployments', 'bootstrap-identity-oidc'), '2025-04-01').outputs.applyPrincipalId.value]",
-        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleOwnerId'))]",
+        "roleDefinitionId": "[tenantResourceId('Microsoft.Authorization/roleDefinitions', variables('roleOwnerId'))]",
         "principalType": "ServicePrincipal"
       },
       "dependsOn": [
@@ -112,7 +112,7 @@
       "name": "[guid(managementGroup().id, variables('effectiveUamiPlanName'), variables('roleReaderId'))]",
       "properties": {
         "principalId": "[reference(subscriptionResourceId(parameters('bootstrapSubscriptionId'), 'Microsoft.Resources/deployments', 'bootstrap-identity-oidc'), '2025-04-01').outputs.planPrincipalId.value]",
-        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleReaderId'))]",
+        "roleDefinitionId": "[tenantResourceId('Microsoft.Authorization/roleDefinitions', variables('roleReaderId'))]",
         "principalType": "ServicePrincipal"
       },
       "dependsOn": [
