@@ -506,10 +506,26 @@ jobs:
               Write-Host "  v '$($mg.Name)' already exists — skipping."
             } else {
               Write-Host "  + Creating '$($mg.Name)' under '$($mg.Parent)'..."
-              New-AzManagementGroup -GroupName $mg.Name `
-                -ParentId "/providers/Microsoft.Management/managementGroups/$($mg.Parent)" `
-                -ErrorAction Stop
-              $anyCreated = $true
+              $created = $false
+              for ($attempt = 1; $attempt -le 3; $attempt++) {
+                try {
+                  New-AzManagementGroup -GroupName $mg.Name `
+                    -ParentId "/providers/Microsoft.Management/managementGroups/$($mg.Parent)" `
+                    -ErrorAction Stop
+                  $created = $true
+                  break
+                } catch {
+                  if ($attempt -lt 3) {
+                    Write-Warning "    Attempt $attempt failed: $($_.Exception.Message). Retrying in 30s..."
+                    Start-Sleep -Seconds 30
+                  } else {
+                    throw
+                  }
+                }
+              }
+              if ($created) { $anyCreated = $true }
+              # Brief pause between creations to avoid ARM throttling
+              Start-Sleep -Seconds 5
             }
           }
 
