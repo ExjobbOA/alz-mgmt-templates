@@ -473,3 +473,43 @@ Also updated `uami-oidc.bicep` source with the same chain so future recompiles s
 **Note:** This is a re-implementation of a previously removed step. Deployment Stacks always require the target scope to exist before they can evaluate permissions.
 
 ---
+
+## Iteration Roadmap & PLATFORM_MODE Architecture Decision
+
+### Iteration 1 scope (current)
+- **3a** Greenfield deployment on a new tenant (post-`cleanup.ps1` → `onboard.ps1` → CD)
+- **3b** Re-deployment on an existing ALZ set up with this method (idempotent stack update)
+- **4a** Single Platform Management Group — one subscription, one `platform` MG, no child breakdown
+
+### Iteration 2 scope (planned)
+- **4b** Multi-platform MG support — formalize connectivity/identity/management/security as a supported path (infrastructure already exists in the codebase, needs proper platform.json shape and CI/CD conditioning)
+- **3c** Brownfield integration — import existing ALZ not set up with this method into stacks
+
+### PLATFORM_MODE: the floodgate model
+
+The platform MG hierarchy works like a river with a floodgate:
+
+- The **main channel** is the `platform` MG — 41 ALZ policy assignments always flow here regardless of mode
+- In **full mode** the floodgate opens: 5 additional policies bifurcate into 4 sub-channels (connectivity, identity, management, security child MGs). Each child MG also receives its own subscription.
+- In **simple mode** the floodgate stays closed: those 5 policies stay consolidated at `platform` scope, one subscription sits directly under `platform`, and the 4 sub-channels are never created.
+
+**Policy inventory per sub-MG (what gets consolidated in simple mode):**
+
+| Sub-MG | Policies | Notes |
+|--------|----------|-------|
+| `connectivity` | Enable-DDoS-VNET | 1 policy |
+| `identity` | Deny-MgmtPorts-Internet, Deny-Public-IP, Deny-Subnet-Without-Nsg, Deploy-VM-Backup | 4 policies |
+| `management` | — | Empty container only |
+| `security` | — | Empty container only |
+
+**Implementation plan for PLATFORM_MODE (iteration 1 work):**
+1. Add `PLATFORM_MODE: "simple"` to `platform.json` (default for iteration 1)
+2. Add `parIncludeSubMgPolicies: bool` to `platform/main.bicep` — when `true`, the 5 sub-MG policies are assigned directly at `platform` scope
+3. Replace `SUBSCRIPTION_ID_MANAGEMENT/CONNECTIVITY/IDENTITY/SECURITY` with a single `SUBSCRIPTION_ID_PLATFORM` in `platform.json` for simple mode
+4. In `cd-template.yaml`: read `PLATFORM_MODE`, skip the 4 sub-MG stack steps when `simple`
+5. In pre-create step: skip connectivity/identity/management/security MG creation when `PLATFORM_MODE == simple`
+6. Absorb `governance-platform-connectivity-rbac` into the platform RBAC step in simple mode — it assigns `Network Contributor` on `connectivity` to the managed identity of the `Deploy-Private-DNS-Zones` policy (originating from Corp MG). In simple mode that role assignment retargets to `platform` instead (where the subscription and DNS zones live). `governance-platform-rbac` and `governance-landingzones-rbac` survive simple mode unchanged.
+
+**Why simple mode is the right default for iteration 1:** Most evaluation tenants have one subscription. Four empty child MGs with no subscriptions add structural complexity without governance benefit. Simple mode also gives a cleaner onboarding story — one subscription ID, one platform MG.
+
+---
