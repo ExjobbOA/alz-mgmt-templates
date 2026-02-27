@@ -474,6 +474,32 @@ Also updated `uami-oidc.bicep` source with the same chain so future recompiles s
 
 ---
 
+## Feb 28: First Full End-to-End Deploy — Green
+
+**Milestone:** First successful full pipeline run on Alen's tenant after a clean slate: `cleanup.ps1` → `onboard.ps1` → CD pipeline.
+
+All governance stacks completed successfully:
+
+- Pre-create ALZ MG hierarchy (cold-start)
+- `governance-int-root` — ALZ policy/role definition library deployed at `alz` scope
+- `governance-platform` + 4 child MGs (connectivity, identity, management, security)
+- `governance-landingzones` + corp + online
+- `governance-sandbox`, `governance-decommissioned`
+- All RBAC stacks
+- `core-logging` (Log Analytics, Automation Account, AMA/DCR)
+
+**Networking excluded intentionally:** Hub networking was not deployed in this run due to Azure infrastructure cost. The networking stack is implemented and available but left disabled for evaluation tenants.
+
+**Total pipeline time:** ~1h34m (cold-start, all stacks CREATE not UPDATE). Subsequent incremental runs will be significantly faster since ARM skips unchanged resources on stack UPDATE.
+
+**Bugs resolved leading up to this milestone:**
+- Bug 1 (Feb 26): PowerShell quote-stripping on `az` CLI calls → `@file` workaround
+- Bug 2 (Feb 26): Concurrent FIC writes during bootstrap → serialized `dependsOn` in ARM JSON
+- Bug 3 (Feb 27): OIDC subject claim mismatch → `Set-OidcSubjectClaim` added to `onboard.ps1`
+- Bug 4 (Feb 27): Deployment Stack cold-start auth failure → pre-create full MG skeleton before any stack step
+
+---
+
 ## Iteration Roadmap & PLATFORM_MODE Architecture Decision
 
 ### Iteration 1 scope (current)
