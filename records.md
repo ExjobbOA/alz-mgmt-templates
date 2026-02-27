@@ -508,7 +508,7 @@ The platform MG hierarchy works like a river with a floodgate:
 3. Replace `SUBSCRIPTION_ID_MANAGEMENT/CONNECTIVITY/IDENTITY/SECURITY` with a single `SUBSCRIPTION_ID_PLATFORM` in `platform.json` for simple mode
 4. In `cd-template.yaml`: read `PLATFORM_MODE`, skip the 4 sub-MG stack steps when `simple`
 5. In pre-create step: skip connectivity/identity/management/security MG creation when `PLATFORM_MODE == simple`
-6. Skip `governance-platform-connectivity-rbac` in simple mode — it targets the `connectivity` scope which doesn't exist. `governance-platform-rbac` (targets `platform`) and `governance-landingzones-rbac` (targets `landingzones`) both survive simple mode unchanged.
+6. Absorb `governance-platform-connectivity-rbac` into the platform RBAC step in simple mode — it assigns `Network Contributor` on `connectivity` to the managed identity of the `Deploy-Private-DNS-Zones` policy (originating from Corp MG). In simple mode that role assignment retargets to `platform` instead (where the subscription and DNS zones live). `governance-platform-rbac` and `governance-landingzones-rbac` survive simple mode unchanged.
 
 **Why simple mode is the right default for iteration 1:** Most evaluation tenants have one subscription. Four empty child MGs with no subscriptions add structural complexity without governance benefit. Simple mode also gives a cleaner onboarding story — one subscription ID, one platform MG.
 
