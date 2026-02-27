@@ -220,7 +220,42 @@ function New-GitHubEnvironments {
     }
 }
 
-# ─── Step 4: Run bootstrap Bicep ─────────────────────────────────────────────
+# ─── Step 4: Configure OIDC subject claim ────────────────────────────────────
+function Set-OidcSubjectClaim {
+    Write-Step 'Configuring OIDC subject claim (include job_workflow_ref)'
+
+    # By default GitHub's OIDC sub for environment-based jobs is:
+    #   repo:ORG/REPO:environment:ENV
+    # Our FICs require job_workflow_ref in the subject. This API call opts the
+    # repo into a custom subject format that appends it.
+    if ($DryRun) {
+        Write-Dry "Would configure OIDC sub: repos/$Script:GithubOrg/$Script:ModuleRepo/actions/oidc/customization/sub"
+        Write-Dry '  use_default=false, include_claim_keys=[repo, context, job_workflow_ref]'
+        return
+    }
+
+    $body     = '{"use_default":false,"include_claim_keys":["repo","context","job_workflow_ref"]}'
+    $tempFile = [System.IO.Path]::GetTempFileName()
+    $body | Set-Content $tempFile -Encoding UTF8
+
+    try {
+        gh api --method PUT "repos/$Script:GithubOrg/$Script:ModuleRepo/actions/oidc/customization/sub" `
+            --input $tempFile | Out-Null
+    } finally {
+        Remove-Item $tempFile -ErrorAction SilentlyContinue
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn 'OIDC subject configuration failed. Set it manually:'
+        Write-Warn "  gh api --method PUT repos/$Script:GithubOrg/$Script:ModuleRepo/actions/oidc/customization/sub --input <json-file>"
+        Write-Warn '  JSON: {"use_default":false,"include_claim_keys":["repo","context","job_workflow_ref"]}'
+        return
+    }
+
+    Write-Ok 'OIDC subject claim configured: sub will include repo + context + job_workflow_ref.'
+}
+
+# ─── Step 5: Run bootstrap Bicep ─────────────────────────────────────────────
 function Invoke-Bootstrap {
     Write-Step 'Running bootstrap Bicep deployment'
 
@@ -291,7 +326,7 @@ function Invoke-Bootstrap {
     Write-Ok "  Apply clientId : $Script:ApplyClientId"
 }
 
-# ─── Step 5: Get Azure tenant ID ─────────────────────────────────────────────
+# ─── Step 6: Get Azure tenant ID ─────────────────────────────────────────────
 function Get-AzureTenantId {
     Write-Step 'Fetching Azure tenant ID'
     if ($DryRun) {
@@ -303,7 +338,7 @@ function Get-AzureTenantId {
     Write-Ok "Tenant ID: $Script:AzureTenantId"
 }
 
-# ─── Step 6: Write GitHub environment variables ───────────────────────────────
+# ─── Step 7: Write GitHub environment variables ───────────────────────────────
 function Set-GitHubEnvVars {
     Write-Step 'Writing GitHub environment variables'
 
@@ -327,7 +362,7 @@ function Set-GitHubEnvVars {
     Write-Ok 'All environment variables written.'
 }
 
-# ─── Step 7: Update config/platform.json ─────────────────────────────────────
+# ─── Step 8: Update config/platform.json ─────────────────────────────────────
 function Update-PlatformJson {
     Write-Step 'Updating config/platform.json'
 
@@ -367,7 +402,7 @@ function Update-PlatformJson {
     }
 }
 
-# ─── Step 8: Update config/bootstrap/plumbing.bicepparam ──────────────────────
+# ─── Step 9: Update config/bootstrap/plumbing.bicepparam ──────────────────────
 function Update-BootstrapBicepparam {
     Write-Step 'Updating config/bootstrap/plumbing.bicepparam'
 
@@ -457,6 +492,7 @@ Test-Prerequisites
 Resolve-Inputs
 Confirm-Plan
 New-GitHubEnvironments
+Set-OidcSubjectClaim
 Invoke-Bootstrap
 Get-AzureTenantId
 Set-GitHubEnvVars
