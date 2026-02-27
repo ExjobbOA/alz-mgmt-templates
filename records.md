@@ -445,4 +445,16 @@ Two scripts added to `scripts/`:
 
 Also updated `uami-oidc.bicep` source with the same chain so future recompiles stay correct.
 
+### Bug 3: `subscriptionResourceId` fails at management group scope
+
+**Error:** `Unable to evaluate template language function 'subscriptionResourceId'. At least 3 parameters should be provided.`
+
+**Root cause:** The compiled `main.json` used `subscriptionResourceId('Microsoft.Authorization/roleDefinitions', ...)` with only 2 arguments for the built-in Owner and Reader role assignments. At management group deployment scope there is no implicit subscription context, so ARM cannot resolve it. The Bicep source correctly used `tenantResourceId()` — the compiled JSON was stale from an older version.
+
+**Fix:** Updated `main.json` to use `tenantResourceId('Microsoft.Authorization/roleDefinitions', ...)` for both role assignments. Built-in role definitions are tenant-scoped resources; `tenantResourceId` is the correct function.
+
+### Outcome
+
+`onboard.ps1` ran successfully end-to-end on a second tenant (Nordlo Alen, `c785e463-...`). GitHub environments created, bootstrap deployed, UAMI client IDs written back to `alz-mgmt-2` config repo and GitHub environment variables.
+
 ---
