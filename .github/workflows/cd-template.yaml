@@ -224,7 +224,7 @@ jobs:
           skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Platform Connectivity'
-        if: ${{ inputs.governance-platform-connectivity }}
+        if: ${{ inputs.governance-platform-connectivity && env.PLATFORM_MODE != 'simple' }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'governance-platform-connectivity'
@@ -241,7 +241,7 @@ jobs:
           skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Platform Identity'
-        if: ${{ inputs.governance-platform-identity }}
+        if: ${{ inputs.governance-platform-identity && env.PLATFORM_MODE != 'simple' }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'governance-platform-identity'
@@ -258,7 +258,7 @@ jobs:
           skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Platform Management'
-        if: ${{ inputs.governance-platform-management }}
+        if: ${{ inputs.governance-platform-management && env.PLATFORM_MODE != 'simple' }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'governance-platform-management'
@@ -275,7 +275,7 @@ jobs:
           skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Platform Security'
-        if: ${{ inputs.governance-platform-security }}
+        if: ${{ inputs.governance-platform-security && env.PLATFORM_MODE != 'simple' }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'governance-platform-security'
@@ -343,7 +343,7 @@ jobs:
           skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Governance-Platform Connectivity RBAC'
-        if: ${{ inputs.governance-platform-connectivity-rbac }}
+        if: ${{ inputs.governance-platform-connectivity-rbac && env.PLATFORM_MODE != 'simple' }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'governance-platform-connectivity-rbac'
@@ -484,23 +484,29 @@ jobs:
           $intRoot  = $env:INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID
           $tenantRg = $env:MANAGEMENT_GROUP_ID
 
-          # Full ALZ MG hierarchy in parent-first order
+          # ALZ MG hierarchy in parent-first order.
+          # SubMgOnly = $true entries are skipped in simple mode (no sub-platform MGs needed).
+          $platformMode = $env:PLATFORM_MODE
           $mgs = @(
-            [pscustomobject]@{ Name = $intRoot;         Parent = $tenantRg },
-            [pscustomobject]@{ Name = 'landingzones';   Parent = $intRoot },
-            [pscustomobject]@{ Name = 'platform';       Parent = $intRoot },
-            [pscustomobject]@{ Name = 'sandbox';        Parent = $intRoot },
-            [pscustomobject]@{ Name = 'decommissioned'; Parent = $intRoot },
-            [pscustomobject]@{ Name = 'corp';           Parent = 'landingzones' },
-            [pscustomobject]@{ Name = 'online';         Parent = 'landingzones' },
-            [pscustomobject]@{ Name = 'connectivity';   Parent = 'platform' },
-            [pscustomobject]@{ Name = 'identity';       Parent = 'platform' },
-            [pscustomobject]@{ Name = 'management';     Parent = 'platform' },
-            [pscustomobject]@{ Name = 'security';       Parent = 'platform' }
+            [pscustomobject]@{ Name = $intRoot;         Parent = $tenantRg;      SubMgOnly = $false },
+            [pscustomobject]@{ Name = 'landingzones';   Parent = $intRoot;       SubMgOnly = $false },
+            [pscustomobject]@{ Name = 'platform';       Parent = $intRoot;       SubMgOnly = $false },
+            [pscustomobject]@{ Name = 'sandbox';        Parent = $intRoot;       SubMgOnly = $false },
+            [pscustomobject]@{ Name = 'decommissioned'; Parent = $intRoot;       SubMgOnly = $false },
+            [pscustomobject]@{ Name = 'corp';           Parent = 'landingzones'; SubMgOnly = $false },
+            [pscustomobject]@{ Name = 'online';         Parent = 'landingzones'; SubMgOnly = $false },
+            [pscustomobject]@{ Name = 'connectivity';   Parent = 'platform';     SubMgOnly = $true },
+            [pscustomobject]@{ Name = 'identity';       Parent = 'platform';     SubMgOnly = $true },
+            [pscustomobject]@{ Name = 'management';     Parent = 'platform';     SubMgOnly = $true },
+            [pscustomobject]@{ Name = 'security';       Parent = 'platform';     SubMgOnly = $true }
           )
 
           $anyCreated = $false
           foreach ($mg in $mgs) {
+            if ($mg.SubMgOnly -and $platformMode -eq 'simple') {
+              Write-Host "  - Skipping '$($mg.Name)' (PLATFORM_MODE=simple)"
+              continue
+            }
             $existing = Get-AzManagementGroup -GroupName $mg.Name -ErrorAction SilentlyContinue
             if ($null -ne $existing) {
               Write-Host "  v '$($mg.Name)' already exists — skipping."
@@ -631,9 +637,9 @@ jobs:
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
   
-      # 4) Platform Connectivity (sub placement)
+      # 4) Platform Connectivity (sub placement) — full mode only
       - name: 'Apply: Governance-Platform Connectivity'
-        if: ${{ inputs.governance-platform-connectivity }}
+        if: ${{ inputs.governance-platform-connectivity && env.PLATFORM_MODE != 'simple' }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
           name: 'governance-platform-connectivity'
@@ -651,9 +657,9 @@ jobs:
           actionOnUnmanage: 'DetachAll'
   
   
-      # 5) Platform Identity
+      # 5) Platform Identity — full mode only
       - name: 'Apply: Governance-Platform Identity'
-        if: ${{ inputs.governance-platform-identity }}
+        if: ${{ inputs.governance-platform-identity && env.PLATFORM_MODE != 'simple' }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
           name: 'governance-platform-identity'
@@ -670,9 +676,9 @@ jobs:
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
   
-      # 6) Platform Management
+      # 6) Platform Management — full mode only
       - name: 'Apply: Governance-Platform Management'
-        if: ${{ inputs.governance-platform-management }}
+        if: ${{ inputs.governance-platform-management && env.PLATFORM_MODE != 'simple' }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
           name: 'governance-platform-management'
@@ -689,9 +695,9 @@ jobs:
           denySettingsMode: 'None'
           actionOnUnmanage: 'DetachAll'
   
-      # 7) Platform Security
+      # 7) Platform Security — full mode only
       - name: 'Apply: Governance-Platform Security'
-        if: ${{ inputs.governance-platform-security }}
+        if: ${{ inputs.governance-platform-security && env.PLATFORM_MODE != 'simple' }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
           name: 'governance-platform-security'
@@ -765,7 +771,7 @@ jobs:
           actionOnUnmanage: 'DetachAll'
   
       - name: 'Apply: Governance-Platform Connectivity RBAC'
-        if: ${{ inputs.governance-platform-connectivity-rbac }}
+        if: ${{ inputs.governance-platform-connectivity-rbac && env.PLATFORM_MODE != 'simple' }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
           name: 'governance-platform-connectivity-rbac'
