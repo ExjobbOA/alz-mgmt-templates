@@ -191,14 +191,17 @@ function Remove-SubscriptionsFromHierarchy {
 
     $moved = 0
     foreach ($mgName in $mgNames) {
-        $mg = Get-AzManagementGroup -GroupName $mgName -Expand -ErrorAction SilentlyContinue
-        if (-not $mg) { continue }
+        $response = Invoke-AzRestMethod `
+            -Path "/providers/Microsoft.Management/managementGroups/$mgName/subscriptions?api-version=2020-05-01" `
+            -Method GET `
+            -ErrorAction SilentlyContinue
+        if (-not $response -or $response.StatusCode -ne 200) { continue }
 
-        $subs = $mg.Children | Where-Object { $_.Type -eq '/subscriptions' }
-        if (-not $subs) { continue }
+        $subList = ($response.Content | ConvertFrom-Json).value
+        if (-not $subList) { continue }
 
-        foreach ($sub in $subs) {
-            $subId = $sub.Name
+        foreach ($sub in $subList) {
+            $subId = $sub.name
             Write-Info "  Subscription '$subId' in MG '$mgName' — moving to tenant root..."
 
             if ($DryRun) {
