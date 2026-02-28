@@ -21,8 +21,12 @@ param parEnableTelemetry bool = true
 @description('Optional. Policy assignment parameter overrides. Specify only the policy parameter values you want to change (logAnalytics, etc.). Role definitions are hardcoded variables and cannot be overridden.')
 param parPolicyAssignmentParameterOverrides object = {}
 
+@description('Optional. When true, includes connectivity and identity sub-MG policies at platform scope (PLATFORM_MODE=simple).')
+param parIncludeSubMgPolicies bool = false
+
 var builtInRoleDefinitionIds = {
   contributor: '/providers/Microsoft.Authorization/roleDefinitions/b24988ac-6180-42a0-ab88-20f7382dd24c'
+  networkContributor: '/providers/Microsoft.Authorization/roleDefinitions/4d97b98b-1d4f-4787-a291-c67834d212e7'
   aksContributor: '/providers/Microsoft.Authorization/roleDefinitions/ed7f3fbd-7b88-4dd4-9017-9adb7ce333f8'
   aksPolicyAddon: '/providers/Microsoft.Authorization/roleDefinitions/18ed5180-3e48-46fd-8541-4ea054d57064'
   logAnalyticsContributor: '/providers/Microsoft.Authorization/roleDefinitions/92aaf0da-9dab-42b6-94a3-d43ce8d16293'
@@ -43,7 +47,7 @@ var alzPolicyDefsJson = []
 
 var alzPolicySetDefsJson = []
 
-var alzPolicyAssignmentsJson = [
+var alzPolicyAssignmentsJsonBase = [
   loadJsonContent('../../lib/alz/platform/DenyAction-DeleteUAMIAMA.alz_policy_assignment.json')
   loadJsonContent('../../lib/alz/platform/Deploy-GuestAttest.alz_policy_assignment.json')
   loadJsonContent('../../lib/alz/platform/Deploy-MDFC-DefSQL-AMA.alz_policy_assignment.json')
@@ -86,7 +90,18 @@ var alzPolicyAssignmentsJson = [
   loadJsonContent('../../lib/alz/platform/Enforce-Subnet-Private.alz_policy_assignment.json')
 ]
 
+var alzPolicyAssignmentsJson = parIncludeSubMgPolicies
+  ? concat(alzPolicyAssignmentsJsonBase, [
+      loadJsonContent('../../lib/alz/platform/connectivity/Enable-DDoS-VNET.alz_policy_assignment.json')
+      loadJsonContent('../../lib/alz/platform/identity/Deny-MgmtPorts-Internet.alz_policy_assignment.json')
+      loadJsonContent('../../lib/alz/platform/identity/Deny-Public-IP.alz_policy_assignment.json')
+      loadJsonContent('../../lib/alz/platform/identity/Deny-Subnet-Without-Nsg.alz_policy_assignment.json')
+      loadJsonContent('../../lib/alz/platform/identity/Deploy-VM-Backup.alz_policy_assignment.json')
+    ])
+  : alzPolicyAssignmentsJsonBase
+
 var alzPolicyAssignmentRoleDefinitions = {
+  'Enable-DDoS-VNET': [builtInRoleDefinitionIds.networkContributor]
   'Deploy-AKS-Policy': [builtInRoleDefinitionIds.aksContributor, builtInRoleDefinitionIds.aksPolicyAddon]
   'Deploy-AzActivity-Log': [builtInRoleDefinitionIds.logAnalyticsContributor]
   'Deploy-Diag-LogsCat': [builtInRoleDefinitionIds.logAnalyticsContributor]
