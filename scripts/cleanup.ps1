@@ -177,6 +177,48 @@ function Invoke-WithSkip([scriptblock]$Action, [string]$NotFoundMsg) {
     }
 }
 
+# ─── Step 1.5: Move subscriptions out of ALZ hierarchy ───────────────────────
+function Remove-SubscriptionsFromHierarchy {
+    Write-Step 'Moving subscriptions out of ALZ management group hierarchy'
+
+    $mgNames = @(
+        'connectivity', 'identity', 'management', 'security',
+        'corp', 'online',
+        'platform', 'landingzones',
+        'sandbox', 'decommissioned',
+        $Script:IntRootMgId
+    )
+
+    $moved = 0
+    foreach ($mgName in $mgNames) {
+        $mg = Get-AzManagementGroup -GroupName $mgName -Expand -ErrorAction SilentlyContinue
+        if (-not $mg) { continue }
+
+        $subs = $mg.Children | Where-Object { $_.Type -eq '/subscriptions' }
+        if (-not $subs) { continue }
+
+        foreach ($sub in $subs) {
+            $subId = $sub.Name
+            Write-Info "  Subscription '$subId' in MG '$mgName' — moving to tenant root..."
+
+            if ($DryRun) {
+                Write-Dry "  New-AzManagementGroupSubscription -GroupName '$Script:TenantRootMgId' -SubscriptionId '$subId'"
+                $moved++
+                continue
+            }
+
+            New-AzManagementGroupSubscription `
+                -GroupName $Script:TenantRootMgId `
+                -SubscriptionId $subId `
+                -ErrorAction SilentlyContinue | Out-Null
+            Write-Ok "  Moved: $subId → tenant root"
+            $moved++
+        }
+    }
+
+    if ($moved -eq 0) { Write-Skip 'No subscriptions found in ALZ hierarchy — nothing to move.' }
+}
+
 # ─── Step 2: Delete governance Deployment Stacks ──────────────────────────────
 function Remove-GovernanceStacks {
     Write-Step 'Deleting governance Deployment Stacks'
@@ -422,6 +464,7 @@ Write-Host ''
 Resolve-Inputs
 Confirm-Plan
 
+Remove-SubscriptionsFromHierarchy
 Remove-GovernanceStacks
 Remove-ManagementGroupHierarchy
 Remove-IdentityResourceGroup
