@@ -377,7 +377,7 @@ jobs:
           skipWhatIfIfTargetMgMissing: 'true'
 
       - name: 'Plan: Networking - Hub'
-        if: ${{ inputs.networking }}
+        if: ${{ inputs.networking && env.NETWORK_TYPE == 'hubnetworking' }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
           name: 'networking-hub'
@@ -808,7 +808,7 @@ jobs:
   
       # 10) Networking (subscription stack)
       - name: 'Apply: Networking - Hub'
-        if: ${{ inputs.networking }}
+        if: ${{ inputs.networking && env.NETWORK_TYPE == 'hubnetworking' }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
           name: 'networking-hub'
