@@ -386,9 +386,16 @@ function Update-PlatformJson {
     $isSimple = ($p.PSObject.Properties.Name -contains 'PLATFORM_MODE') -and ($p.PLATFORM_MODE -eq 'simple')
 
     if ($isSimple) {
-        # Simple mode: single SUBSCRIPTION_ID_PLATFORM covers all platform subs
-        if ($p.PSObject.Properties.Name -contains 'SUBSCRIPTION_ID_PLATFORM') {
-            $p.SUBSCRIPTION_ID_PLATFORM = $Script:BootstrapSubscriptionId
+        # Simple mode: all subscription ID fields are kept in sync to the same value so
+        # the schema never changes when switching modes — just update PLATFORM_MODE and
+        # fill in real IDs for the fields that become active.
+        foreach ($field in @('SUBSCRIPTION_ID_PLATFORM', 'SUBSCRIPTION_ID_CONNECTIVITY',
+                             'SUBSCRIPTION_ID_IDENTITY', 'SUBSCRIPTION_ID_SECURITY')) {
+            if ($p.PSObject.Properties.Name -contains $field) {
+                $p.$field = $Script:BootstrapSubscriptionId
+            } else {
+                $p | Add-Member -NotePropertyName $field -NotePropertyValue $Script:BootstrapSubscriptionId
+            }
         }
     } else {
         # Full mode: update the four individual platform subscription IDs if they were all identical
