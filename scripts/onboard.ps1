@@ -381,25 +381,37 @@ function Update-PlatformJson {
     $p.LOCATION              = $Script:Location
     $p.LOCATION_PRIMARY      = $Script:Location
 
-    # If all four platform subscription IDs are identical (common on fresh installs),
-    # update all of them; otherwise only update the management one.
-    $allSame = ($p.SUBSCRIPTION_ID_MANAGEMENT -eq $p.SUBSCRIPTION_ID_CONNECTIVITY) -and
-               ($p.SUBSCRIPTION_ID_MANAGEMENT -eq $p.SUBSCRIPTION_ID_IDENTITY)     -and
-               ($p.SUBSCRIPTION_ID_MANAGEMENT -eq $p.SUBSCRIPTION_ID_SECURITY)
-
     $p.SUBSCRIPTION_ID_MANAGEMENT = $Script:BootstrapSubscriptionId
-    if ($allSame) {
-        $p.SUBSCRIPTION_ID_CONNECTIVITY = $Script:BootstrapSubscriptionId
-        $p.SUBSCRIPTION_ID_IDENTITY     = $Script:BootstrapSubscriptionId
-        $p.SUBSCRIPTION_ID_SECURITY     = $Script:BootstrapSubscriptionId
+
+    $isSimple = ($p.PSObject.Properties.Name -contains 'PLATFORM_MODE') -and ($p.PLATFORM_MODE -eq 'simple')
+
+    if ($isSimple) {
+        # Simple mode: single SUBSCRIPTION_ID_PLATFORM covers all platform subs
+        if ($p.PSObject.Properties.Name -contains 'SUBSCRIPTION_ID_PLATFORM') {
+            $p.SUBSCRIPTION_ID_PLATFORM = $Script:BootstrapSubscriptionId
+        }
+    } else {
+        # Full mode: update the four individual platform subscription IDs if they were all identical
+        $hasAll = ($p.PSObject.Properties.Name -contains 'SUBSCRIPTION_ID_CONNECTIVITY') -and
+                  ($p.PSObject.Properties.Name -contains 'SUBSCRIPTION_ID_IDENTITY')     -and
+                  ($p.PSObject.Properties.Name -contains 'SUBSCRIPTION_ID_SECURITY')
+        if ($hasAll) {
+            $allSame = ($p.SUBSCRIPTION_ID_MANAGEMENT -eq $p.SUBSCRIPTION_ID_CONNECTIVITY) -and
+                       ($p.SUBSCRIPTION_ID_MANAGEMENT -eq $p.SUBSCRIPTION_ID_IDENTITY)     -and
+                       ($p.SUBSCRIPTION_ID_MANAGEMENT -eq $p.SUBSCRIPTION_ID_SECURITY)
+            if ($allSame) {
+                $p.SUBSCRIPTION_ID_CONNECTIVITY = $Script:BootstrapSubscriptionId
+                $p.SUBSCRIPTION_ID_IDENTITY     = $Script:BootstrapSubscriptionId
+                $p.SUBSCRIPTION_ID_SECURITY     = $Script:BootstrapSubscriptionId
+            } else {
+                Write-Info '  SUBSCRIPTION_ID_CONNECTIVITY/IDENTITY/SECURITY were already different — only MANAGEMENT was updated.'
+                Write-Info '  Review and adjust the others manually if needed.'
+            }
+        }
     }
 
     $p | ConvertTo-Json -Depth 5 | Set-Content $platformFile -Encoding UTF8
     Write-Ok 'config/platform.json updated.'
-    if (-not $allSame) {
-        Write-Info '  SUBSCRIPTION_ID_CONNECTIVITY/IDENTITY/SECURITY were already different — only MANAGEMENT was updated.'
-        Write-Info '  Review and adjust the others manually if needed.'
-    }
 }
 
 # ─── Step 9: Update config/bootstrap/plumbing.bicepparam ──────────────────────
