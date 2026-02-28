@@ -194,7 +194,7 @@ function Remove-SubscriptionsFromHierarchy {
         $mg = Get-AzManagementGroup -GroupName $mgName -Expand -ErrorAction SilentlyContinue
         if (-not $mg) { continue }
 
-        $subs = $mg.Children | Where-Object { $_.Type -eq '/subscriptions' }
+        $subs = $mg.Children | Where-Object { $_.Id -match '^/subscriptions/[0-9a-f-]+$' }
         if (-not $subs) { continue }
 
         foreach ($sub in $subs) {
