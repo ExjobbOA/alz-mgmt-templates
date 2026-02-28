@@ -500,6 +500,35 @@ All governance stacks completed successfully:
 
 ---
 
+## Feb 28: PLATFORM_MODE=simple Implemented (Iteration 1 / 4a)
+
+### What was built
+
+`PLATFORM_MODE` is a new field in `platform.json` that acts as a floodgate controlling whether the full platform sub-MG hierarchy deploys or collapses into a single `platform` MG. Default for iteration 1 is `"simple"`.
+
+**Templates repo (`alz-mgmt-templates`):**
+
+- **`platform/main.bicep`**: Added `parIncludeSubMgPolicies bool` param. When `true`, 5 sub-MG policies are concatenated into the platform policy assignments at `platform` scope: `Enable-DDoS-VNET` (from connectivity), `Deny-MgmtPorts-Internet`, `Deny-Public-IP`, `Deny-Subnet-Without-Nsg`, `Deploy-VM-Backup` (from identity). Added `networkContributor` to `builtInRoleDefinitionIds` and `Enable-DDoS-VNET` to `alzPolicyAssignmentRoleDefinitions` so AVM creates the Network Contributor role assignment automatically.
+- **`platform/main-rbac.bicep`**: Added `parPlatformMode` param (`"full"` | `"simple"`). Full mode: existing behavior (Network Contributor on platform MG for Enable-DDoS-VNET identity from connectivity). Simple mode: absorbed connectivity-rbac behavior (Network Contributor on platform MG for Deploy-Private-DNS-Zones identity from corp MG). The two modes are mutually exclusive — whichever is active, the other's for-loop evaluates to `[]`.
+- **`cd-template.yaml`**: Gated 4 sub-MG governance steps (`governance-platform-connectivity/identity/management/security`) and `governance-platform-connectivity-rbac` on `PLATFORM_MODE != 'simple'` in both the whatif and deploy jobs. Pre-create step now skips the 4 sub-MGs when `PLATFORM_MODE=simple`.
+
+**Config repos (`alz-mgmt`, `alz-mgmt-3`):**
+
+- **`platform.json`**: Added `PLATFORM_MODE: "simple"`, added `SUBSCRIPTION_ID_PLATFORM` (the single subscription to place under `platform` MG), removed `SUBSCRIPTION_ID_CONNECTIVITY/IDENTITY/SECURITY` (not needed in simple mode — sub-MG steps don't run).
+- **`platform/main.bicepparam`**: Added `parIncludeSubMgPolicies = includeSubMgPolicies` and `subscriptionsToPlaceInManagementGroup: platformSubscriptions` (places `SUBSCRIPTION_ID_PLATFORM` under `platform` MG in simple mode).
+- **`platform/main-rbac.bicepparam`**: Added `parPlatformMode = platformMode` and `parCorpManagementGroupName = 'corp'`.
+
+### Deployment flow in simple mode
+
+1. Pre-create: `alz`, `landingzones`, `platform`, `sandbox`, `decommissioned`, `corp`, `online` (sub-MGs skipped)
+2. `governance-int-root` → `governance-platform` (now includes 5 extra policies) → `governance-landingzones` → corp/online → sandbox/decommissioned
+3. `governance-platform-rbac` (now absorbs connectivity RBAC in simple mode) → `governance-landingzones-rbac`
+4. `core-logging`
+
+Steps skipped in simple mode: `governance-platform-connectivity/identity/management/security` and `governance-platform-connectivity-rbac`.
+
+---
+
 ## Iteration Roadmap & PLATFORM_MODE Architecture Decision
 
 ### Iteration 1 scope (current)
