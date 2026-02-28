@@ -568,3 +568,54 @@ The platform MG hierarchy works like a river with a floodgate:
 **Why simple mode is the right default for iteration 1:** Most evaluation tenants have one subscription. Four empty child MGs with no subscriptions add structural complexity without governance benefit. Simple mode also gives a cleaner onboarding story — one subscription ID, one platform MG.
 
 ---
+
+## Feb 28: cleanup.ps1 — Subscription Movement Fix
+
+**Problem:** Running `cleanup.ps1` after a full deployment failed with `ResourceDeletionFailed` on the `governance-platform-connectivity` stack. ARM cannot delete a management group that still has a subscription in it. The stack's `DeleteAll` logic tried to delete the `connectivity` MG while the platform subscription was still placed there.
+
+**Fix:** Added `Remove-SubscriptionsFromHierarchy` as a pre-step before stack deletion. It iterates all known ALZ MG names and calls the `managementGroups/subscriptions` REST API to find any subscriptions placed there, then moves them to the tenant root MG before stacks are deleted.
+
+**Implementation detail:** Initial attempt used `Get-AzManagementGroup -Expand` and filtered children by `Type`. Failed because `Set-StrictMode -Version Latest` throws on property access when the object shape is inconsistent across Az PS versions. Fixed by using `Invoke-AzRestMethod` against the dedicated REST endpoint directly — more reliable and explicit.
+
+**Note:** This is a development-only concern. On a production tenant you would never run cleanup.
+
+---
+
+## Feb 28: Brownfield Discovery Script — Prototype
+
+A real brownfield tenant is being onboarded next week. Ahead of that, a discovery script (`scripts/discover.ps1`) was built as a read-only "git diff" diagnostic tool.
+
+### Concept
+
+The core analogy: brownfield adoption is like a merge conflict. The platform has a desired state (ALZ MG hierarchy, policy library, RBAC). The existing tenant has its own state. They've diverged. The discovery script surfaces where they agree (green), where there are decisions to make (yellow), and where there are hard conflicts that must be resolved before adoption (red).
+
+### What it does
+
+1. **Discovers** all subscriptions in the tenant and their current MG placement
+2. **Inventories** resource types per subscription
+3. **Flags resource conflicts** — matches resource types against a map of ALZ deny policies that would affect them (e.g. `Deny-Public-IP` → any `Microsoft.Network/publicIPAddresses`)
+4. **Flags policy definition conflicts** — enumerates existing custom policy definitions, initiatives, assignments, and role definitions that could collide with ALZ library names or be shadowed by incoming MG-level assignments
+5. **Classifies** each subscription as Green / Yellow / Red
+6. **Outputs** a color-coded console report and optionally a JSON file for further review
+
+### The "custom policies disappearing" concern
+
+A key requirement raised: existing custom policies must not be lost during adoption. Deployment Stacks with `DeleteAll` only manage what they deployed — they won't delete things they never owned. But two real risks remain:
+
+- **Name collision**: ALZ tries to create a policy def with the same name as an existing one → ARM deployment error
+- **Effect collision**: customer's sub-level or MG-level assignments overlap with incoming ALZ MG-level policies → unexpected effective policy
+
+The script surfaces both. All custom policy definitions/initiatives are flagged Yellow by default. The stub for full name-collision detection (comparing against the `.alz_policy_definition.json` library) is marked clearly — when implemented, confirmed collisions would escalate to Red.
+
+### Stubs (not yet implemented)
+
+- Deep NSG rule inspection (inbound allow 0.0.0.0/0 on port 22/3389 → Red)
+- Storage account public access check → Red
+- Actual name comparison against ALZ policy library files → flip Yellow → Red on confirmed collisions
+- Arbitrary MG hierarchy traversal (current implementation only checks known ALZ MG names)
+
+### Output artifact
+
+The `-OutputPath` flag writes the full result as JSON. This is the artifact to review with stakeholders before touching anything in the tenant. After review, decisions feed into a placement config (sub → target MG, policy exclusions, custom policies to preserve) that an adoption script would read.
+
+---
