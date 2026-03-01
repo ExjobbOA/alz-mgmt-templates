@@ -136,6 +136,7 @@ jobs:
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-first-deployment-check@main
         with:
           managementGroupId: ${{ env.INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID }}
+          parentManagementGroupId: ${{ env.MANAGEMENT_GROUP_ID }}
 
       # ---- WHAT-IF in proven order (same as Apply order below) ----
 

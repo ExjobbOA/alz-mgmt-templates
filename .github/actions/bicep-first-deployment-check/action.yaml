@@ -5,6 +5,15 @@ inputs:
   managementGroupId:
     description: 'The management group id to check'
     required: true
+  parentManagementGroupId:
+    description: >
+      Optional. The parent MG ID (tenant root GUID). When provided and a direct
+      Get-AzManagementGroup call returns 403 (which happens when the child MG does
+      not exist yet and Azure cannot walk an inheritance chain for a non-existent
+      scope), the action falls back to listing the parent's children to determine
+      whether the target MG exists. Pass MANAGEMENT_GROUP_ID here.
+    required: false
+    default: ''
 
 runs:
   using: "composite"
@@ -16,25 +25,48 @@ runs:
         azPSVersion: 'latest'
         inlineScript: |
           $ErrorActionPreference = "Stop"
-        
-          $mgId = $env:MG_TO_CHECK
+
+          $mgId          = $env:MG_TO_CHECK
+          $parentMgId    = $env:PARENT_MG_ID
           $firstDeployment = $true
-        
+
           try {
-            # If we can retrieve the MG, then the "intermediate root" exists -> not first deployment.
+            # Primary check: if we can retrieve the MG, it exists -> not first deployment.
             $null = Get-AzManagementGroup -GroupName $mgId -ErrorAction Stop
             Write-Host "Found the '$mgId' Management Group -> NOT first deployment."
             $firstDeployment = $false
           }
           catch {
             $msg = $_.Exception.Message
-          
-            $isNotFound = ($msg -match '(?i)not\s*found|could\s*not\s*be\s*found|ResourceNotFound|404')
+
+            $isNotFound   = ($msg -match '(?i)not\s*found|could\s*not\s*be\s*found|ResourceNotFound|404')
             $isAuthOrScope = ($msg -match '(?i)does not have authorization|AuthorizationFailed|Forbidden|403|scope is invalid')
-          
+
             if ($isNotFound) {
               Write-Warning "Management group '$mgId' not found. Treating as first deployment. Error: $msg"
               $firstDeployment = $true
+            }
+            elseif ($isAuthOrScope -and -not [string]::IsNullOrWhiteSpace($parentMgId)) {
+              # 403 on a non-existent child MG: Azure cannot walk an inheritance chain
+              # for a scope that doesn't exist yet, so it denies rather than returning 404.
+              # Fall back: list the parent MG's direct children (the plan UAMI has an
+              # explicit Reader assignment there, so this call succeeds).
+              Write-Warning "Got 403 querying '$mgId' directly. Falling back to listing children of parent MG '$parentMgId'..."
+              try {
+                $parentMg = Get-AzManagementGroup -GroupName $parentMgId -Expand -ErrorAction Stop
+                $childExists = $parentMg.Children | Where-Object { $_.Name -eq $mgId }
+                if ($childExists) {
+                  Write-Host "Found '$mgId' in children of '$parentMgId' -> NOT first deployment."
+                  $firstDeployment = $false
+                } else {
+                  Write-Host "'$mgId' not found in children of '$parentMgId' -> first deployment."
+                  $firstDeployment = $true
+                }
+              }
+              catch {
+                Write-Error "Fallback also failed — cannot determine first-deployment state. Error: $($_.Exception.Message)"
+                throw
+              }
             }
             elseif ($isAuthOrScope) {
               Write-Error "Cannot read management group '$mgId' due to missing permissions. This is NOT a valid first-deployment signal. Error: $msg"
@@ -45,10 +77,10 @@ runs:
               throw
             }
           }
-        
+
           echo "firstDeployment=$firstDeployment" >> $env:GITHUB_ENV
           echo "firstDeployment=$firstDeployment" >> $env:GITHUB_OUTPUT
 
       env:
-        MG_TO_CHECK: ${{ inputs.managementGroupId }}
-
+        MG_TO_CHECK:   ${{ inputs.managementGroupId }}
+        PARENT_MG_ID:  ${{ inputs.parentManagementGroupId }}
