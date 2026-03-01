@@ -145,7 +145,10 @@ function Confirm-Plan {
     Write-Step 'Cleanup plan'
     Write-Host ''
     Write-Host "  Will delete (if present):"
-    Write-Host "    Deployment stacks at MG '$Script:IntRootMgId' scope (governance stacks)"
+    Write-Host "    Governance Deployment Stacks at MG '$Script:IntRootMgId' scope"
+    Write-Host "    Governance int-root stack at tenant root MG '$Script:TenantRootMgId' scope"
+    Write-Host "    Subscription-scoped Deployment Stacks (core-logging, networking)"
+    Write-Host "    ALZ resource groups created by policies (rg-alz-*, rg-serviceHealthAlert)"
     Write-Host "    Management groups under '$Script:IntRootMgId' + '$Script:IntRootMgId' itself"
     Write-Host "    Resource group '$Script:IdentityRgName' in sub '$Script:BootstrapSubscriptionId'"
     Write-Host "    Role assignments for plan/apply UAMIs at MG '$Script:TenantRootMgId'"
@@ -155,6 +158,7 @@ function Confirm-Plan {
     Write-Host "    The tenant root management group ('$Script:TenantRootMgId')"
     Write-Host "    Any Azure subscriptions"
     Write-Host "    GitHub environments or variables"
+    Write-Host "    NetworkWatcherRG (Azure-managed)"
     Write-Host ''
 
     if ($DryRun) { Write-Warn 'DRY RUN — no changes will be made.'; return }
@@ -227,6 +231,7 @@ function Remove-GovernanceStacks {
     Write-Step 'Deleting governance Deployment Stacks'
 
     # Stack names: {intRootMgId}-{step-name}, deleted in reverse dependency order
+    # Stacks at IntRootMgId scope (all except int-root)
     $stackNames = @(
         # 1st pass: RBAC stacks (depend on everything else)
         "$Script:IntRootMgId-governance-platform-connectivity-rbac"
@@ -244,8 +249,6 @@ function Remove-GovernanceStacks {
         "$Script:IntRootMgId-governance-landingzones"
         "$Script:IntRootMgId-governance-sandbox"
         "$Script:IntRootMgId-governance-decommissioned"
-        # Last: int-root (owns policy + role defs)
-        "$Script:IntRootMgId-governance-int-root"
     )
 
     foreach ($stackName in $stackNames) {
@@ -271,6 +274,81 @@ function Remove-GovernanceStacks {
                 -Force | Out-Null
             Write-Ok "  Deleted: $stackName"
         } "Stack '$stackName' not found — skipped."
+    }
+
+    # int-root stack lives at the TENANT ROOT MG scope (not IntRootMgId) because
+    # the bicep-deploy action uses MANAGEMENT_GROUP_ID_OVERRIDE = MANAGEMENT_GROUP_ID
+    # for the governance-int-root step.
+    $intRootStackName = "$Script:IntRootMgId-governance-int-root"
+    Write-Info "  Stack: $intRootStackName (at tenant root scope)"
+
+    if ($DryRun) {
+        Write-Dry "  Remove-AzManagementGroupDeploymentStack -ManagementGroupId '$Script:TenantRootMgId' -Name '$intRootStackName' -ActionOnUnmanage DeleteAll -Force"
+    } else {
+        Invoke-WithSkip {
+            $existing = Get-AzManagementGroupDeploymentStack `
+                -ManagementGroupId $Script:TenantRootMgId `
+                -Name $intRootStackName `
+                -ErrorAction SilentlyContinue
+            if (-not $existing) { Write-Skip "  Stack '$intRootStackName' not found — skipping."; return }
+
+            Write-Info "  Deleting stack '$intRootStackName' (ActionOnUnmanage=DeleteAll)..."
+            Remove-AzManagementGroupDeploymentStack `
+                -ManagementGroupId $Script:TenantRootMgId `
+                -Name $intRootStackName `
+                -ActionOnUnmanage DeleteAll `
+                -Force | Out-Null
+            Write-Ok "  Deleted: $intRootStackName"
+        } "Stack '$intRootStackName' not found — skipped."
+    }
+}
+
+# ─── Step 2.5: Delete subscription-scoped Deployment Stacks ──────────────────
+function Remove-SubscriptionStacks {
+    Write-Step 'Deleting subscription-scoped Deployment Stacks'
+
+    if ($DryRun) {
+        Write-Dry "  Would list and delete ALZ subscription stacks in '$Script:BootstrapSubscriptionId'"
+        return
+    }
+
+    Select-AzSubscription -SubscriptionId $Script:BootstrapSubscriptionId | Out-Null
+
+    $stacks = Get-AzSubscriptionDeploymentStack -ErrorAction SilentlyContinue
+    if (-not $stacks) { Write-Skip 'No subscription-scoped stacks found.'; return }
+
+    $alzStacks = @($stacks | Where-Object { $_.Name -match 'alz|core-logging|networking' })
+    if ($alzStacks.Count -eq 0) { Write-Skip 'No ALZ subscription-scoped stacks found.'; return }
+
+    foreach ($stack in $alzStacks) {
+        Write-Info "  Stack: $($stack.Name)"
+        Remove-AzSubscriptionDeploymentStack `
+            -Name $stack.Name `
+            -ActionOnUnmanage DeleteAll `
+            -Force | Out-Null
+        Write-Ok "  Deleted: $($stack.Name)"
+    }
+}
+
+# ─── Step 2.6: Delete ALZ policy-created resource groups ──────────────────────
+function Remove-PolicyCreatedResourceGroups {
+    Write-Step 'Deleting ALZ policy-created resource groups'
+
+    Select-AzSubscription -SubscriptionId $Script:BootstrapSubscriptionId | Out-Null
+
+    $all = Get-AzResourceGroup -ErrorAction SilentlyContinue
+    $alzRgs = @($all | Where-Object {
+        ($_.ResourceGroupName -like 'rg-alz-*' -and $_.ResourceGroupName -ne $Script:IdentityRgName) -or
+        $_.ResourceGroupName -eq 'rg-serviceHealthAlert'
+    })
+
+    if ($alzRgs.Count -eq 0) { Write-Skip 'No ALZ policy-created resource groups found.'; return }
+
+    foreach ($rg in $alzRgs) {
+        Write-Info "  RG: $($rg.ResourceGroupName)"
+        if ($DryRun) { Write-Dry "  Remove-AzResourceGroup -Name '$($rg.ResourceGroupName)' -Force"; continue }
+        Remove-AzResourceGroup -Name $rg.ResourceGroupName -Force | Out-Null
+        Write-Ok "  Deleted: $($rg.ResourceGroupName)"
     }
 }
 
@@ -469,6 +547,8 @@ Confirm-Plan
 
 Remove-SubscriptionsFromHierarchy
 Remove-GovernanceStacks
+Remove-SubscriptionStacks
+Remove-PolicyCreatedResourceGroups
 Remove-ManagementGroupHierarchy
 Remove-IdentityResourceGroup
 Remove-UamiRoleAssignments
