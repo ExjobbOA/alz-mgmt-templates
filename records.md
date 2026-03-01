@@ -631,3 +631,47 @@ The script surfaces both. All custom policy definitions/initiatives are flagged 
 The `-OutputPath` flag writes the full result as JSON. This is the artifact to review with stakeholders before touching anything in the tenant. After review, decisions feed into a placement config (sub → target MG, policy exclusions, custom policies to preserve) that an adoption script would read.
 
 ---
+
+---
+
+## Mar 01: Networking Issues on Fresh Deployment — Three Bugs Fixed
+
+While enabling hub networking for the empirical testing pass, three separate failures surfaced and were fixed.
+
+### Bug 1: ALZ NSG Policy Blocks Placeholder Subnets
+
+**Error:** `RequestDisallowedByPolicy` — `AzureBastionSubnet` disallowed because it had no NSG.
+
+**Cause:** The hub networking `.bicepparam` pre-created subnets for Firewall, Bastion, VPN Gateway, and DNS Resolver even though all corresponding `deploy*` flags were `false`. The ALZ `Deny-Subnet-Without-Nsg` policy rejects any subnet without an NSG.
+
+**Fix:** Removed all placeholder subnets from both hub networks (swedencentral + northeurope). Comments in the file document how to re-add each subnet when enabling the corresponding resource. A VNet with no subnets is valid and policy-compliant.
+
+---
+
+### Bug 2: Enable-DDoS-VNET Policy Causes LinkedAuthorizationFailed
+
+**Error:** `LinkedAuthorizationFailed` — ARM tried to join VNets to a DDoS plan in subscription `00000000-0000-0000-0000-000000000000`.
+
+**Root cause:** The ALZ library ships `Enable-DDoS-VNET` with `effect: Modify` and a placeholder DDoS plan resource ID (`/subscriptions/00000000-.../placeholder`). In simple mode, `parIncludeSubMgPolicies=true` causes this assignment to be deployed at the **platform MG** scope — covering the platform subscription where the hub VNets live. No override existed to neutralise it.
+
+The existing override in `landingzones/main.bicepparam` only overrode `ddosPlan` (pointing to a plan that also doesn't exist since `deployDdosProtectionPlan: false`), leaving `effect: Modify` intact — so the policy still fired and still failed.
+
+**Fix:** Added `effect: Audit` override to both `platform/main.bicepparam` (missing override) and `landingzones/main.bicepparam` (wrong override). With `Audit` the policy reports non-compliant VNets but does not attempt to modify them. When a real DDoS plan is deployed, change the effect back to `Modify` and uncomment the `ddosPlan` override.
+
+---
+
+### Bug 3: First-Deployment Check Returns 403 Instead of 404 on Blank Tenant
+
+**Error:** `bicep-first-deployment-check` failed with `AuthorizationFailed` when querying the `alz` management group.
+
+**Root cause:** When `alz` doesn't exist yet, Azure cannot walk an RBAC inheritance chain from a non-existent scope and returns 403 instead of 404. The check correctly refuses to treat a permission error as a "not found" signal — but this made it impossible to run CD on a blank tenant immediately after onboarding, even though the plan UAMI has explicit Reader at the tenant root MG.
+
+**Fix:** Added optional `parentManagementGroupId` input to `bicep-first-deployment-check`. When a 403 is received, the action falls back to listing the parent MG's direct children (which the plan UAMI can always read via its explicit assignment). If `alz` is absent from the children list → first deployment. `MANAGEMENT_GROUP_ID` is passed as the parent from `cd-template.yaml`.
+
+---
+
+### Design Note: readEnvironmentVariable() vs. Extendable Params
+
+During a review of the official ALZ Bicep accelerator team's discussion, they described the repetition problem (every `.bicepparam` file must restate `location`, subscription IDs, etc.) and said extendable parameter files — currently experimental — will eventually solve it.
+
+Our platform already solves this today via `readEnvironmentVariable()` + `platform.json` as a single source of truth, exported to env vars by the `bicep-variables` CI action before any Bicep compile step. The approach works because we own the full build environment (GitHub Actions). The ALZ team's broader audience (arbitrary CI/CD setups, local terminal, Cloud Shell) makes a compile-time env var dependency less practical for them as a reference implementation.
