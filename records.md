@@ -670,6 +670,115 @@ The existing override in `landingzones/main.bicepparam` only overrode `ddosPlan`
 
 ---
 
+## Mar 02: platform.json Expansion — Iteration 2 Planning
+
+### Current state
+
+`platform.json` is the single source of truth for infrastructure-level config (subscription IDs, location, MG IDs, PLATFORM_MODE). All `.bicepparam` files derive compound resource IDs from these vars via Bicep string interpolation in var blocks — no hardcoded subscription IDs or location strings.
+
+### What's still hardcoded (identified via full scan)
+
+A scan of all `.bicepparam` files found the following values that should move to `platform.json` in iteration 2:
+
+| Value | Current location | Why it varies per tenant |
+|-------|-----------------|--------------------------|
+| Network address space primary (`10.0.0.0/22`) | `hubnetworking/main.bicepparam` | Every tenant has different IP ranges |
+| Network address space secondary (`10.1.0.0/22`) | `hubnetworking/main.bicepparam` | As above |
+| P2S VPN address pools (`172.16.0.0/24`, `172.16.1.0/24`) | `virtualwan/main.bicepparam` | Client VPN address space |
+| Log retention days (`365`) | `logging/main.bicepparam` | Compliance requirements vary |
+| LAW SKU (`PerGB2018`) | `logging/main.bicepparam` | Some tenants use Capacity Reservation |
+| Automation Account SKU (`Basic`) | `logging/main.bicepparam` | Tenant preference |
+| Deploy Automation Account (`false`) | `logging/main.bicepparam` | Not all tenants need it |
+| MG display names (`'Azure Landing Zones'`, `'Platform'`, etc.) | All MG `.bicepparam` files | Tenant branding |
+| Wait consistency counters | All MG `.bicepparam` files | Currently inconsistent (platform-security uses 30, others 10/40) — should be one central value |
+
+### Design decision
+
+The principle is: the more that can be edited in `platform.json`, the better. A tenant operator should never need to open a `.bicepparam` file for a standard deployment. Values that are already correctly derived from existing platform.json vars (resource names, RG names) should stay as var-block derivations — moving scalar inputs to platform.json and keeping derivation logic in var blocks is the right split.
+
+The Lunavi blog (`lunavi.com/blog/utilizing-bicep-parameter-files-with-alz-bicep`) independently arrived at the same pattern using a flat `.env` file. Key difference: they pre-build full resource ID strings in the env file. Our approach derives IDs in var blocks from scalar inputs — more maintainable since changing location or naming convention updates one var expression, not dozens of env var strings.
+
+### Planned iteration 2 additions to platform.json
+
+```json
+"NETWORK_ADDRESS_SPACE_PRIMARY": "10.0.0.0/22",
+"NETWORK_ADDRESS_SPACE_SECONDARY": "10.1.0.0/22",
+"P2S_VPN_ADDRESS_POOL_PRIMARY": "172.16.0.0/24",
+"P2S_VPN_ADDRESS_POOL_SECONDARY": "172.16.1.0/24",
+"LOG_RETENTION_DAYS": "365",
+"LAW_SKU": "PerGB2018",
+"AUTOMATION_ACCOUNT_SKU": "Basic",
+"DEPLOY_AUTOMATION_ACCOUNT": "false",
+"WAIT_COUNTER_POLICY_ASSIGNMENTS": "40",
+"WAIT_COUNTER_ROLE_ASSIGNMENTS": "40",
+"WAIT_COUNTER_DEFAULT": "10"
+```
+
+MG display names are lower priority — they could be added as individual keys (`MG_DISPLAY_NAME_ROOT`, `MG_DISPLAY_NAME_PLATFORM`, etc.) but are not needed for functional parity.
+
+---
+
+---
+
+## Mar 02: Iteration 2 Scope
+
+### Context
+
+The platform is built for a consulting company managing a fleet of customer tenants. Each customer gets their own config repo (`alz-mgmt`) while the templates repo is shared across all customers. This MSP model is the primary driver for several iteration 2 decisions — particularly brownfield adoption (consulting companies rarely get greenfield customers) and the tag pinning strategy (breaking changes in templates must not hit all customers simultaneously).
+
+### Architecture
+
+- **Create `alz` MG in bootstrap (`onboard.ps1`)** — enables OIDC plan UAMI to be scoped to `alz` instead of tenant root (least privilege). Cold-start workaround in `cd-template.yaml` and the full MG pre-create step can be removed as a consequence.
+- **Scope plan UAMI Reader to `alz`** — currently assigned at tenant root, which is broader than needed. Bootstrap creating `alz` first is the prerequisite for this.
+- **Tag templates repo** — `v1.0.0` for iteration 1, `v2.0.0` for iteration 2. All customer config repos pin to a specific tag rather than `@main`. Enables controlled rollout of template updates across the fleet — test on one customer before upgrading the rest.
+
+### platform.json expansion
+
+Move all remaining tenant-specific hardcoded values out of `.bicepparam` files:
+
+```json
+"NETWORK_ADDRESS_SPACE_PRIMARY": "10.0.0.0/22",
+"NETWORK_ADDRESS_SPACE_SECONDARY": "10.1.0.0/22",
+"P2S_VPN_ADDRESS_POOL_PRIMARY": "172.16.0.0/24",
+"P2S_VPN_ADDRESS_POOL_SECONDARY": "172.16.1.0/24",
+"LOG_RETENTION_DAYS": "365",
+"LAW_SKU": "PerGB2018",
+"AUTOMATION_ACCOUNT_SKU": "Basic",
+"DEPLOY_AUTOMATION_ACCOUNT": "false",
+"WAIT_COUNTER_POLICY_ASSIGNMENTS": "40",
+"WAIT_COUNTER_ROLE_ASSIGNMENTS": "40",
+"WAIT_COUNTER_DEFAULT": "10"
+```
+
+MG display names are lower priority but follow the same principle.
+
+### PLATFORM_MODE full
+
+- Formalize multi-subscription platform with connectivity/identity/management/security child MGs as a tested, supported path
+- Define the full-mode `platform.json` shape properly (four separate subscription IDs)
+- End-to-end test full mode deploy
+
+### Brownfield
+
+Highest priority after architecture. The consulting company's customers almost never start greenfield.
+
+- **Harden `discover.ps1`** — complete stubs: NSG inbound rule inspection, storage public access check, ALZ policy name collision detection against the `.alz_policy_definition.json` library
+- **Solve Deployment Stack adoption** — how to bring existing resources under stack management non-destructively. Core challenge: `DeleteAll` stacks will destroy resources they didn't create. Need a safe import path.
+- **Fleet scale** — `discover.ps1` should be runnable across multiple tenants in sequence, not just one at a time
+
+### Operational hardening
+
+- Harden `cleanup.ps1` robustness
+- Review role definitions — use built-in where possible instead of custom
+- Fix `ddosResourceId` unused variable warning in `landingzones/main.bicepparam`
+
+### MSP/fleet model
+
+- Document the one-templates-repo / many-config-repos pattern explicitly in `CLAUDE.md` and `README`
+- Define tag pinning strategy — how the consulting company communicates and rolls out template upgrades to customers
+
+---
+
 ### Design Note: readEnvironmentVariable() vs. Extendable Params
 
 During a review of the official ALZ Bicep accelerator team's discussion, they described the repetition problem (every `.bicepparam` file must restate `location`, subscription IDs, etc.) and said extendable parameter files — currently experimental — will eventually solve it.
