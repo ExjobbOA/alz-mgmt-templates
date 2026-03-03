@@ -38,19 +38,31 @@
 |------|-------|
 | Starttid | |
 | Sluttid | |
-| Utfall | |
-| Kommentar | |
+| Utfall | Succeeded |
+| Varaktighet | 44,89 sekunder |
+| Kommentar | GitHub environments skapade, UAMIs deployade, env-variabler skrivna |
 
 ### CD-körning #1
 
 | Fält | Värde |
 |------|-------|
-| Starttid | |
-| Sluttid | |
-| Actions run URL | |
-| Slutstatus | |
-| Antal retries | |
-| Kommentar | |
+| Starttid | 23:00 |
+| Sluttid | 00:20 |
+| Varaktighet | ~1h 20min |
+| Actions run URL | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22644686558 |
+| Slutstatus | Succeeded |
+| Antal retries | 1 (networking — VNet peering race condition, ARM-transient) |
+| Kommentar | Alla steg gröna. Retry hanterades automatiskt av pipeline. |
+
+### Azure-verifiering efter CD-körning #1
+
+| Check | Status |
+|-------|--------|
+| MG-hierarki (alz → platform, landingzones, sandbox, decommissioned) | ✅ |
+| Policy assignments på alz MG (16 st) + ytterligare på barn-MGs | ✅ |
+| Resource group rg-alz-logging-swedencentral med LAW, UAMI, DCRs | ✅ |
+| Resource groups rg-alz-conn-swedencentral och rg-alz-conn-northeurope med hub VNets | ✅ |
+| VNet peering Connected mellan swedencentral och northeurope | ✅ |
 
 ---
 
@@ -148,7 +160,7 @@ commit (revert) → PR → Actions run → återställt tillstånd
 
 | Kriterium | Körning | Datum | Utfall | Artefakt |
 |-----------|---------|-------|--------|----------|
-| K1 | #1 Cold start Oskar | 2026-03-03 | | |
+| K1 | #1 Cold start Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22644686558 |
 | K1 | #2 Idempotent Oskar | 2026-03-03 | | |
 | K1 | #3 Cold start Alen | 2026-03-03 | | |
 | K2 | Förändring (email) | 2026-03-03 | | |
@@ -156,5 +168,5 @@ commit (revert) → PR → Actions run → återställt tillstånd
 | K3 | Förändring via PR | 2026-03-03 | | |
 | K3 | Rollback via PR | 2026-03-03 | | |
 | K4 | Rollback-deploy | 2026-03-03 | | |
-| K6 | Cold start Oskar | 2026-03-03 | | |
+| K6 | Cold start Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22644686558 |
 | K6 | Cold start Alen | 2026-03-03 | | |
