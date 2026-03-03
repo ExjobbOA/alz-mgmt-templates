@@ -279,7 +279,7 @@ function Remove-GovernanceStacks {
     # int-root stack lives at the TENANT ROOT MG scope (not IntRootMgId) because
     # the bicep-deploy action uses MANAGEMENT_GROUP_ID_OVERRIDE = MANAGEMENT_GROUP_ID
     # for the governance-int-root step.
-    $intRootStackName = "$Script:IntRootMgId-governance-int-root"
+    $intRootStackName = "$Script:TenantRootMgId-governance-int-root"
     Write-Info "  Stack: $intRootStackName (at tenant root scope)"
 
     if ($DryRun) {
