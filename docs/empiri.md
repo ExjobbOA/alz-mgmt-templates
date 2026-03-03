@@ -72,12 +72,23 @@
 
 | Fält | Värde |
 |------|-------|
-| Starttid | |
+| Starttid | 00:31 |
 | Sluttid | |
-| Actions run URL | |
+| Actions run URL | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22647650534 |
 | Slutstatus | |
-| What-if: inga ändringar bekräftade | |
-| Kommentar | |
+| What-if: inga ändringar bekräftade | Ej tillämpligt — se not nedan |
+| Kommentar | skip_what_if: false |
+
+**Not — ARM what-if brus:**
+What-if-outputen visade sig vara opålitlig för governance-steg och kan inte användas som idempotensbevis:
+- `properties.definitionVersion` rapporteras tas bort på alla policy assignments — Azure-managed property som inte sätts av mallen (false positive)
+- `policyRule` visas som `~ Modify` på alla custom policy definitions — ARM kan inte resolva `copyIndex()` vid what-if-tid och jämför råa ARM-uttryck mot deployade värden (känd ARM-begränsning)
+- `doNotVerifyRemoteGateways: false → true` på VNet peerings — computed property, troligen false positive
+- governance-int-root: loggen trunkeras av GitHub Actions p.g.a. outputstorlek — sammanfattningsraden syns inte
+
+**Slutsats:** What-if är oanvändbar som förändringsindikator för policy-tung ALZ-infrastruktur. De flesta ALZ-team accepterar bruset. Pipeline Succeeded utan retries används som idempotensbevis för denna körning.
+
+**Metodbyte för Del 4 (Alens test):** ARM-state exporteras till JSON före och efter idempotenskörningen och jämförs med diff — ger ett definitivt, brusfrips bevis oberoende av what-if.
 
 ---
 
@@ -125,6 +136,43 @@ commit (revert) → PR → Actions run → återställt tillstånd
 ---
 
 ## Del 4 — Cold start Alen (K6 #2 + K1 #3)
+
+### Plan: ARM-state export för idempotensverifiering
+
+För att komplettera what-if (som är opålitlig för policy-tung infrastruktur) exporterar vi ARM-state
+före och efter idempotenskörningen och jämför med diff.
+
+**Steg:**
+1. Kör CD #3 (Alens cold start) → `Succeeded`
+2. Kör exportskript → sparar state till `export-after-cd3.json`
+3. Kör CD #4 (inga ändringar, skip_what_if: true)
+4. Kör exportskript → sparar state till `export-after-cd4.json`
+5. `diff export-after-cd3.json export-after-cd4.json` → förväntat: inga meningsfulla skillnader
+
+**Exportskript (PowerShell):**
+```powershell
+# Kör mot Alens tenant
+$state = @{
+    policyAssignments = @{}
+    vnets             = @()
+    law               = $null
+}
+
+# Policy assignments per MG
+foreach ($mg in @('alz','platform','landingzones','landingzones-corp','landingzones-online','sandbox','decommissioned')) {
+    $state.policyAssignments[$mg] = Get-AzPolicyAssignment -Scope "/providers/Microsoft.Management/managementGroups/$mg" |
+        Select-Object Name, @{n='parameters';e={$_.Properties.Parameters}} |
+        Sort-Object Name
+}
+
+# VNets
+$state.vnets = Get-AzVirtualNetwork | Select-Object Name, Location, AddressSpace, VirtualNetworkPeerings | Sort-Object Name
+
+# Log Analytics
+$state.law = Get-AzOperationalInsightsWorkspace | Select-Object Name, Location, Sku, RetentionInDays
+
+$state | ConvertTo-Json -Depth 10 | Out-File "export-after-cd3.json"  # byt till cd4 för andra körningen
+```
 
 ### Förutsättningar
 
