@@ -73,9 +73,10 @@
 | Fält | Värde |
 |------|-------|
 | Starttid | 00:31 |
-| Sluttid | |
+| Sluttid | 01:50 |
+| Varaktighet | ~1h 20min |
 | Actions run URL | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22647650534 |
-| Slutstatus | |
+| Slutstatus | Succeeded |
 | What-if: inga ändringar bekräftade | Ej tillämpligt — se not nedan |
 | Kommentar | skip_what_if: false |
 
@@ -137,42 +138,48 @@ commit (revert) → PR → Actions run → återställt tillstånd
 
 ## Del 4 — Cold start Alen (K6 #2 + K1 #3)
 
-### Plan: ARM-state export för idempotensverifiering
+### Plan: Deployment Stack-jämförelse för idempotensverifiering
 
-För att komplettera what-if (som är opålitlig för policy-tung infrastruktur) exporterar vi ARM-state
-före och efter idempotenskörningen och jämför med diff.
+What-if är opålitlig för policy-tung infrastruktur (se Del 2). Istället exporteras alla Deployment Stacks
+efter CD #3 och CD #4 och jämförs med diff. Stacks listar exakt vilka resurser de äger — om listan är
+identisk (bortsett från timestamps) är deployn bevisligen idempotent.
 
 **Steg:**
 1. Kör CD #3 (Alens cold start) → `Succeeded`
-2. Kör exportskript → sparar state till `export-after-cd3.json`
-3. Kör CD #4 (inga ändringar, skip_what_if: true)
-4. Kör exportskript → sparar state till `export-after-cd4.json`
-5. `diff export-after-cd3.json export-after-cd4.json` → förväntat: inga meningsfulla skillnader
+2. Kör exportskript → sparar till `stacks-after-cd3.json`
+3. Kör CD #4 (inga ändringar, `skip_what_if: true`)
+4. Kör exportskript → sparar till `stacks-after-cd4.json`
+5. Diff de två filerna (exkludera timestamps) → förväntat: identiska
 
 **Exportskript (PowerShell):**
 ```powershell
-# Kör mot Alens tenant
-$state = @{
-    policyAssignments = @{}
-    vnets             = @()
-    law               = $null
+$mgStacks = @(
+    @{ MgId = '3aadcd6c-...'; Name = '3aadcd6c-...-governance-int-root' }
+    @{ MgId = 'alz';          Name = 'alz-governance-platform' }
+    @{ MgId = 'alz';          Name = 'alz-governance-landingzones' }
+    @{ MgId = 'alz';          Name = 'alz-governance-landingzones-corp' }
+    @{ MgId = 'alz';          Name = 'alz-governance-landingzones-online' }
+    @{ MgId = 'alz';          Name = 'alz-governance-sandbox' }
+    @{ MgId = 'alz';          Name = 'alz-governance-decommissioned' }
+    @{ MgId = 'alz';          Name = 'alz-governance-rbac' }
+)
+
+$result = foreach ($s in $mgStacks) {
+    Get-AzManagementGroupDeploymentStack -ManagementGroupId $s.MgId -Name $s.Name |
+        Select-Object Name, ProvisioningState, Resources, DeletedResources, DetachedResources
 }
 
-# Policy assignments per MG
-foreach ($mg in @('alz','platform','landingzones','landingzones-corp','landingzones-online','sandbox','decommissioned')) {
-    $state.policyAssignments[$mg] = Get-AzPolicyAssignment -Scope "/providers/Microsoft.Management/managementGroups/$mg" |
-        Select-Object Name, @{n='parameters';e={$_.Properties.Parameters}} |
-        Sort-Object Name
-}
+# Subscription-scoped stacks
+$result += Get-AzSubscriptionDeploymentStack -Name 'alz-core-logging' |
+    Select-Object Name, ProvisioningState, Resources, DeletedResources, DetachedResources
+$result += Get-AzSubscriptionDeploymentStack -Name 'alz-networking-hub' |
+    Select-Object Name, ProvisioningState, Resources, DeletedResources, DetachedResources
 
-# VNets
-$state.vnets = Get-AzVirtualNetwork | Select-Object Name, Location, AddressSpace, VirtualNetworkPeerings | Sort-Object Name
-
-# Log Analytics
-$state.law = Get-AzOperationalInsightsWorkspace | Select-Object Name, Location, Sku, RetentionInDays
-
-$state | ConvertTo-Json -Depth 10 | Out-File "export-after-cd3.json"  # byt till cd4 för andra körningen
+$result | ConvertTo-Json -Depth 20 | Out-File "stacks-after-cd3.json"  # byt filnamn för cd4
 ```
+
+**Godkänt om:** `diff stacks-after-cd3.json stacks-after-cd4.json` visar inga skillnader utöver timestamps,
+och `DeletedResources`/`DetachedResources` är tomma i båda.
 
 ### Förutsättningar
 
@@ -209,7 +216,7 @@ $state | ConvertTo-Json -Depth 10 | Out-File "export-after-cd3.json"  # byt till
 | Kriterium | Körning | Datum | Utfall | Artefakt |
 |-----------|---------|-------|--------|----------|
 | K1 | #1 Cold start Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22644686558 |
-| K1 | #2 Idempotent Oskar | 2026-03-03 | | |
+| K1 | #2 Idempotent Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22647650534 |
 | K1 | #3 Cold start Alen | 2026-03-03 | | |
 | K2 | Förändring (email) | 2026-03-03 | | |
 | K2 | Rollback | 2026-03-03 | | |
