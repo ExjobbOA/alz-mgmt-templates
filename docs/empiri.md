@@ -231,36 +231,33 @@ och jämförs med diff. Metoden används för två syften:
 7. Kör exportskript → `stacks-after-cd5.json`
 8. Diff stacks-after-change.json vs stacks-after-cd5.json → identiska → K1 idempotens bevisat
 
-**Exportskript (PowerShell):**
+**Export och diff (PowerShell) — använder `scripts/Export-ALZStackState.ps1` och `scripts/Compare-ALZStackState.ps1`:**
+
 ```powershell
-$mgStacks = @(
-    @{ MgId = '3aadcd6c-...'; Name = '3aadcd6c-...-governance-int-root' }
-    @{ MgId = 'alz';          Name = 'alz-governance-platform' }
-    @{ MgId = 'alz';          Name = 'alz-governance-landingzones' }
-    @{ MgId = 'alz';          Name = 'alz-governance-landingzones-corp' }
-    @{ MgId = 'alz';          Name = 'alz-governance-landingzones-online' }
-    @{ MgId = 'alz';          Name = 'alz-governance-sandbox' }
-    @{ MgId = 'alz';          Name = 'alz-governance-decommissioned' }
-    @{ MgId = 'alz';          Name = 'alz-governance-rbac' }
-)
+# Export (kör med rätt -OutputFile per steg)
+cd c:\repos\alz-mgmt-templates
+./scripts/Export-ALZStackState.ps1 `
+    -OutputFile "state-alen-baseline.json" `
+    -SubscriptionId "<ALENS_SUBSCRIPTION_ID>" `
+    -TenantIntRootMgId "<ALENS_TENANT_GUID>"
 
-$result = foreach ($s in $mgStacks) {
-    Get-AzManagementGroupDeploymentStack -ManagementGroupId $s.MgId -Name $s.Name |
-        Select-Object Name, ProvisioningState, Resources, DeletedResources, DetachedResources
-}
+# Diff (K5: baseline vs after-change)
+powershell -ExecutionPolicy Bypass -File ./scripts/Compare-ALZStackState.ps1 `
+    -BeforeFile "state-alen-baseline.json" `
+    -AfterFile "state-alen-after-change.json"
 
-# Subscription-scoped stacks
-$result += Get-AzSubscriptionDeploymentStack -Name 'alz-core-logging' |
-    Select-Object Name, ProvisioningState, Resources, DeletedResources, DetachedResources
-$result += Get-AzSubscriptionDeploymentStack -Name 'alz-networking-hub' |
-    Select-Object Name, ProvisioningState, Resources, DeletedResources, DetachedResources
-
-$result | ConvertTo-Json -Depth 20 | Out-File "stacks-baseline.json"  # byt filnamn per körning
+# Diff (K1: after-change vs after-cd5)
+powershell -ExecutionPolicy Bypass -File ./scripts/Compare-ALZStackState.ps1 `
+    -BeforeFile "state-alen-after-change.json" `
+    -AfterFile "state-alen-after-cd5.json"
 ```
 
-**K1 godkänt om:** `diff stacks-after-change.json stacks-after-cd5.json` visar inga skillnader utöver timestamps, och `DeletedResources`/`DetachedResources` är tomma i båda.
+Skripten fångar två lager per stack: stack-metadata (DeploymentId) och resursinnehåll (policy
+assignment-parametrar). Se Del 3c för metodbeskrivning och exempeloutput.
 
-**K5 godkänt om:** `diff stacks-baseline.json stacks-after-change.json` visar skillnader **enbart** i governance-int-root-stacken (policy assignment-parametern emailSecurityContact), inga övriga stackar påverkade.
+**K5 godkänt om:** Compare-skriptet skriver `K5 PASSED` — enbart governance-int-root-stacken ändrades.
+
+**K1 godkänt om:** Compare-skriptet skriver `RESULT: No stacks changed. Deployment was fully idempotent.`
 
 ### Förutsättningar
 
