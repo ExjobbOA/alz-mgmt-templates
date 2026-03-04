@@ -102,17 +102,20 @@ What-if-outputen visade sig vara opålitlig för governance-steg och kan inte an
 | Ändring | `SECURITY_CONTACT_EMAIL: "" → "oskar.granlof@nordlo.com"` |
 | Commit SHA | ef01b55 |
 | PR-länk | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/66 |
-| Actions run URL | |
-| Slutstatus | |
-| Verifierad i Azure | |
+| Starttid | 14:55 |
+| Sluttid | 15:16 |
+| Varaktighet | ~21 min |
+| Actions run URL | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22672449387 |
+| Slutstatus | Succeeded |
+| Verifierad i Azure | ✅ Policy assignment "Deploy Microsoft Defender for Cloud configuration" på alz MG visar emailSecurityContact = "oskar.granlof@nordlo.com" |
 | Kommentar | Endast governance-int-root kördes (enda steget som påverkas av SECURITY_CONTACT_EMAIL) |
 
 ### Del 3b — Rollback
 
 | Fält | Värde |
 |------|-------|
-| Revert commit SHA | |
-| PR-länk | |
+| Revert commit SHA | 2139a5b |
+| PR-länk | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/67 |
 | Actions run URL | |
 | Slutstatus | |
 | Miljö återställd | |
@@ -128,11 +131,11 @@ commit (revert) → PR → Actions run → återställt tillstånd
 
 | Länk | Värde |
 |------|-------|
-| Change commit | |
-| Change PR | |
-| Change Actions run | |
-| Revert commit | |
-| Revert PR | |
+| Change commit | ef01b55 |
+| Change PR | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/66 |
+| Change Actions run | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22672449387 |
+| Revert commit | 2139a5b |
+| Revert PR | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/67 |
 | Revert Actions run | |
 
 ---
