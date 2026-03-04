@@ -128,20 +128,35 @@ What-if-outputen visade sig vara opålitlig för governance-steg och kan inte an
 
 ### Del 3c — K5 förändringspåverkan (Deployment Stack-diff, Oskars tenant)
 
-Baseline exporteras efter Del 3b (emailSecurityContact tomt). SECURITY_CONTACT_EMAIL sätts igen
-och deployment körs — diff ska visa att **enbart** governance-int-root-stacken påverkas.
+Metodbyte: ARM what-if är opålitlig för policy-tung infrastruktur (se Del 2). Istället används
+`Export-ALZStackState.ps1` + `Compare-ALZStackState.ps1` (scripts/ i templates-repot) för att
+fånga två lager per stack: stack-metadata (DeploymentId) och resursinnehåll (faktiska policy
+assignment-parametrar). Diff av JSON-exporterna ger definitiv, brusfrisk bevisning.
+
+**Baseline:** `SECURITY_CONTACT_EMAIL: "oskar.granlof@nordlo.com"` (nuläge efter Del 3a).
+**Förändring:** `SECURITY_CONTACT_EMAIL: "oskar.granlof@nordlo.com" → "test@example.com"`.
+Metodvalet att använda ett värde→värde-byte (inte tomt→värde) gör att baseline kan exporteras
+direkt utan extra CD-körning, och ger ett tydligare parameterdiff.
 
 | Fält | Värde |
 |------|-------|
-| Baseline-export | stacks-oskar-baseline.json |
-| Ändring | `SECURITY_CONTACT_EMAIL: "" → "oskar.granlof@nordlo.com"` |
-| Commit SHA | |
-| PR-länk | |
-| Actions run URL | |
-| Slutstatus | |
-| Export efter ändring | stacks-oskar-after-change.json |
-| Diff: endast governance-int-root | |
-| K5 godkänt | |
+| Baseline-export | state-before.json (exporterad 2026-03-04 21:00) |
+| Ändring | `SECURITY_CONTACT_EMAIL: "oskar.granlof@nordlo.com" → "test@example.com"` |
+| Commit SHA | 0b99811 |
+| PR-länk | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/69 |
+| Starttid CD | 21:17 |
+| Sluttid CD | 21:39 |
+| Varaktighet | ~22 min |
+| Actions run URL | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22687444623 |
+| Slutstatus | Succeeded |
+| CD-steg körda | governance-int-root only |
+| Export efter ändring | state-after.json (exporterad 2026-03-04 21:39) |
+| Diff: endast governance-int-root | ✅ |
+| K5 godkänt | ✅ |
+
+**Compare-skript output:**
+
+```
 
 ### Spårbarhet (K2)
 
@@ -301,7 +316,7 @@ $result | ConvertTo-Json -Depth 20 | Out-File "stacks-baseline.json"  # byt filn
 | K3 | Förändring via PR | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/66 |
 | K3 | Rollback via PR | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/67 |
 | K4 | Rollback-deploy | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22673623003 |
-| K5 | Förändringspåverkan Oskar (stack-diff) | 2026-03-04 | | stacks-oskar-baseline.json vs stacks-oskar-after-change.json |
-| K5 | Förändringspåverkan Alen (stack-diff) | 2026-03-04 | | stacks-baseline.json vs stacks-after-change.json |
+| K5 | Förändringspåverkan Oskar (stack-diff) | 2026-03-04 | K5 PASSED | state-before.json vs state-after.json — 1/11 stackar ändrad (governance-int-root), [CD run](https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22687444623) |
+| K5 | Förändringspåverkan Alen (stack-diff) | 2026-03-04 | | state-before.json vs state-after.json |
 | K6 | Cold start Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22644686558 |
 | K6 | Cold start Alen | 2026-03-04 | | |
