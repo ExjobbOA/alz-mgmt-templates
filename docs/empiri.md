@@ -58,11 +58,13 @@
 
 | Check | Status |
 |-------|--------|
-| MG-hierarki (alz → platform, landingzones, sandbox, decommissioned) | ✅ |
-| Policy assignments på alz MG (16 st) + ytterligare på barn-MGs | ✅ |
-| Resource group rg-alz-logging-swedencentral med LAW, UAMI, DCRs | ✅ |
-| Resource groups rg-alz-conn-swedencentral och rg-alz-conn-northeurope med hub VNets | ✅ |
-| VNet peering Connected mellan swedencentral och northeurope | ✅ |
+| MG-hierarki (alz → platform, landingzones, sandbox, decommissioned) | ✅ [screenshot](screenshots/del1-mg-hierarchy.png) |
+| Policy assignments på alz MG (16 st) | ✅ [screenshot](screenshots/del1-policy-assignments.png) |
+| Policy assignments på platform MG (61 st) | ✅ [screenshot](screenshots/del1-policy-platform.png) |
+| Policy assignments på landingzones MG (69 st) | ✅ [screenshot](screenshots/del1-policy-landingzones.png) |
+| Resource group rg-alz-logging-swedencentral med LAW, UAMI, DCRs | ✅ [screenshot](screenshots/del1-resource-groups.png) |
+| Resource groups rg-alz-conn-swedencentral och rg-alz-conn-northeurope med hub VNets | ✅ [screenshot](screenshots/del1-resource-groups.png) |
+| VNet peering Connected mellan swedencentral och northeurope | ✅ [screenshot](screenshots/del1-vnet-peering.png) |
 
 ---
 
@@ -102,21 +104,27 @@ What-if-outputen visade sig vara opålitlig för governance-steg och kan inte an
 | Ändring | `SECURITY_CONTACT_EMAIL: "" → "oskar.granlof@nordlo.com"` |
 | Commit SHA | ef01b55 |
 | PR-länk | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/66 |
-| Actions run URL | |
-| Slutstatus | |
-| Verifierad i Azure | |
+| Starttid | 14:55 |
+| Sluttid | 15:16 |
+| Varaktighet | ~21 min |
+| Actions run URL | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22672449387 |
+| Slutstatus | Succeeded |
+| Verifierad i Azure | ✅ emailSecurityContact = "oskar.granlof@nordlo.com" i policy assignment på alz MG — [screenshot](screenshots/del3a-email-set.png) |
 | Kommentar | Endast governance-int-root kördes (enda steget som påverkas av SECURITY_CONTACT_EMAIL) |
 
 ### Del 3b — Rollback
 
 | Fält | Värde |
 |------|-------|
-| Revert commit SHA | |
-| PR-länk | |
-| Actions run URL | |
-| Slutstatus | |
-| Miljö återställd | |
-| Kommentar | |
+| Revert commit SHA | 2139a5b |
+| PR-länk | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/67 |
+| Starttid | 15:25 |
+| Sluttid | 15:43 |
+| Varaktighet | ~18 min |
+| Actions run URL | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22673623003 |
+| Slutstatus | Succeeded |
+| Miljö återställd | ✅ emailSecurityContact tomt i policy assignment på alz MG — [screenshot](screenshots/del3b-email-empty.png) |
+| Kommentar | Endast governance-int-root kördes |
 
 ### Spårbarhet (K2)
 
@@ -128,12 +136,12 @@ commit (revert) → PR → Actions run → återställt tillstånd
 
 | Länk | Värde |
 |------|-------|
-| Change commit | |
-| Change PR | |
-| Change Actions run | |
-| Revert commit | |
-| Revert PR | |
-| Revert Actions run | |
+| Change commit | ef01b55 |
+| Change PR | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/66 |
+| Change Actions run | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22672449387 |
+| Revert commit | 2139a5b |
+| Revert PR | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/67 |
+| Revert Actions run | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22673623003 |
 
 ---
 
@@ -219,10 +227,10 @@ och `DeletedResources`/`DetachedResources` är tomma i båda.
 | K1 | #1 Cold start Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22644686558 |
 | K1 | #2 Idempotent Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22647650534 |
 | K1 | #3 Cold start Alen | 2026-03-03 | | |
-| K2 | Förändring (email) | 2026-03-03 | | |
-| K2 | Rollback | 2026-03-03 | | |
-| K3 | Förändring via PR | 2026-03-03 | | |
-| K3 | Rollback via PR | 2026-03-03 | | |
-| K4 | Rollback-deploy | 2026-03-03 | | |
+| K2 | Förändring (email) | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22672449387 |
+| K2 | Rollback | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22673623003 |
+| K3 | Förändring via PR | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/66 |
+| K3 | Rollback via PR | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/67 |
+| K4 | Rollback-deploy | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22673623003 |
 | K6 | Cold start Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22644686558 |
 | K6 | Cold start Alen | 2026-03-03 | | |
