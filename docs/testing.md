@@ -1,7 +1,8 @@
 # Empiriskt testpass — Iteration 1
 
-Syfte: Samla in empiri för utvärderingskriterierna K1, K2, K3, K4 och K6.
-K5 tillhör iteration 2 och ingår inte här.
+Syfte: Samla in empiri för utvärderingskriterierna K1, K2, K3, K4, K5 och K6.
+
+**K5 — uppdaterad mätmetod:** K5 definieras ursprungligen med ARM what-if som referenspunkt, men what-if är opålitlig för policy-tung ALZ-infrastruktur (se Del 2 i empiri.md). Mätmetoden ersätts med Deployment Stack-diff: alla stackar exporteras till JSON före och efter en avgränsad ändring och jämförs — om bara förväntade stackar skiljer sig är förändringspåverkan bevisligen kontrollerad.
 
 ---
 
@@ -184,9 +185,9 @@ commit (revert) → PR → Actions run → återställt tillstånd
 
 ---
 
-## Del 4 — Cold start Alen (K6 körning #2 + K1 körning #3)
+## Del 4 — Cold start Alen (K6 körning #2 + K1 körning #3 + K5)
 
-**Täcker:** K6 körning #2, K1 körning #3
+**Täcker:** K6 körning #2, K1 körning #3, K5 (Deployment Stack-diff)
 
 ```powershell
 # 1. Cleanup
@@ -206,12 +207,49 @@ cd c:\Users\granl\repos\alz-mgmt-templates
 # 3. CD i GitHub Actions för alz-mgmt-alen — alla steg
 ```
 
-### Dokumentera
+### Dokumentera (K6 + K1)
 
-- [ ] GitHub Actions run-URL
+- [ ] GitHub Actions run-URL (CD #3)
 - [ ] Slutstatus: Succeeded
 - [ ] Skärmdump: management group-hierarki i Azure-portalen (Alens tenant)
 - [ ] Jämför hierarkin med Oskars → ska vara identisk struktur
+
+### K5 — Deployment Stack-diff (kontrollerad förändringspåverkan)
+
+**Steg:**
+
+```powershell
+# 1. Exportera stacks efter CD #3 (baseline)
+Connect-AzAccount -TenantId 'c785e463-29cf-46e6-9b1d-ae17db0a6ac4'
+# Kör exportskript (se empiri.md Del 4) → stacks-baseline.json
+
+# 2. Applicera en avgränsad ändring i alz-mgmt-alen
+# Sätt SECURITY_CONTACT_EMAIL till en testadress i platform.json
+# Commit → PR → merge → Kör CD (endast governance-int-root)
+
+# 3. Exportera stacks efter ändringen
+# → stacks-after-change.json
+
+# 4. Diff
+# Förväntat: endast governance-int-root-stacken skiljer sig
+# Alla övriga stackar: identiska → förändringen var kontrollerad
+```
+
+- [ ] `stacks-baseline.json` sparad
+- [ ] `stacks-after-change.json` sparad
+- [ ] Diff visar att **endast** governance-int-root-stacken skiljer sig
+- [ ] Commit SHA + PR-länk för ändringen dokumenterad
+
+### Dokumentera (K5 idempotens — CD #4)
+
+```powershell
+# Kör CD igen utan ytterligare ändringar (skip_what_if: true)
+# → stacks-after-cd4.json
+# Diff stacks-after-change.json vs stacks-after-cd4.json → identiska
+```
+
+- [ ] `stacks-after-cd4.json` sparad
+- [ ] Diff: inga skillnader utöver timestamps
 
 ---
 
@@ -229,6 +267,7 @@ Fyll i efter passet:
 | K3 | Förändring via PR | | | PR-länk |
 | K3 | Rollback via PR | | | PR-länk |
 | K4 | Rollback-deploy | | | Actions run URL |
+| K5 | Förändringspåverkan (stack-diff) | | | stacks-baseline.json vs stacks-after-change.json |
 | K6 | Cold start Oskar | | | onboard output + Actions |
 | K6 | Cold start Alen | | | onboard output + Actions |
 
@@ -242,4 +281,5 @@ Fyll i efter passet:
 | K2 | Fullständig kedja commit → PR → pipeline → Azure-förändring dokumenterad |
 | K3 | Samtliga förändringar skedde via PR-flöde, noll direktmanipulation i portalen |
 | K4 | Miljön återställd utan manuell rekonstruktion, spårbart i loggar |
+| K5 | Diff visar att endast förväntade stackar förändrades, inga oavsiktliga sidoeffekter |
 | K6 | Cleanup → onboard → CD genomfört med enbart dokumenterade kommandon |
