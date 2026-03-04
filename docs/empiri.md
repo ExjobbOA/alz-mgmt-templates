@@ -99,12 +99,13 @@ What-if-outputen visade sig vara opålitlig för governance-steg och kan inte an
 
 | Fält | Värde |
 |------|-------|
-| Commit SHA | |
-| PR-länk | |
+| Ändring | `SECURITY_CONTACT_EMAIL: "" → "oskar.granlof@nordlo.com"` |
+| Commit SHA | ef01b55 |
+| PR-länk | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/66 |
 | Actions run URL | |
 | Slutstatus | |
 | Verifierad i Azure | |
-| Kommentar | |
+| Kommentar | Endast governance-int-root kördes (enda steget som påverkas av SECURITY_CONTACT_EMAIL) |
 
 ### Del 3b — Rollback
 
