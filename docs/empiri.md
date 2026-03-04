@@ -95,7 +95,7 @@ What-if-outputen visade sig vara opålitlig för governance-steg och kan inte an
 
 ---
 
-## Del 3 — Kontrollerad förändring + rollback (K2 + K3 + K4)
+## Del 3 — Kontrollerad förändring + rollback + K5 (K2 + K3 + K4 + K5)
 
 ### Del 3a — Applicera förändring (SECURITY_CONTACT_EMAIL)
 
@@ -126,6 +126,23 @@ What-if-outputen visade sig vara opålitlig för governance-steg och kan inte an
 | Miljö återställd | ✅ emailSecurityContact tomt i policy assignment på alz MG — [screenshot](screenshots/del3b-email-empty.png) |
 | Kommentar | Endast governance-int-root kördes |
 
+### Del 3c — K5 förändringspåverkan (Deployment Stack-diff, Oskars tenant)
+
+Baseline exporteras efter Del 3b (emailSecurityContact tomt). SECURITY_CONTACT_EMAIL sätts igen
+och deployment körs — diff ska visa att **enbart** governance-int-root-stacken påverkas.
+
+| Fält | Värde |
+|------|-------|
+| Baseline-export | stacks-oskar-baseline.json |
+| Ändring | `SECURITY_CONTACT_EMAIL: "" → "oskar.granlof@nordlo.com"` |
+| Commit SHA | |
+| PR-länk | |
+| Actions run URL | |
+| Slutstatus | |
+| Export efter ändring | stacks-oskar-after-change.json |
+| Diff: endast governance-int-root | |
+| K5 godkänt | |
+
 ### Spårbarhet (K2)
 
 ```
@@ -145,20 +162,25 @@ commit (revert) → PR → Actions run → återställt tillstånd
 
 ---
 
-## Del 4 — Cold start Alen (K6 #2 + K1 #3)
+## Del 4 — Cold start Alen (K6 #2 + K1 #3 + K5)
 
-### Plan: Deployment Stack-jämförelse för idempotensverifiering
+### Plan: Deployment Stack-jämförelse för idempotens- och förändringspåverkan
 
 What-if är opålitlig för policy-tung infrastruktur (se Del 2). Istället exporteras alla Deployment Stacks
-efter CD #3 och CD #4 och jämförs med diff. Stacks listar exakt vilka resurser de äger — om listan är
-identisk (bortsett från timestamps) är deployn bevisligen idempotent.
+och jämförs med diff. Metoden används för två syften:
+
+- **K1 idempotens:** Stacks före och efter en no-change-körning är identiska
+- **K5 förändringspåverkan:** Stacks före och efter en avgränsad ändring skiljer sig *enbart* på förväntade stackar
 
 **Steg:**
 1. Kör CD #3 (Alens cold start) → `Succeeded`
-2. Kör exportskript → sparar till `stacks-after-cd3.json`
-3. Kör CD #4 (inga ändringar, `skip_what_if: true`)
-4. Kör exportskript → sparar till `stacks-after-cd4.json`
-5. Diff de två filerna (exkludera timestamps) → förväntat: identiska
+2. Kör exportskript → `stacks-baseline.json`
+3. Applicera avgränsad ändring (`SECURITY_CONTACT_EMAIL`) → PR → merge → CD #4 (governance-int-root)
+4. Kör exportskript → `stacks-after-change.json`
+5. Diff: förväntat att **endast** governance-int-root-stacken skiljer → K5 bevisat
+6. Kör CD #5 (inga ändringar, `skip_what_if: true`)
+7. Kör exportskript → `stacks-after-cd5.json`
+8. Diff stacks-after-change.json vs stacks-after-cd5.json → identiska → K1 idempotens bevisat
 
 **Exportskript (PowerShell):**
 ```powershell
@@ -184,11 +206,12 @@ $result += Get-AzSubscriptionDeploymentStack -Name 'alz-core-logging' |
 $result += Get-AzSubscriptionDeploymentStack -Name 'alz-networking-hub' |
     Select-Object Name, ProvisioningState, Resources, DeletedResources, DetachedResources
 
-$result | ConvertTo-Json -Depth 20 | Out-File "stacks-after-cd3.json"  # byt filnamn för cd4
+$result | ConvertTo-Json -Depth 20 | Out-File "stacks-baseline.json"  # byt filnamn per körning
 ```
 
-**Godkänt om:** `diff stacks-after-cd3.json stacks-after-cd4.json` visar inga skillnader utöver timestamps,
-och `DeletedResources`/`DetachedResources` är tomma i båda.
+**K1 godkänt om:** `diff stacks-after-change.json stacks-after-cd5.json` visar inga skillnader utöver timestamps, och `DeletedResources`/`DetachedResources` är tomma i båda.
+
+**K5 godkänt om:** `diff stacks-baseline.json stacks-after-change.json` visar skillnader **enbart** i governance-int-root-stacken (policy assignment-parametern emailSecurityContact), inga övriga stackar påverkade.
 
 ### Förutsättningar
 
@@ -207,7 +230,7 @@ och `DeletedResources`/`DetachedResources` är tomma i båda.
 | Utfall | |
 | Kommentar | |
 
-### CD-körning #3
+### CD-körning #3 (cold start)
 
 | Fält | Värde |
 |------|-------|
@@ -217,6 +240,52 @@ och `DeletedResources`/`DetachedResources` är tomma i båda.
 | Slutstatus | |
 | Hierarki identisk med Oskars | |
 | Kommentar | |
+
+### Stack-export baseline
+
+| Fält | Värde |
+|------|-------|
+| Fil | stacks-baseline.json |
+| Status | |
+
+### CD-körning #4 — K5 förändring (SECURITY_CONTACT_EMAIL)
+
+| Fält | Värde |
+|------|-------|
+| Ändring | `SECURITY_CONTACT_EMAIL: "" → "test@example.com"` |
+| Commit SHA | |
+| PR-länk | |
+| Starttid | |
+| Sluttid | |
+| Actions run URL | |
+| Slutstatus | |
+| Kommentar | Endast governance-int-root |
+
+### Stack-export efter förändring
+
+| Fält | Värde |
+|------|-------|
+| Fil | stacks-after-change.json |
+| Diff mot baseline | |
+| K5 godkänt | |
+
+### CD-körning #5 — K1 idempotens (no-change)
+
+| Fält | Värde |
+|------|-------|
+| Starttid | |
+| Sluttid | |
+| Actions run URL | |
+| Slutstatus | |
+| Kommentar | skip_what_if: true |
+
+### Stack-export efter idempotenskörning
+
+| Fält | Värde |
+|------|-------|
+| Fil | stacks-after-cd5.json |
+| Diff mot stacks-after-change.json | |
+| K1 godkänt | |
 
 ---
 
@@ -232,5 +301,7 @@ och `DeletedResources`/`DetachedResources` är tomma i båda.
 | K3 | Förändring via PR | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/66 |
 | K3 | Rollback via PR | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/67 |
 | K4 | Rollback-deploy | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22673623003 |
+| K5 | Förändringspåverkan Oskar (stack-diff) | 2026-03-04 | | stacks-oskar-baseline.json vs stacks-oskar-after-change.json |
+| K5 | Förändringspåverkan Alen (stack-diff) | 2026-03-04 | | stacks-baseline.json vs stacks-after-change.json |
 | K6 | Cold start Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22644686558 |
-| K6 | Cold start Alen | 2026-03-03 | | |
+| K6 | Cold start Alen | 2026-03-04 | | |
