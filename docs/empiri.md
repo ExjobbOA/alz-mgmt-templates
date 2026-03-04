@@ -157,43 +157,6 @@ direkt utan extra CD-körning, och ger ett tydligare parameterdiff.
 **Compare-skript output:**
 
 ```
-============================================
- K5 Change Containment -- Diff Report
-============================================
-  CHANGED: 3aadcd6c-3c4c-49bc-a9d5-57b7fbf31db7-governance-int-root
-    DeploymentId changed
-    Resource changed: Deploy-MDFC-Config-H224
-      -> Policy assignment parameters changed
-      -> Parameter 'emailSecurityContact': {"value":"oskar.granlof@nordlo.com"} -> {"value":"test@example.com"}
-    Resource changed: Deploy-SvcHealth-BuiltIn
-      -> Policy assignment parameters changed
-      -> Parameter 'actionGroupResources': {"value":{"actionGroupEmail":["oskar.granlof@nordlo.com"],...}} -> {"value":{"actionGroupEmail":["test@example.com"],...}}
-  UNCHANGED: alz-governance-platform
-  UNCHANGED: alz-governance-landingzones
-  UNCHANGED: alz-governance-landingzones-corp
-  UNCHANGED: alz-governance-landingzones-online
-  UNCHANGED: alz-governance-sandbox
-  UNCHANGED: alz-governance-decommissioned
-  UNCHANGED: alz-governance-platform-rbac
-  UNCHANGED: alz-governance-landingzones-rbac
-  UNCHANGED: alz-core-logging
-  UNCHANGED: alz-networking-hub
-
-============================================
- Summary
-============================================
-Changed stacks:   1
-Unchanged stacks: 10
-
-RESULT: Only '3aadcd6c-...-governance-int-root' was affected.
-K5 PASSED: Change was contained to the expected scope.
-```
-
-**Analys:** Exakt två policy assignments påverkades — `Deploy-MDFC-Config-H224` (MDFC email-kontakt)
-och `Deploy-SvcHealth-BuiltIn` (service health action group email). Båda är förväntade — de är de
-enda assignments i governance-int-root-stacken som refererar till `SECURITY_CONTACT_EMAIL`.
-Alla övriga 10 stackar (platform, landingzones, rbac, core-logging, networking) är identiska.
-Förändringen var fullständigt kontrollerad och spred sig inte utanför governance-int-root.
 
 ### Spårbarhet (K2)
 
