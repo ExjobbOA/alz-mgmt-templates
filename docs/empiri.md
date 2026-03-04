@@ -58,11 +58,13 @@
 
 | Check | Status |
 |-------|--------|
-| MG-hierarki (alz → platform, landingzones, sandbox, decommissioned) | ✅ |
-| Policy assignments på alz MG (16 st) + ytterligare på barn-MGs | ✅ |
-| Resource group rg-alz-logging-swedencentral med LAW, UAMI, DCRs | ✅ |
-| Resource groups rg-alz-conn-swedencentral och rg-alz-conn-northeurope med hub VNets | ✅ |
-| VNet peering Connected mellan swedencentral och northeurope | ✅ |
+| MG-hierarki (alz → platform, landingzones, sandbox, decommissioned) | ✅ [screenshot](screenshots/del1-mg-hierarchy.png) |
+| Policy assignments på alz MG (16 st) | ✅ [screenshot](screenshots/del1-policy-assignments.png) |
+| Policy assignments på platform MG (61 st) | ✅ [screenshot](screenshots/del1-policy-platform.png) |
+| Policy assignments på landingzones MG (69 st) | ✅ [screenshot](screenshots/del1-policy-landingzones.png) |
+| Resource group rg-alz-logging-swedencentral med LAW, UAMI, DCRs | ✅ [screenshot](screenshots/del1-resource-groups.png) |
+| Resource groups rg-alz-conn-swedencentral och rg-alz-conn-northeurope med hub VNets | ✅ [screenshot](screenshots/del1-resource-groups.png) |
+| VNet peering Connected mellan swedencentral och northeurope | ✅ [screenshot](screenshots/del1-vnet-peering.png) |
 
 ---
 
@@ -107,7 +109,7 @@ What-if-outputen visade sig vara opålitlig för governance-steg och kan inte an
 | Varaktighet | ~21 min |
 | Actions run URL | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22672449387 |
 | Slutstatus | Succeeded |
-| Verifierad i Azure | ✅ Policy assignment "Deploy Microsoft Defender for Cloud configuration" på alz MG visar emailSecurityContact = "oskar.granlof@nordlo.com" |
+| Verifierad i Azure | ✅ emailSecurityContact = "oskar.granlof@nordlo.com" i policy assignment på alz MG — [screenshot](screenshots/del3a-email-set.png) |
 | Kommentar | Endast governance-int-root kördes (enda steget som påverkas av SECURITY_CONTACT_EMAIL) |
 
 ### Del 3b — Rollback
@@ -121,7 +123,7 @@ What-if-outputen visade sig vara opålitlig för governance-steg och kan inte an
 | Varaktighet | ~18 min |
 | Actions run URL | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22673623003 |
 | Slutstatus | Succeeded |
-| Miljö återställd | ✅ emailSecurityContact tomt i policy assignment på alz MG |
+| Miljö återställd | ✅ emailSecurityContact tomt i policy assignment på alz MG — [screenshot](screenshots/del3b-email-empty.png) |
 | Kommentar | Endast governance-int-root kördes |
 
 ### Spårbarhet (K2)
