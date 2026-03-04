@@ -116,10 +116,13 @@ What-if-outputen visade sig vara opålitlig för governance-steg och kan inte an
 |------|-------|
 | Revert commit SHA | 2139a5b |
 | PR-länk | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/67 |
-| Actions run URL | |
-| Slutstatus | |
-| Miljö återställd | |
-| Kommentar | |
+| Starttid | 15:25 |
+| Sluttid | 15:43 |
+| Varaktighet | ~18 min |
+| Actions run URL | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22673623003 |
+| Slutstatus | Succeeded |
+| Miljö återställd | ✅ emailSecurityContact tomt i policy assignment på alz MG |
+| Kommentar | Endast governance-int-root kördes |
 
 ### Spårbarhet (K2)
 
@@ -136,7 +139,7 @@ commit (revert) → PR → Actions run → återställt tillstånd
 | Change Actions run | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22672449387 |
 | Revert commit | 2139a5b |
 | Revert PR | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/67 |
-| Revert Actions run | |
+| Revert Actions run | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22673623003 |
 
 ---
 
@@ -222,10 +225,10 @@ och `DeletedResources`/`DetachedResources` är tomma i båda.
 | K1 | #1 Cold start Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22644686558 |
 | K1 | #2 Idempotent Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22647650534 |
 | K1 | #3 Cold start Alen | 2026-03-03 | | |
-| K2 | Förändring (email) | 2026-03-03 | | |
-| K2 | Rollback | 2026-03-03 | | |
-| K3 | Förändring via PR | 2026-03-03 | | |
-| K3 | Rollback via PR | 2026-03-03 | | |
-| K4 | Rollback-deploy | 2026-03-03 | | |
+| K2 | Förändring (email) | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22672449387 |
+| K2 | Rollback | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22673623003 |
+| K3 | Förändring via PR | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/66 |
+| K3 | Rollback via PR | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/67 |
+| K4 | Rollback-deploy | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22673623003 |
 | K6 | Cold start Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22644686558 |
 | K6 | Cold start Alen | 2026-03-03 | | |
