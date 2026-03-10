@@ -14,6 +14,7 @@
 | K2 | Spårbarhet | Fullständig kedja commit → PR → pipeline → Azure-förändring dokumenterad |
 | K3 | Kontrollerad process | Samtliga förändringar via PR-flöde, noll direktmanipulation i portalen |
 | K4 | Rollback | Miljön återställd utan manuell rekonstruktion, spårbart i loggar |
+| K5 | Förändringspåverkan | `Compare-ALZStackState.ps1` skriver `K5 PASSED` — enbart governance-int-root ändrades, alla övriga 10 stackar UNCHANGED |
 | K6 | Cold start | Onboard → CD genomfört mot greenfield-tenant med enbart dokumenterade kommandon |
 
 ---
