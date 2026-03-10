@@ -14,6 +14,7 @@
 | K2 | Spårbarhet | Fullständig kedja commit → PR → pipeline → Azure-förändring dokumenterad |
 | K3 | Kontrollerad process | Samtliga förändringar via PR-flöde, noll direktmanipulation i portalen |
 | K4 | Rollback | Miljön återställd utan manuell rekonstruktion, spårbart i loggar |
+| K5 | Förändringspåverkan | `Compare-ALZStackState.ps1` skriver `K5 PASSED` — enbart governance-int-root ändrades, alla övriga 10 stackar UNCHANGED |
 | K6 | Cold start | Onboard → CD genomfört mot greenfield-tenant med enbart dokumenterade kommandon |
 
 ---
@@ -211,75 +212,76 @@ commit (revert) → PR → Actions run → återställt tillstånd
 
 ---
 
-## Del 4 — Cold start Alen (K6 #2 + K1 #3 + K5)
+## Del 4 — Alens tenant (K6 + K1 + K2 + K3 + K4 + K5)
 
-### Plan: Deployment Stack-jämförelse för idempotens- och förändringspåverkan
+Alla kriterier verifieras på Alens greenfield-tenant. Export och diff via
+`scripts/Export-ALZStackState.ps1` + `scripts/Compare-ALZStackState.ps1` (se Del 3c för metodbeskrivning).
 
-What-if är opålitlig för policy-tung infrastruktur (se Del 2). Istället exporteras alla Deployment Stacks
-och jämförs med diff. Metoden används för två syften:
-
-- **K1 idempotens:** Stacks före och efter en no-change-körning är identiska
-- **K5 förändringspåverkan:** Stacks före och efter en avgränsad ändring skiljer sig *enbart* på förväntade stackar
-
-**Steg:**
-1. Kör CD #3 (Alens cold start) → `Succeeded`
-2. Kör exportskript → `stacks-baseline.json`
-3. Applicera avgränsad ändring (`SECURITY_CONTACT_EMAIL`) → PR → merge → CD #4 (governance-int-root)
-4. Kör exportskript → `stacks-after-change.json`
-5. Diff: förväntat att **endast** governance-int-root-stacken skiljer → K5 bevisat
-6. Kör CD #5 (inga ändringar, `skip_what_if: true`)
-7. Kör exportskript → `stacks-after-cd5.json`
-8. Diff stacks-after-change.json vs stacks-after-cd5.json → identiska → K1 idempotens bevisat
-
-**Exportskript (PowerShell):**
+Hämta Alens tenant-GUID och subscription-ID före start:
 ```powershell
-$mgStacks = @(
-    @{ MgId = '3aadcd6c-...'; Name = '3aadcd6c-...-governance-int-root' }
-    @{ MgId = 'alz';          Name = 'alz-governance-platform' }
-    @{ MgId = 'alz';          Name = 'alz-governance-landingzones' }
-    @{ MgId = 'alz';          Name = 'alz-governance-landingzones-corp' }
-    @{ MgId = 'alz';          Name = 'alz-governance-landingzones-online' }
-    @{ MgId = 'alz';          Name = 'alz-governance-sandbox' }
-    @{ MgId = 'alz';          Name = 'alz-governance-decommissioned' }
-    @{ MgId = 'alz';          Name = 'alz-governance-rbac' }
-)
-
-$result = foreach ($s in $mgStacks) {
-    Get-AzManagementGroupDeploymentStack -ManagementGroupId $s.MgId -Name $s.Name |
-        Select-Object Name, ProvisioningState, Resources, DeletedResources, DetachedResources
-}
-
-# Subscription-scoped stacks
-$result += Get-AzSubscriptionDeploymentStack -Name 'alz-core-logging' |
-    Select-Object Name, ProvisioningState, Resources, DeletedResources, DetachedResources
-$result += Get-AzSubscriptionDeploymentStack -Name 'alz-networking-hub' |
-    Select-Object Name, ProvisioningState, Resources, DeletedResources, DetachedResources
-
-$result | ConvertTo-Json -Depth 20 | Out-File "stacks-baseline.json"  # byt filnamn per körning
+Connect-AzAccount
+Get-AzTenant        # MANAGEMENT_GROUP_ID / TenantIntRootMgId
+Get-AzSubscription  # SubscriptionId
 ```
 
-**K1 godkänt om:** `diff stacks-after-change.json stacks-after-cd5.json` visar inga skillnader utöver timestamps, och `DeletedResources`/`DetachedResources` är tomma i båda.
+---
 
-**K5 godkänt om:** `diff stacks-baseline.json stacks-after-change.json` visar skillnader **enbart** i governance-int-root-stacken (policy assignment-parametern emailSecurityContact), inga övriga stackar påverkade.
-
-### Förutsättningar
+### Fas 1 — Förutsättningar
 
 | Check | Status |
 |-------|--------|
-| Tenant: enbart tenant root management group och en subscription | |
-| Utföraren är Owner + User Access Administrator på tenant root | |
-| GitHub-repot alz-mgmt-alen har inga environments | |
+| Tenant: enbart tenant root MG + en subscription | |
+| Inga GitHub environments i alz-mgmt-alen | |
+| `alz-mgmt-alen` på main, ren | |
+| `alz-mgmt-templates` på main, ren | |
+| `SECURITY_CONTACT_EMAIL: ""` i alz-mgmt-alen/config/platform.json | |
+| `az login --tenant <id>` + `gh auth login` klart | |
+| `Connect-AzAccount` + `Set-AzContext` klart (för cleanup + export) | |
 
-### Onboard
+---
+
+### Fas 2 — Cleanup
+
+```powershell
+Connect-AzAccount
+Set-AzContext -Subscription "<ALENS_SUB_ID>"
+cd c:\repos\alz-mgmt-templates
+./scripts/cleanup.ps1
+```
+
+| Fält | Värde |
+|------|-------|
+| Utfall | |
+| Kommentar | |
+
+---
+
+### Fas 3 — Onboard (K6)
+
+```powershell
+az login --tenant <ALENS_TENANT_GUID>
+gh auth login
+./scripts/onboard.ps1 `
+    -ConfigRepoPath       '../alz-mgmt-alen' `
+    -ModuleRepo           'alz-mgmt-alen' `
+    -BootstrapSubscriptionId '<ALENS_SUB_ID>' `
+    -ManagementGroupId    '<ALENS_TENANT_GUID>' `
+    -Location             'swedencentral'
+```
 
 | Fält | Värde |
 |------|-------|
 | Starttid | |
 | Sluttid | |
 | Utfall | |
+| GitHub environments skapade | |
 | Kommentar | |
 
-### CD-körning #3 (cold start)
+---
+
+### Fas 4 — CD #1: Cold start (K6 + K1 körning #3)
+
+Trigga CD med **alla steg aktiverade**.
 
 | Fält | Värde |
 |------|-------|
@@ -287,38 +289,118 @@ $result | ConvertTo-Json -Depth 20 | Out-File "stacks-baseline.json"  # byt filn
 | Sluttid | |
 | Actions run URL | |
 | Slutstatus | |
-| Hierarki identisk med Oskars | |
 | Kommentar | |
 
-### Stack-export baseline
+**Screenshots efter CD:**
+
+| Screenshot | Tagen |
+|------------|-------|
+| MG-hierarki | |
+| Policy assignments (int-root / alz-MG) | |
+| Policy assignments (platform-MG) | |
+| Policy assignments (landingzones-MG) | |
+| Resource groups på subscriptionen | |
+| VNet / hub peering | |
+
+---
+
+### Fas 5 — Stack-export baseline
+
+```powershell
+cd c:\repos\alz-mgmt-templates
+./scripts/Export-ALZStackState.ps1 `
+    -OutputFile "state-alen-baseline.json" `
+    -SubscriptionId "<ALENS_SUB_ID>" `
+    -TenantIntRootMgId "<ALENS_TENANT_GUID>"
+```
 
 | Fält | Värde |
 |------|-------|
-| Fil | stacks-baseline.json |
-| Status | |
+| Fil | state-alen-baseline.json |
+| Antal stackar exporterade | |
+| Alla ProvisioningState: succeeded | |
 
-### CD-körning #4 — K5 förändring (SECURITY_CONTACT_EMAIL)
+---
+
+### Fas 6 — K5 förändring: SECURITY_CONTACT_EMAIL (K2 + K3 + K5)
+
+I `alz-mgmt-alen`:
+```powershell
+git checkout -b test/k5-email-change
+# Sätt SECURITY_CONTACT_EMAIL: "alen@example.com" i config/platform.json
+git add config/platform.json
+git commit -m "test: set SECURITY_CONTACT_EMAIL for K5 stack-diff test"
+git push -u origin test/k5-email-change
+# Skapa PR, merga
+```
 
 | Fält | Värde |
 |------|-------|
-| Ändring | `SECURITY_CONTACT_EMAIL: "" → "test@example.com"` |
+| Ändring | `SECURITY_CONTACT_EMAIL: "" → "alen@example.com"` |
 | Commit SHA | |
 | PR-länk | |
+
+#### CD #2 — K5-ändring (governance-int-root only)
+
+| Fält | Värde |
+|------|-------|
 | Starttid | |
 | Sluttid | |
 | Actions run URL | |
 | Slutstatus | |
-| Kommentar | Endast governance-int-root |
 
-### Stack-export efter förändring
+**Screenshot:** Policy assignment `Deploy-MDFC-Config-H224` → `emailSecurityContact = "alen@example.com"` i Azure Portal.
+
+| Screenshot | Tagen |
+|------------|-------|
+| emailSecurityContact satt | |
+
+---
+
+### Fas 7 — Stack-export efter förändring + K5-diff
+
+```powershell
+./scripts/Export-ALZStackState.ps1 `
+    -OutputFile "state-alen-after-change.json" `
+    -SubscriptionId "<ALENS_SUB_ID>" `
+    -TenantIntRootMgId "<ALENS_TENANT_GUID>"
+
+powershell -ExecutionPolicy Bypass -File ./scripts/Compare-ALZStackState.ps1 `
+    -BeforeFile "state-alen-baseline.json" `
+    -AfterFile "state-alen-after-change.json"
+```
 
 | Fält | Värde |
 |------|-------|
-| Fil | stacks-after-change.json |
-| Diff mot baseline | |
+| Fil | state-alen-after-change.json |
 | K5 godkänt | |
 
-### CD-körning #5 — K1 idempotens (no-change)
+**Compare-skript output:**
+
+```
+(klistra in output här)
+```
+
+---
+
+### Fas 8 — Rollback: SECURITY_CONTACT_EMAIL (K4 + K2 + K3)
+
+I `alz-mgmt-alen`:
+```powershell
+git checkout -b test/k5-email-revert
+# Sätt SECURITY_CONTACT_EMAIL: "" i config/platform.json
+git add config/platform.json
+git commit -m "test: revert SECURITY_CONTACT_EMAIL for K4 rollback test"
+git push -u origin test/k5-email-revert
+# Skapa PR, merga
+```
+
+| Fält | Värde |
+|------|-------|
+| Commit SHA | |
+| PR-länk | |
+
+#### CD #3 — Rollback (governance-int-root only)
 
 | Fält | Värde |
 |------|-------|
@@ -326,15 +408,56 @@ $result | ConvertTo-Json -Depth 20 | Out-File "stacks-baseline.json"  # byt filn
 | Sluttid | |
 | Actions run URL | |
 | Slutstatus | |
-| Kommentar | skip_what_if: true |
 
-### Stack-export efter idempotenskörning
+**Screenshot:** `emailSecurityContact` tomt i Azure Portal.
+
+| Screenshot | Tagen |
+|------------|-------|
+| emailSecurityContact tomt | |
+
+---
+
+### Fas 9 — K1 Idempotens (stack-diff)
+
+Exportera state efter rollback, kör sedan CD igen utan ändringar, exportera igen och diff.
+
+```powershell
+./scripts/Export-ALZStackState.ps1 `
+    -OutputFile "state-alen-after-revert.json" `
+    -SubscriptionId "<ALENS_SUB_ID>" `
+    -TenantIntRootMgId "<ALENS_TENANT_GUID>"
+```
+
+#### CD #4 — Idempotens (governance-int-root only, inga ändringar)
 
 | Fält | Värde |
 |------|-------|
-| Fil | stacks-after-cd5.json |
-| Diff mot stacks-after-change.json | |
+| Starttid | |
+| Sluttid | |
+| Actions run URL | |
+| Slutstatus | |
+
+```powershell
+./scripts/Export-ALZStackState.ps1 `
+    -OutputFile "state-alen-after-cd4.json" `
+    -SubscriptionId "<ALENS_SUB_ID>" `
+    -TenantIntRootMgId "<ALENS_TENANT_GUID>"
+
+powershell -ExecutionPolicy Bypass -File ./scripts/Compare-ALZStackState.ps1 `
+    -BeforeFile "state-alen-after-revert.json" `
+    -AfterFile "state-alen-after-cd4.json"
+```
+
+| Fält | Värde |
+|------|-------|
+| Fil | state-alen-after-cd4.json |
 | K1 godkänt | |
+
+**Compare-skript output:**
+
+```
+(klistra in output här)
+```
 
 ---
 
