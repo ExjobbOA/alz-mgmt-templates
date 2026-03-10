@@ -271,11 +271,11 @@ gh auth login
 
 | Fält | Värde |
 |------|-------|
-| Starttid | |
-| Sluttid | |
-| Utfall | |
-| GitHub environments skapade | |
-| Kommentar | |
+| Starttid | 12:52 |
+| Sluttid | 12:53 |
+| Utfall | Succeeded |
+| GitHub environments skapade | alz-mgmt-plan + alz-mgmt-apply, båda med AZURE_CLIENT_ID satt |
+| Kommentar | Varaktighet ~1 min |
 
 ---
 
