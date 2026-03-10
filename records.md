@@ -770,12 +770,59 @@ Highest priority after architecture. The consulting company's customers almost n
 
 - Harden `cleanup.ps1` robustness
 - Review role definitions — use built-in where possible instead of custom
-- Fix `ddosResourceId` unused variable warning in `landingzones/main.bicepparam`
+- ~~Fix `ddosResourceId` unused variable warning in `landingzones/main.bicepparam`~~ — resolved Mar 10, see below
 
 ### MSP/fleet model
 
 - Document the one-templates-repo / many-config-repos pattern explicitly in `CLAUDE.md` and `README`
 - Define tag pinning strategy — how the consulting company communicates and rolls out template upgrades to customers
+
+---
+
+## Mar 10: Enable-DDoS-VNET Policy — LinkedAuthorizationFailed on Cold Start
+
+### Problem
+
+During Alen's tenant cold-start CD, the `alz-networking-hub` deployment stack failed consistently with:
+
+```
+LinkedAuthorizationFailed: The client has permission to perform action
+'Microsoft.Network/ddosProtectionPlans/join/action' on scope '.../vnet-alz-swedencentral',
+however the linked subscription '00000000-0000-0000-0000-000000000000' was not found.
+```
+
+The pipeline retried but failed every time — not a transient error.
+
+### Root Cause
+
+The ALZ policy library ships two `Enable-DDoS-VNET` policy assignments with `effect: Modify` and a placeholder DDoS plan ID:
+
+```
+/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/placeholder/providers/Microsoft.Network/ddosProtectionPlans/placeholder
+```
+
+- `lib/alz/platform/connectivity/Enable-DDoS-VNET.alz_policy_assignment.json` — scope: connectivity MG
+- `lib/alz/landingzones/Enable-DDoS-VNET.alz_policy_assignment.json` — scope: landingzones MG
+
+When the hub VNets are deployed under `platform-connectivity`, Azure Policy evaluates these assignments and the `Modify` effect attempts to associate the VNet with the placeholder DDoS plan. Since subscription `00000000-0000-0000-0000-000000000000` doesn't exist, ARM rejects the deployment with `LinkedAuthorizationFailed`.
+
+This is distinct from the Feb 21 "ghost parameter" issue (which was a Bicep template-level problem). This is a policy library default that has never been overridden in `alz-mgmt-alen`.
+
+Oskar's tenant did not exhibit this problem because `platform/main.bicepparam` and `landingzones/main.bicepparam` already had `effect: Audit` overrides (added during earlier troubleshooting). Alen's repo was missing these overrides, and `landingzones/main.bicepparam` only overrode `ddosPlan` (not `effect`), leaving `Modify` active with the placeholder ID.
+
+### Fix
+
+Set `effect: Audit` for `Enable-DDoS-VNET` in all three `.bicepparam` files in the tenant config repo:
+
+- `config/core/governance/mgmt-groups/int-root.bicepparam` (safety net — no assignment at this scope currently but future-proof)
+- `config/core/governance/mgmt-groups/platform/main.bicepparam` — covers the connectivity-scoped assignment
+- `config/core/governance/mgmt-groups/landingzones/main.bicepparam` — covers the landingzones-scoped assignment; `ddosPlan` override commented out since there's no deployed plan
+
+`Audit` was chosen over `Disabled` — the policy still reports non-compliance but doesn't modify resources. When a real DDoS Protection Plan is deployed in the future, change `effect` back to `Modify` and uncomment the `ddosPlan` override with the correct plan resource ID.
+
+### Required action for all tenant config repos
+
+Every tenant repo that doesn't deploy a DDoS Protection Plan must have these overrides. This is now standard in both `alz-mgmt-oskar` and `alz-mgmt-alen`.
 
 ---
 
