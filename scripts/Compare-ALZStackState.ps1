@@ -84,44 +84,73 @@ foreach ($beforeStack in $before.Stacks) {
 
             if (-not $afterSnap) { continue }
 
-            $beforeJson = $beforeSnap | ConvertTo-Json -Depth 20 -Compress
-            $afterJson  = $afterSnap  | ConvertTo-Json -Depth 20 -Compress
+            # Use type-aware semantic comparison instead of full JSON string comparison.
+            # ConvertTo-Json -Compress produces non-deterministic property ordering, causing
+            # false positives for unchanged resources. Compare only the fields that matter.
+            $resourceChanged = $false
+            $resourceName = ($beforeSnap.ResourceId -split "/")[-1]
 
-            if ($beforeJson -ne $afterJson) {
-                $resourceName = ($beforeSnap.ResourceId -split "/")[-1]
-                $differences += "Resource changed: $resourceName"
+            if ($beforeSnap.Type -eq "policyAssignment" -and $afterSnap.Type -eq "policyAssignment") {
+                # Compare enforcement mode
+                if ($beforeSnap.EnforcementMode -ne $afterSnap.EnforcementMode) {
+                    $resourceChanged = $true
+                    $differences += "Resource changed: $resourceName"
+                    $differences += "  -> EnforcementMode: $($beforeSnap.EnforcementMode) -> $($afterSnap.EnforcementMode)"
+                }
 
-                # Show specific parameter changes for policy assignments
-                if ($beforeSnap.Type -eq "policyAssignment" -and $afterSnap.Type -eq "policyAssignment") {
-                    $beforeParams = $beforeSnap.Parameters | ConvertTo-Json -Depth 10 -Compress
-                    $afterParams  = $afterSnap.Parameters  | ConvertTo-Json -Depth 10 -Compress
-                    if ($beforeParams -ne $afterParams) {
-                        $differences += "  -> Policy assignment parameters changed"
+                # Compare parameters key-by-key (sorted, value-serialized)
+                $bp = $beforeSnap.Parameters
+                $ap = $afterSnap.Parameters
+                $paramChanged = $false
+                $paramDiffs = @()
 
-                        $bp = $beforeSnap.Parameters
-                        $ap = $afterSnap.Parameters
+                if ($bp -or $ap) {
+                    $allKeys = @()
+                    if ($bp) { $bp.PSObject.Properties | ForEach-Object { $allKeys += $_.Name } }
+                    if ($ap) { $ap.PSObject.Properties | ForEach-Object { if ($_.Name -notin $allKeys) { $allKeys += $_.Name } } }
 
-                        if ($bp -and $ap) {
-                            $allKeys = @()
-                            $bp.PSObject.Properties | ForEach-Object { $allKeys += $_.Name }
-                            $ap.PSObject.Properties | ForEach-Object { if ($_.Name -notin $allKeys) { $allKeys += $_.Name } }
-
-                            foreach ($key in $allKeys) {
-                                $bv = ($bp.$key | ConvertTo-Json -Depth 5 -Compress)
-                                $av = ($ap.$key | ConvertTo-Json -Depth 5 -Compress)
-                                if ($bv -ne $av) {
-                                    $differences += "  -> Parameter '$key': $bv -> $av"
-                                }
-                            }
+                    foreach ($key in ($allKeys | Sort-Object)) {
+                        $bv = ($bp.$key | ConvertTo-Json -Depth 5 -Compress)
+                        $av = ($ap.$key | ConvertTo-Json -Depth 5 -Compress)
+                        if ($bv -ne $av) {
+                            $paramChanged = $true
+                            $paramDiffs += "  -> Parameter '$key': $bv -> $av"
                         }
                     }
                 }
 
-                # Show hash changes for policy definitions
+                if ($paramChanged) {
+                    if (-not $resourceChanged) {
+                        $resourceChanged = $true
+                        $differences += "Resource changed: $resourceName"
+                    }
+                    $differences += "  -> Policy assignment parameters changed"
+                    $differences += $paramDiffs
+                }
+            }
+            elseif ($beforeSnap.Type -eq "policyDefinition" -and $afterSnap.Type -eq "policyDefinition") {
                 if ($beforeSnap.PolicyRuleHash -and $afterSnap.PolicyRuleHash) {
                     if ($beforeSnap.PolicyRuleHash -ne $afterSnap.PolicyRuleHash) {
+                        $resourceChanged = $true
+                        $differences += "Resource changed: $resourceName"
                         $differences += "  -> PolicyRule hash changed"
                     }
+                }
+            }
+            elseif ($beforeSnap.Type -eq "policySetDefinition" -and $afterSnap.Type -eq "policySetDefinition") {
+                if ($beforeSnap.PolicyDefinitionCount -ne $afterSnap.PolicyDefinitionCount) {
+                    $resourceChanged = $true
+                    $differences += "Resource changed: $resourceName"
+                    $differences += "  -> PolicyDefinitionCount: $($beforeSnap.PolicyDefinitionCount) -> $($afterSnap.PolicyDefinitionCount)"
+                }
+            }
+            else {
+                # For other resource types fall back to JSON comparison (ResourceId, Type, Name fields only)
+                $bSafe = [PSCustomObject]@{ ResourceId = $beforeSnap.ResourceId; Type = $beforeSnap.Type; Name = $beforeSnap.Name }
+                $aSafe = [PSCustomObject]@{ ResourceId = $afterSnap.ResourceId;  Type = $afterSnap.Type;  Name = $afterSnap.Name  }
+                if (($bSafe | ConvertTo-Json -Compress) -ne ($aSafe | ConvertTo-Json -Compress)) {
+                    $resourceChanged = $true
+                    $differences += "Resource changed: $resourceName"
                 }
             }
         }
