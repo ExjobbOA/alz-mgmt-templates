@@ -426,33 +426,35 @@ K5 PASSED: Change was contained to the expected scope.
 
 I `alz-mgmt-alen`:
 ```powershell
-git checkout -b test/k5-email-revert
+git checkout -b test/revert-del4-k5-email
 # Sätt SECURITY_CONTACT_EMAIL: "" i config/platform.json
 git add config/platform.json
-git commit -m "test: revert SECURITY_CONTACT_EMAIL for K4 rollback test"
-git push -u origin test/k5-email-revert
+git commit -m "test: revert SECURITY_CONTACT_EMAIL for Del 4 K5 rollback test"
+git push -u origin test/revert-del4-k5-email
 # Skapa PR, merga
 ```
 
 | Fält | Värde |
 |------|-------|
-| Commit SHA | |
-| PR-länk | |
+| Ändring | `SECURITY_CONTACT_EMAIL: "alen@example.com" → ""` |
+| Commit SHA | 0987ca4 |
+| PR-länk | https://github.com/ExjobbOA/alz-mgmt-alen/pull/8 |
 
 #### CD #3 — Rollback (governance-int-root only)
 
 | Fält | Värde |
 |------|-------|
-| Starttid | |
-| Sluttid | |
-| Actions run URL | |
-| Slutstatus | |
+| Starttid | 13:50 |
+| Sluttid | 14:10 |
+| Varaktighet | ~20 min |
+| Actions run URL | https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22953276891 |
+| Slutstatus | Succeeded |
 
 **Screenshot:** `emailSecurityContact` tomt i Azure Portal.
 
 | Screenshot | Tagen |
 |------------|-------|
-| emailSecurityContact tomt | |
+| emailSecurityContact tomt | ✅ [screenshot](screenshots/del4-email-reverted.jpeg) |
 
 ---
 
@@ -471,10 +473,11 @@ Exportera state efter rollback, kör sedan CD igen utan ändringar, exportera ig
 
 | Fält | Värde |
 |------|-------|
-| Starttid | |
-| Sluttid | |
-| Actions run URL | |
-| Slutstatus | |
+| Starttid | 14:16 |
+| Sluttid | 14:38 |
+| Varaktighet | ~22 min |
+| Actions run URL | https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22954477017 |
+| Slutstatus | Succeeded |
 
 ```powershell
 ./scripts/Export-ALZStackState.ps1 `
@@ -490,12 +493,40 @@ powershell -ExecutionPolicy Bypass -File ./scripts/Compare-ALZStackState.ps1 `
 | Fält | Värde |
 |------|-------|
 | Fil | state-alen-after-cd4.json |
-| K1 godkänt | |
+| K1 godkänt | ✅ |
+
+**Not — idempotenstolkning:** `DeploymentId changed` är förväntat — varje CD-körning skapar ett nytt deployment. Frånvaron av `Resource changed`-rader bevisar att stack-innehållet (policy assignment-parametrar, enforcement mode, policy definition hashes) är identiskt före och efter omdriftsättningen.
 
 **Compare-skript output:**
 
 ```
-(klistra in output här)
+============================================
+ K5 Change Containment -- Diff Report
+============================================
+Before: state-alen-after-revert.json
+After:  state-alen-after-cd4.json
+
+  CHANGED: c785e463-29cf-46e6-9b1d-ae17db0a6ac4-governance-int-root
+    DeploymentId changed
+  UNCHANGED: alz-governance-platform
+  UNCHANGED: alz-governance-landingzones
+  UNCHANGED: alz-governance-landingzones-corp
+  UNCHANGED: alz-governance-landingzones-online
+  UNCHANGED: alz-governance-sandbox
+  UNCHANGED: alz-governance-decommissioned
+  UNCHANGED: alz-governance-platform-rbac
+  UNCHANGED: alz-governance-landingzones-rbac
+  UNCHANGED: alz-core-logging
+  UNCHANGED: alz-networking-hub
+
+============================================
+ Summary
+============================================
+Changed stacks:   1
+Unchanged stacks: 10
+
+RESULT: Only 'c785e463-...-governance-int-root' was affected.
+K5 PASSED: Change was contained to the expected scope.
 ```
 
 ---
@@ -507,11 +538,13 @@ powershell -ExecutionPolicy Bypass -File ./scripts/Compare-ALZStackState.ps1 `
 | K1 | #1 Cold start Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22644686558 |
 | K1 | #2 Idempotent Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22647650534 |
 | K1 | #3 Cold start Alen | 2026-03-10 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22905778818 |
+| K1 | #4 Idempotent Alen (stack-diff) | 2026-03-11 | K1 PASSED | state-alen-after-revert.json vs state-alen-after-cd4.json — DeploymentId ändrad, inget innehåll ändrat, [CD run](https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22954477017) |
 | K2 | Förändring (email) | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22672449387 |
 | K2 | Rollback | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22673623003 |
 | K3 | Förändring via PR | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/66 |
 | K3 | Rollback via PR | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/67 |
-| K4 | Rollback-deploy | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22673623003 |
+| K4 | Rollback-deploy Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22673623003 |
+| K4 | Rollback-deploy Alen | 2026-03-11 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22953276891 |
 | K5 | Förändringspåverkan Oskar (stack-diff) | 2026-03-04 | K5 PASSED | state-before.json vs state-after.json — 1/11 stackar ändrad (governance-int-root), [CD run](https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22687444623) |
 | K5 | Förändringspåverkan Alen (stack-diff) | 2026-03-10 | K5 PASSED | state-alen-baseline.json vs state-alen-after-change.json — 1/11 stackar ändrad (governance-int-root), [CD run](https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22912613229) |
 | K6 | Cold start Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22644686558 |
