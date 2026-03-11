@@ -271,11 +271,11 @@ gh auth login
 
 | Fält | Värde |
 |------|-------|
-| Starttid | |
-| Sluttid | |
-| Utfall | |
-| GitHub environments skapade | |
-| Kommentar | |
+| Starttid | 12:52 |
+| Sluttid | 12:53 |
+| Utfall | Succeeded |
+| GitHub environments skapade | alz-mgmt-plan + alz-mgmt-apply, båda med AZURE_CLIENT_ID satt |
+| Kommentar | Varaktighet ~1 min |
 
 ---
 
@@ -283,24 +283,28 @@ gh auth login
 
 Trigga CD med **alla steg aktiverade**.
 
+**Not — DDoS policy-bug:** Första körningsförsöket (starttid 12:57) avbröts vid networking-steget med `LinkedAuthorizationFailed` — Azure Policy `Enable-DDoS-VNET` med `Modify`-effekt injicerade ett placeholder DDoS-plan med subscription `00000000-0000-0000-0000-000000000000` i hub-VNetsen. Fixen (override `effect: Audit` i `platform/main.bicepparam` och `landingzones/main.bicepparam`, matchandes Oskars konfiguration) applicerades via PR i `alz-mgmt-alen` och `alz-mgmt-templates` innan omstarten. Omstarten kördes med skip_what_if.
+
 | Fält | Värde |
 |------|-------|
-| Starttid | |
-| Sluttid | |
-| Actions run URL | |
-| Slutstatus | |
-| Kommentar | |
+| Starttid | 14:51 |
+| Sluttid | 15:56 |
+| Varaktighet | ~1h 5min |
+| Actions run URL | https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22905778818 |
+| Slutstatus | Succeeded |
+| Kommentar | Ingen retry — alla steg gröna |
 
 **Screenshots efter CD:**
 
 | Screenshot | Tagen |
 |------------|-------|
-| MG-hierarki | |
-| Policy assignments (int-root / alz-MG) | |
-| Policy assignments (platform-MG) | |
-| Policy assignments (landingzones-MG) | |
-| Resource groups på subscriptionen | |
-| VNet / hub peering | |
+| MG-hierarki (alz → platform, landingzones, sandbox, decommissioned) | ✅ [screenshot](screenshots/del4-mg-hierarchy.jpeg) |
+| Policy assignments (alz-MG, 16 st) | ✅ [screenshot](screenshots/del4-policy-alz.jpeg) |
+| Policy assignments (platform-MG, 61 st) | ✅ [screenshot](screenshots/del4-policy-platform.jpeg) |
+| Policy assignments (landingzones-MG, 69 st) | ✅ [screenshot](screenshots/del4-policy-landingzones.jpeg) |
+| Resource groups på subscriptionen | ✅ [screenshot](screenshots/del4-resource-groups.jpeg) |
+| VNet swedencentral (capabilities, 1 peering) | ✅ [screenshot](screenshots/del4-vnet-overview.jpeg) |
+| VNet peering Connected (swedencentral ↔ northeurope) | ✅ [screenshot](screenshots/del4-vnet-peering.jpeg) |
 
 ---
 
@@ -317,8 +321,8 @@ cd c:\repos\alz-mgmt-templates
 | Fält | Värde |
 |------|-------|
 | Fil | state-alen-baseline.json |
-| Antal stackar exporterade | |
-| Alla ProvisioningState: succeeded | |
+| Antal stackar exporterade | 11 |
+| Alla ProvisioningState: succeeded | ✅ |
 
 ---
 
@@ -337,23 +341,24 @@ git push -u origin test/k5-email-change
 | Fält | Värde |
 |------|-------|
 | Ändring | `SECURITY_CONTACT_EMAIL: "" → "alen@example.com"` |
-| Commit SHA | |
-| PR-länk | |
+| Commit SHA | 3a2f8c0 |
+| PR-länk | https://github.com/ExjobbOA/alz-mgmt-alen/pull/7 |
 
 #### CD #2 — K5-ändring (governance-int-root only)
 
 | Fält | Värde |
 |------|-------|
-| Starttid | |
-| Sluttid | |
-| Actions run URL | |
-| Slutstatus | |
+| Starttid | 17:21 |
+| Sluttid | 17:44 |
+| Varaktighet | ~22 min |
+| Actions run URL | https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22912613229 |
+| Slutstatus | Succeeded |
 
 **Screenshot:** Policy assignment `Deploy-MDFC-Config-H224` → `emailSecurityContact = "alen@example.com"` i Azure Portal.
 
 | Screenshot | Tagen |
 |------------|-------|
-| emailSecurityContact satt | |
+| emailSecurityContact satt | ✅ [screenshot](screenshots/del4-email-set.png) |
 
 ---
 
@@ -370,15 +375,49 @@ powershell -ExecutionPolicy Bypass -File ./scripts/Compare-ALZStackState.ps1 `
     -AfterFile "state-alen-after-change.json"
 ```
 
+**Not — Compare-skript bugg åtgärdad:** Det ursprungliga `Compare-ALZStackState.ps1` jämförde hela resurs-snapshots som råa JSON-strängar via `ConvertTo-Json -Compress`. PowerShells JSON-serialisering producerar icke-deterministisk property-ordning mellan körningar, vilket gav falska positiver — 6 stackar rapporterades som ändrade trots att innehållet var identiskt. Scriptet skrevs om till typmedveten fältspecifik jämförelse: för `policyAssignment` jämförs `Parameters` nyckel-för-nyckel (sorterade) + `EnforcementMode`; för `policyDefinition` jämförs `PolicyRuleHash`; för `policySetDefinition` jämförs `PolicyDefinitionCount`. Efter fixen ger scriptet korrekt utfall.
+
 | Fält | Värde |
 |------|-------|
 | Fil | state-alen-after-change.json |
-| K5 godkänt | |
+| K5 godkänt | ✅ |
 
 **Compare-skript output:**
 
 ```
-(klistra in output här)
+============================================
+ K5 Change Containment -- Diff Report
+============================================
+Before: state-alen-baseline.json
+After:  state-alen-after-change.json
+
+  CHANGED: c785e463-29cf-46e6-9b1d-ae17db0a6ac4-governance-int-root
+    DeploymentId changed
+    Resource changed: Deploy-MDFC-Config-H224
+      -> Policy assignment parameters changed
+      -> Parameter 'emailSecurityContact': {"value":""} -> {"value":"alen@example.com"}
+    Resource changed: Deploy-SvcHealth-BuiltIn
+      -> Policy assignment parameters changed
+      -> Parameter 'actionGroupResources': {"value":{"actionGroupEmail":[""],...}} -> {"value":{"actionGroupEmail":["alen@example.com"],...}}
+  UNCHANGED: alz-governance-platform
+  UNCHANGED: alz-governance-landingzones
+  UNCHANGED: alz-governance-landingzones-corp
+  UNCHANGED: alz-governance-landingzones-online
+  UNCHANGED: alz-governance-sandbox
+  UNCHANGED: alz-governance-decommissioned
+  UNCHANGED: alz-governance-platform-rbac
+  UNCHANGED: alz-governance-landingzones-rbac
+  UNCHANGED: alz-core-logging
+  UNCHANGED: alz-networking-hub
+
+============================================
+ Summary
+============================================
+Changed stacks:   1
+Unchanged stacks: 10
+
+RESULT: Only 'c785e463-29cf-46e6-9b1d-ae17db0a6ac4-governance-int-root' was affected.
+K5 PASSED: Change was contained to the expected scope.
 ```
 
 ---
@@ -387,33 +426,35 @@ powershell -ExecutionPolicy Bypass -File ./scripts/Compare-ALZStackState.ps1 `
 
 I `alz-mgmt-alen`:
 ```powershell
-git checkout -b test/k5-email-revert
+git checkout -b test/revert-del4-k5-email
 # Sätt SECURITY_CONTACT_EMAIL: "" i config/platform.json
 git add config/platform.json
-git commit -m "test: revert SECURITY_CONTACT_EMAIL for K4 rollback test"
-git push -u origin test/k5-email-revert
+git commit -m "test: revert SECURITY_CONTACT_EMAIL for Del 4 K5 rollback test"
+git push -u origin test/revert-del4-k5-email
 # Skapa PR, merga
 ```
 
 | Fält | Värde |
 |------|-------|
-| Commit SHA | |
-| PR-länk | |
+| Ändring | `SECURITY_CONTACT_EMAIL: "alen@example.com" → ""` |
+| Commit SHA | 0987ca4 |
+| PR-länk | https://github.com/ExjobbOA/alz-mgmt-alen/pull/8 |
 
 #### CD #3 — Rollback (governance-int-root only)
 
 | Fält | Värde |
 |------|-------|
-| Starttid | |
-| Sluttid | |
-| Actions run URL | |
-| Slutstatus | |
+| Starttid | 13:50 |
+| Sluttid | 14:10 |
+| Varaktighet | ~20 min |
+| Actions run URL | https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22953276891 |
+| Slutstatus | Succeeded |
 
 **Screenshot:** `emailSecurityContact` tomt i Azure Portal.
 
 | Screenshot | Tagen |
 |------------|-------|
-| emailSecurityContact tomt | |
+| emailSecurityContact tomt | ✅ [screenshot](screenshots/del4-email-reverted.jpeg) |
 
 ---
 
@@ -432,10 +473,11 @@ Exportera state efter rollback, kör sedan CD igen utan ändringar, exportera ig
 
 | Fält | Värde |
 |------|-------|
-| Starttid | |
-| Sluttid | |
-| Actions run URL | |
-| Slutstatus | |
+| Starttid | 14:16 |
+| Sluttid | 14:38 |
+| Varaktighet | ~22 min |
+| Actions run URL | https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22954477017 |
+| Slutstatus | Succeeded |
 
 ```powershell
 ./scripts/Export-ALZStackState.ps1 `
@@ -451,12 +493,40 @@ powershell -ExecutionPolicy Bypass -File ./scripts/Compare-ALZStackState.ps1 `
 | Fält | Värde |
 |------|-------|
 | Fil | state-alen-after-cd4.json |
-| K1 godkänt | |
+| K1 godkänt | ✅ |
+
+**Not — idempotenstolkning:** `DeploymentId changed` är förväntat — varje CD-körning skapar ett nytt deployment. Frånvaron av `Resource changed`-rader bevisar att stack-innehållet (policy assignment-parametrar, enforcement mode, policy definition hashes) är identiskt före och efter omdriftsättningen.
 
 **Compare-skript output:**
 
 ```
-(klistra in output här)
+============================================
+ K5 Change Containment -- Diff Report
+============================================
+Before: state-alen-after-revert.json
+After:  state-alen-after-cd4.json
+
+  CHANGED: c785e463-29cf-46e6-9b1d-ae17db0a6ac4-governance-int-root
+    DeploymentId changed
+  UNCHANGED: alz-governance-platform
+  UNCHANGED: alz-governance-landingzones
+  UNCHANGED: alz-governance-landingzones-corp
+  UNCHANGED: alz-governance-landingzones-online
+  UNCHANGED: alz-governance-sandbox
+  UNCHANGED: alz-governance-decommissioned
+  UNCHANGED: alz-governance-platform-rbac
+  UNCHANGED: alz-governance-landingzones-rbac
+  UNCHANGED: alz-core-logging
+  UNCHANGED: alz-networking-hub
+
+============================================
+ Summary
+============================================
+Changed stacks:   1
+Unchanged stacks: 10
+
+RESULT: Only 'c785e463-...-governance-int-root' was affected.
+K5 PASSED: Change was contained to the expected scope.
 ```
 
 ---
@@ -467,13 +537,15 @@ powershell -ExecutionPolicy Bypass -File ./scripts/Compare-ALZStackState.ps1 `
 |-----------|---------|-------|--------|----------|
 | K1 | #1 Cold start Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22644686558 |
 | K1 | #2 Idempotent Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22647650534 |
-| K1 | #3 Cold start Alen | 2026-03-03 | | |
+| K1 | #3 Cold start Alen | 2026-03-10 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22905778818 |
+| K1 | #4 Idempotent Alen (stack-diff) | 2026-03-11 | K1 PASSED | state-alen-after-revert.json vs state-alen-after-cd4.json — DeploymentId ändrad, inget innehåll ändrat, [CD run](https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22954477017) |
 | K2 | Förändring (email) | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22672449387 |
 | K2 | Rollback | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22673623003 |
 | K3 | Förändring via PR | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/66 |
 | K3 | Rollback via PR | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/pull/67 |
-| K4 | Rollback-deploy | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22673623003 |
+| K4 | Rollback-deploy Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22673623003 |
+| K4 | Rollback-deploy Alen | 2026-03-11 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22953276891 |
 | K5 | Förändringspåverkan Oskar (stack-diff) | 2026-03-04 | K5 PASSED | state-before.json vs state-after.json — 1/11 stackar ändrad (governance-int-root), [CD run](https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22687444623) |
-| K5 | Förändringspåverkan Alen (stack-diff) | 2026-03-04 | | state-before.json vs state-after.json |
+| K5 | Förändringspåverkan Alen (stack-diff) | 2026-03-10 | K5 PASSED | state-alen-baseline.json vs state-alen-after-change.json — 1/11 stackar ändrad (governance-int-root), [CD run](https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22912613229) |
 | K6 | Cold start Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22644686558 |
-| K6 | Cold start Alen | 2026-03-04 | | |
+| K6 | Cold start Alen | 2026-03-10 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22905778818 |
