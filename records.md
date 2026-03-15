@@ -831,3 +831,80 @@ Every tenant repo that doesn't deploy a DDoS Protection Plan must have these ove
 During a review of the official ALZ Bicep accelerator team's discussion, they described the repetition problem (every `.bicepparam` file must restate `location`, subscription IDs, etc.) and said extendable parameter files — currently experimental — will eventually solve it.
 
 Our platform already solves this today via `readEnvironmentVariable()` + `platform.json` as a single source of truth, exported to env vars by the `bicep-variables` CI action before any Bicep compile step. The approach works because we own the full build environment (GitHub Actions). The ALZ team's broader audience (arbitrary CI/CD setups, local terminal, Cloud Shell) makes a compile-time env var dependency less practical for them as a reference implementation.
+
+---
+
+## Mar 13: Compare-ALZStackState.ps1 — False Positives Fixed
+
+### Problem
+
+After CD #2 (K5 email-change test on Alen's tenant), `Compare-ALZStackState.ps1` reported 6 stacks as changed instead of the expected 1. All 6 reported "Resource changed" despite having identical policy assignment parameters.
+
+### Root Cause
+
+The script compared full stack resource snapshots using `ConvertTo-Json -Depth 20 -Compress` string equality. PowerShell's `ConvertTo-Json` does not guarantee property ordering — the same object serialized twice can produce different JSON strings if the underlying hashtable iterates in different order. This caused false positives for every stack that was re-exported (new `DeploymentId`) but whose content was identical.
+
+Verified by manually comparing the flagged resources: `Enable-DDoS-VNET` had identical `ddosPlan` and `effect` values in both snapshots; the only difference was JSON property ordering.
+
+### Fix
+
+Replaced the full JSON string comparison with type-aware field-specific comparison:
+
+- **`policyAssignment`**: compare `Parameters` (keys sorted, values serialized) + `EnforcementMode`
+- **`policyDefinition`**: compare `PolicyRuleHash`
+- **`policySetDefinition`**: compare `PolicyDefinitionCount`
+
+After the fix, re-running the diff on the same snapshot files (`state-alen-baseline.json` vs `state-alen-after-change.json`) correctly reported 1 changed stack (governance-int-root) with exactly 2 parameter changes (`emailSecurityContact` and `actionGroupEmail`) — K5 PASSED.
+
+---
+
+## Mar 13: Iteration 2 — Config Monorepo Architecture Decision
+
+### Context
+
+Iteration 1 used one config repo per tenant (`alz-mgmt-oskar`, `alz-mgmt-alen`). At 2 tenants this is manageable. The target deployment context (Nordlo) operates 20+ tenants. Scaling the multi-repo model linearly — one repo, one set of GitHub environments, one workflow copy per tenant — is operationally impractical.
+
+During iteration 1 evaluation, the ALZ product team's guidance (ALZ Weekly Q&A — Week 10) was reviewed. Their recommendation for subscription vending: single repo, config-file-per-entity, pipeline as orchestrator. The core insight is directly applicable to our layer despite the difference in scope (subscription vending vs. full tenant governance platform vending).
+
+### Decision
+
+Adopt the **compromise monorepo** (Option C): consolidate all tenant config repos into a single `alz-mgmt` repo while keeping the engine repo (`alz-mgmt-templates`) separate.
+
+```
+alz-mgmt-templates/        ← engine repo (unchanged)
+alz-mgmt/                  ← consolidated tenant config repo
+  tenants/
+    oskar/config/
+      platform.json
+      *.bicepparam
+    alen/config/
+      platform.json
+      *.bicepparam
+  .github/workflows/
+    ci.yaml                 ← single workflow, matrix per affected tenant
+    cd.yaml                 ← single workflow, tenant selection parameter
+```
+
+### Rationale
+
+A full monorepo (engine + config in one repo) was evaluated and rejected. The engine and config repos change at different rates, for different reasons, by different roles — merging them would require CI to distinguish between template changes (revalidate all tenants) and config changes (validate affected tenant only), adding complexity without meaningful benefit.
+
+The multi-repo model from iteration 1 is not deprecated — it remains the correct choice for strict org-boundary isolation scenarios where a customer requires their config to live in their own GitHub org.
+
+### What changes
+
+- CI: path filtering on `tenants/**`, matrix build from `git diff` to find affected tenant folders
+- CD: explicit tenant name parameter; deploy job scopes to `tenants/<name>/config/`, selects the correct GitHub environment and OIDC identity
+- `onboard.ps1`: creates a folder + writes `platform.json` instead of creating a full GitHub repo
+- `cleanup.ps1`: removes the tenant folder instead of deleting a repository
+- GitHub OIDC: environments and federated credentials remain per-tenant, but all live in the single `alz-mgmt` repo — FIC subject claims use environment name to discriminate tenants
+
+### What stays the same
+
+Engine repo, `.bicepparam` format, `readEnvironmentVariable()` pattern, `platform.json` schema, deployment stacks, OIDC identity strategy (per-tenant plan + apply UAMIs), K5 stack state tooling.
+
+### Open question: engine changes triggering config repo CI
+
+`git diff`-based matrix detection works for config changes but not for engine repo changes. When a template is updated in `alz-mgmt-templates`, no change lands in `alz-mgmt` — CI does not auto-trigger. Options: (1) repository dispatch webhook from templates repo to config repo on release tag push, (2) scheduled nightly validation, (3) manual trigger. This is an unresolved CI design problem to address during iteration 2 implementation.
+
+Full trade-off analysis: `docs/iteration2-repo-architecture-tradeoff.md`.
