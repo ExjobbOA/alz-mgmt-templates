@@ -16,6 +16,8 @@
 | T4 | Rollback | Att miljön kan återställas utan manuell rekonstruktion, spårbart i loggar |
 | T5 | Förändringspåverkan | Att en förändring enbart påverkar förväntade Deployment Stacks (`Compare-ALZStackState.ps1`) |
 | T6 | Cold start | Att onboarding och CD kan genomföras mot en greenfield-tenant med enbart dokumenterade kommandon |
+| T8 | Driftskydd via deny assignments | Att Deployment Stacks deny assignments förhindrar manuell manipulation av plattformsresurser |
+| T9 | Hemlighetshantering | Att inga hemligheter lagras i klartext och att känslig data injiceras via säkra mekanismer |
 
 ---
 
@@ -37,8 +39,8 @@
 
 | Fält | Värde |
 |------|-------|
-| Starttid | |
-| Sluttid | |
+| Starttid | 22:50 |
+| Sluttid | 22:51 |
 | Utfall | Succeeded |
 | Varaktighet | 44,89 sekunder |
 | Kommentar | GitHub environments skapade, UAMIs deployade, env-variabler skrivna |
@@ -69,30 +71,90 @@
 
 ---
 
-## Del 2 — Idempotent omdriftsättning Oskar (T1 #2)
+## Del 2 — Idempotent omdriftsättning Oskar (T1 #2, stack-diff)
+
+**Not:** Det ursprungliga idempotensbeviset (CD-körning #2, 2026-03-04) baserades på ARM what-if,
+som visade sig vara opålitlig för policy-tung infrastruktur och inte kan användas som bevis.
+Detta steg körs om med stack-export-metoden för att ge ett definitivt, brusfriskt resultat.
+
+Baseline exporteras från nuläget (tenant i post-Del 3-state), sedan körs CD utan ändringar
+och en ny export tas. Export och diff via `scripts/Export-ALZStackState.ps1` +
+`scripts/Compare-ALZStackState.ps1` (se Del 4 Fas 9 för metodbeskrivning).
+
+### Stack-export baseline
+
+```powershell
+cd c:\repos\alz-mgmt-templates
+./scripts/Export-ALZStackState.ps1 `
+    -OutputFile "state-oskar-before-cd2.json" `
+    -SubscriptionId "<OSKARS_SUB_ID>" `
+    -TenantIntRootMgId "<OSKARS_TENANT_GUID>"
+```
+
+| Fält | Värde |
+|------|-------|
+| Fil | state-oskar-before-cd2.json |
+| Antal stackar exporterade | |
+| Alla ProvisioningState: succeeded | |
 
 ### CD-körning #2 (inga ändringar)
 
 | Fält | Värde |
 |------|-------|
-| Starttid | 00:31 |
-| Sluttid | 01:50 |
-| Varaktighet | ~1h 20min |
-| Actions run URL | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22647650534 |
+| Starttid | 21:03 |
+| Sluttid | 22:12 |
+| Varaktighet | ~1h 9min |
+| Actions run URL | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/23163410866 |
 | Slutstatus | Succeeded |
-| What-if: inga ändringar bekräftade | Ej tillämpligt — se not nedan |
-| Kommentar | skip_what_if: false |
 
-**Not — ARM what-if brus:**
-What-if-outputen visade sig vara opålitlig för governance-steg och kan inte användas som idempotensbevis:
-- `properties.definitionVersion` rapporteras tas bort på alla policy assignments — Azure-managed property som inte sätts av mallen (false positive)
-- `policyRule` visas som `~ Modify` på alla custom policy definitions — ARM kan inte resolva `copyIndex()` vid what-if-tid och jämför råa ARM-uttryck mot deployade värden (känd ARM-begränsning)
-- `doNotVerifyRemoteGateways: false → true` på VNet peerings — computed property, troligen false positive
-- governance-int-root: loggen trunkeras av GitHub Actions p.g.a. outputstorlek — sammanfattningsraden syns inte
+### Stack-export efter + diff
 
-**Slutsats:** What-if är oanvändbar som förändringsindikator för policy-tung ALZ-infrastruktur. De flesta ALZ-team accepterar bruset. Pipeline Succeeded utan retries används som idempotensbevis för denna körning.
+```powershell
+./scripts/Export-ALZStackState.ps1 `
+    -OutputFile "state-oskar-after-cd2.json" `
+    -SubscriptionId "<OSKARS_SUB_ID>" `
+    -TenantIntRootMgId "<OSKARS_TENANT_GUID>"
 
-**Metodbyte för Del 4 (Alens test):** ARM-state exporteras till JSON före och efter idempotenskörningen och jämförs med diff — ger ett definitivt, brusfrips bevis oberoende av what-if.
+powershell -ExecutionPolicy Bypass -File ./scripts/Compare-ALZStackState.ps1 `
+    -BeforeFile "state-oskar-before-cd2.json" `
+    -AfterFile "state-oskar-after-cd2.json"
+```
+
+| Fält | Värde |
+|------|-------|
+| Fil efter | state-oskar-after-cd2.json |
+| T1 utfall | ✅ |
+
+**Compare-skript output:**
+
+```
+============================================
+ ALZ Stack Diff Report
+============================================
+Before: state-oskar-before-cd2.json
+After:  state-oskar-after-cd2.json
+
+  REDEPLOYED (no content change): 3aadcd6c-3c4c-49bc-a9d5-57b7fbf31db7-governance-int-root
+  REDEPLOYED (no content change): alz-governance-platform
+  REDEPLOYED (no content change): alz-governance-landingzones
+  REDEPLOYED (no content change): alz-governance-landingzones-corp
+  REDEPLOYED (no content change): alz-governance-landingzones-online
+  REDEPLOYED (no content change): alz-governance-sandbox
+  REDEPLOYED (no content change): alz-governance-decommissioned
+  REDEPLOYED (no content change): alz-governance-platform-rbac
+  REDEPLOYED (no content change): alz-governance-landingzones-rbac
+  REDEPLOYED (no content change): alz-core-logging
+  REDEPLOYED (no content change): alz-networking-hub
+
+============================================
+ Summary
+============================================
+Content changed:  0
+Redeployed only:  11
+Unchanged:        0
+
+RESULT: No content changes detected.
+```
 
 ---
 
@@ -462,6 +524,8 @@ git push -u origin test/revert-del4-k5-email
 
 Exportera state efter rollback, kör sedan CD igen utan ändringar, exportera igen och diff.
 
+**Not:** CD #4 körde enbart `governance-int-root` — inte tillräckligt rigoröst som idempotensbevis för hela plattformen. CD #5 (nedan) kör alla steg.
+
 ```powershell
 ./scripts/Export-ALZStackState.ps1 `
     -OutputFile "state-alen-after-revert.json" `
@@ -529,6 +593,144 @@ RESULT: Only 'c785e463-...-governance-int-root' was affected.
 K5 PASSED: Change was contained to the expected scope.
 ```
 
+#### CD #5 — Idempotens (alla steg, inga ändringar)
+
+```powershell
+./scripts/Export-ALZStackState.ps1 `
+    -OutputFile "state-alen-before-cd5.json" `
+    -SubscriptionId "<ALENS_SUB_ID>" `
+    -TenantIntRootMgId "<ALENS_TENANT_GUID>"
+```
+
+| Fält | Värde |
+|------|-------|
+| Starttid | |
+| Sluttid | |
+| Varaktighet | |
+| Actions run URL | |
+| Slutstatus | |
+
+```powershell
+./scripts/Export-ALZStackState.ps1 `
+    -OutputFile "state-alen-after-cd5.json" `
+    -SubscriptionId "<ALENS_SUB_ID>" `
+    -TenantIntRootMgId "<ALENS_TENANT_GUID>"
+
+powershell -ExecutionPolicy Bypass -File ./scripts/Compare-ALZStackState.ps1 `
+    -BeforeFile "state-alen-before-cd5.json" `
+    -AfterFile "state-alen-after-cd5.json"
+```
+
+| Fält | Värde |
+|------|-------|
+| Fil baseline | state-alen-before-cd5.json |
+| Fil efter | state-alen-after-cd5.json |
+| T1 utfall | |
+
+**Compare-skript output:**
+
+```
+(klistra in output här)
+```
+
+---
+
+## Del 5 — Driftskydd via deny assignments (T8)
+
+**Syfte:** Verifiera att Deployment Stacks deny assignments förhindrar manuell manipulation av resurser som hanteras av plattformen.
+
+**Förutsättningar:** En tenant med fullständig CD-körning (alla stacks deployade). Utföraren har Owner-rättigheter på subscription-nivå.
+
+### Steg 1 — Identifiera hanterad resurs
+
+| Fält | Värde |
+|------|-------|
+| Resurs | |
+| Tenant | |
+| Stack | |
+
+### Steg 2 — Försök ta bort resursen manuellt (Azure Portal)
+
+| Fält | Värde |
+|------|-------|
+| Felmeddelande | |
+| Screenshot | |
+| Resurs oförändrad | |
+
+### Steg 3 — Försök modifiera resursen manuellt (Azure Portal)
+
+| Fält | Värde |
+|------|-------|
+| Åtgärd försökt | |
+| Felmeddelande | |
+| Screenshot | |
+| Resurs oförändrad | |
+
+### Utfall
+
+| Kriterium | Status |
+|-----------|--------|
+| Azure returnerade deny-felmeddelande vid borttagning | |
+| Azure returnerade deny-felmeddelande vid modifiering | |
+| Resursen förblir oförändrad (jämfört mot stack-export) | |
+| **T8 godkänt** | |
+
+---
+
+## Del 6 — Hemlighetshantering (T9)
+
+**Syfte:** Verifiera att inga hemligheter lagras i klartext i repositorierna och att känslig data injiceras via säkra mekanismer.
+
+**Förutsättningar:** Tillgång till alz-mgmt-templates och minst ett tenant-repo.
+
+### Steg 1 — Sökning efter klartext-hemligheter
+
+Kör följande kommando mot båda repona:
+
+```bash
+grep -rEi "(password|secret|key|token|credential|connectionstring)\s*[:=]" \
+  --include="*.json" --include="*.bicep" --include="*.bicepparam" \
+  --include="*.yml" --include="*.yaml" --include="*.ps1" \
+  | grep -v "keyVault\|secureString\|@secure()\|reference("
+```
+
+| Repo | Antal träffar | Kommentar |
+|------|---------------|-----------|
+| alz-mgmt-templates | | |
+| alz-mgmt-oskar | | |
+
+### Steg 2 — Manuell granskning av .bicepparam och platform.json
+
+| Fil | Granskat | Fynd |
+|-----|----------|------|
+| config/platform.json | | |
+| config/bootstrap/plumbing.bicepparam | | |
+| Övriga .bicepparam | | |
+
+### Steg 3 — GitHub Actions workflows: credentials-hantering
+
+| Check | Status |
+|-------|--------|
+| Workflows använder OIDC-federation (inte client secret) | |
+| AZURE_CLIENT_ID satt som GitHub-environment-variabel | |
+| Inga hårdkodade credentials i workflow-filer | |
+
+### Steg 4 — Bicep @secure()-dekorering
+
+| Check | Status |
+|-------|--------|
+| Parametrar för känslig data dekorerade med @secure() | |
+| Inga känsliga värden som plain string-parametrar | |
+
+### Utfall
+
+| Kriterium | Status |
+|-----------|--------|
+| Sökning ger noll träffar på klartext-hemligheter | |
+| Känsliga värden hanteras via GitHub secrets eller OIDC | |
+| Bicep-parametrar för känslig data använder @secure() | |
+| **T9 godkänt** | |
+
 ---
 
 ## Sammanfattning
@@ -536,7 +738,7 @@ K5 PASSED: Change was contained to the expected scope.
 | Scenario | Körning | Datum | Utfall | Artefakt |
 |----------|---------|-------|--------|----------|
 | T1 | #1 Cold start Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22644686558 |
-| T1 | #2 Idempotent Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22647650534 |
+| T1 | #2 Idempotent Oskar (stack-diff) | 2026-03-16 | T1 PASSED | state-oskar-before-cd2.json vs state-oskar-after-cd2.json — 0 content changes, 11 redeployed, [CD run](https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/23163410866) |
 | T1 | #3 Cold start Alen | 2026-03-10 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22905778818 |
 | T1 | #4 Idempotent Alen (stack-diff) | 2026-03-11 | T1 PASSED | state-alen-after-revert.json vs state-alen-after-cd4.json — DeploymentId ändrad, inget innehåll ändrat, [CD run](https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22954477017) |
 | T2 | Förändring (email) | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22672449387 |
@@ -549,3 +751,5 @@ K5 PASSED: Change was contained to the expected scope.
 | T5 | Förändringspåverkan Alen (stack-diff) | 2026-03-10 | T5 PASSED | state-alen-baseline.json vs state-alen-after-change.json — 1/11 stackar ändrad (governance-int-root), [CD run](https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22912613229) |
 | T6 | Cold start Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22644686558 |
 | T6 | Cold start Alen | 2026-03-10 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22905778818 |
+| T8 | Driftskydd deny assignments | | | |
+| T9 | Hemlighetshantering | | | |
