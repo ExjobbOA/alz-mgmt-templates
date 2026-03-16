@@ -1,14 +1,15 @@
 <#
 .SYNOPSIS
-    Compares two ALZ stack state exports for K5 change containment verification.
+    Compares two ALZ stack state exports for change containment verification.
 
 .DESCRIPTION
     Reads two JSON files produced by Export-ALZStackState.ps1 and reports:
-    - Which stacks changed (DeploymentId, resource snapshots)
-    - Which stacks were untouched
+    - Which stacks had content changes (resource snapshots)
+    - Which stacks were redeployed without content changes (DeploymentId only)
+    - Which stacks were fully untouched
     - Specific property changes in affected stacks
 
-    Ignores: ExportTimestamp (expected to differ)
+    Ignores: ExportTimestamp, DeploymentId (expected to differ on redeployment)
 
 .EXAMPLE
     ./Compare-ALZStackState.ps1 -BeforeFile "state-before.json" -AfterFile "state-after.json"
@@ -28,13 +29,14 @@ $before = Get-Content $BeforeFile -Raw | ConvertFrom-Json
 $after  = Get-Content $AfterFile -Raw  | ConvertFrom-Json
 
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host " K5 Change Containment -- Diff Report" -ForegroundColor Cyan
+Write-Host " ALZ Stack Diff Report" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "Before: $BeforeFile"
 Write-Host "After:  $AfterFile"
 Write-Host ""
 
 $changedStacks = @()
+$redeployedStacks = @()
 $unchangedStacks = @()
 
 foreach ($beforeStack in $before.Stacks) {
@@ -46,10 +48,11 @@ foreach ($beforeStack in $before.Stacks) {
     }
 
     $differences = @()
+    $redeployed = $false
 
-    # Compare DeploymentId (changes when stack is redeployed)
+    # Track DeploymentId separately — changes on every redeployment, not a content change
     if ($beforeStack.DeploymentId -ne $afterStack.DeploymentId) {
-        $differences += "DeploymentId changed"
+        $redeployed = $true
     }
 
     # Compare ProvisioningState
@@ -163,6 +166,10 @@ foreach ($beforeStack in $before.Stacks) {
             Write-Host "    $d" -ForegroundColor Yellow
         }
     }
+    elseif ($redeployed) {
+        $redeployedStacks += $beforeStack.Name
+        Write-Host "  REDEPLOYED (no content change): $($beforeStack.Name)" -ForegroundColor Cyan
+    }
     else {
         $unchangedStacks += $beforeStack.Name
         Write-Host "  UNCHANGED: $($beforeStack.Name)" -ForegroundColor Green
@@ -174,21 +181,20 @@ Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host " Summary" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
-$changedColor = if ($changedStacks.Count -le 1) { "Green" } else { "Red" }
-Write-Host "Changed stacks:   $($changedStacks.Count)" -ForegroundColor $changedColor
-Write-Host "Unchanged stacks: $($unchangedStacks.Count)" -ForegroundColor Green
+$changedColor = if ($changedStacks.Count -eq 0) { "Green" } else { "Red" }
+Write-Host "Content changed:  $($changedStacks.Count)" -ForegroundColor $changedColor
+Write-Host "Redeployed only:  $($redeployedStacks.Count)" -ForegroundColor Cyan
+Write-Host "Unchanged:        $($unchangedStacks.Count)" -ForegroundColor Green
 Write-Host ""
 
 if ($changedStacks.Count -eq 0) {
-    Write-Host "RESULT: No stacks changed. Deployment was fully idempotent." -ForegroundColor Green
+    Write-Host "RESULT: No content changes detected." -ForegroundColor Green
 }
 elseif ($changedStacks.Count -eq 1) {
     $name = $changedStacks[0]
-    Write-Host "RESULT: Only '$name' was affected." -ForegroundColor Green
-    Write-Host "K5 PASSED: Change was contained to the expected scope." -ForegroundColor Green
+    Write-Host "RESULT: Only '$name' had content changes." -ForegroundColor Yellow
 }
 else {
     $affected = $changedStacks -join ', '
-    Write-Host "RESULT: Multiple stacks were affected: $affected" -ForegroundColor Red
-    Write-Host "K5 REVIEW NEEDED: Change may have leaked beyond expected scope." -ForegroundColor Red
+    Write-Host "RESULT: Multiple stacks had content changes: $affected" -ForegroundColor Red
 }
