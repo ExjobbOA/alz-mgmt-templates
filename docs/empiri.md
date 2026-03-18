@@ -16,7 +16,6 @@
 | T4 | Rollback | Att miljön kan återställas utan manuell rekonstruktion, spårbart i loggar |
 | T5 | Förändringspåverkan | Att en förändring enbart påverkar förväntade Deployment Stacks (`Compare-ALZStackState.ps1`) |
 | T6 | Cold start | Att onboarding och CD kan genomföras mot en greenfield-tenant med enbart dokumenterade kommandon |
-| T8 | Driftskydd via deny assignments | Att Deployment Stacks deny assignments förhindrar manuell manipulation av plattformsresurser |
 | T9 | Hemlighetshantering | Att inga hemligheter lagras i klartext och att känslig data injiceras via säkra mekanismer |
 
 ---
@@ -635,49 +634,7 @@ powershell -ExecutionPolicy Bypass -File ./scripts/Compare-ALZStackState.ps1 `
 
 ---
 
-## Del 5 — Driftskydd via deny assignments (T8)
-
-**Syfte:** Verifiera att Deployment Stacks deny assignments förhindrar manuell manipulation av resurser som hanteras av plattformen.
-
-**Förutsättningar:** En tenant med fullständig CD-körning (alla stacks deployade). Utföraren har Owner-rättigheter på subscription-nivå.
-
-### Steg 1 — Identifiera hanterad resurs
-
-| Fält | Värde |
-|------|-------|
-| Resurs | |
-| Tenant | |
-| Stack | |
-
-### Steg 2 — Försök ta bort resursen manuellt (Azure Portal)
-
-| Fält | Värde |
-|------|-------|
-| Felmeddelande | |
-| Screenshot | |
-| Resurs oförändrad | |
-
-### Steg 3 — Försök modifiera resursen manuellt (Azure Portal)
-
-| Fält | Värde |
-|------|-------|
-| Åtgärd försökt | |
-| Felmeddelande | |
-| Screenshot | |
-| Resurs oförändrad | |
-
-### Utfall
-
-| Kriterium | Status |
-|-----------|--------|
-| Azure returnerade deny-felmeddelande vid borttagning | |
-| Azure returnerade deny-felmeddelande vid modifiering | |
-| Resursen förblir oförändrad (jämfört mot stack-export) | |
-| **T8 godkänt** | |
-
----
-
-## Del 6 — Hemlighetshantering (T9)
+## Del 5 — Hemlighetshantering (T9)
 
 **Syfte:** Verifiera att inga hemligheter lagras i klartext i repositorierna och att känslig data injiceras via säkra mekanismer.
 
@@ -751,5 +708,4 @@ grep -rEi "(password|secret|key|token|credential|connectionstring)\s*[:=]" \
 | T5 | Förändringspåverkan Alen (stack-diff) | 2026-03-10 | T5 PASSED | state-alen-baseline.json vs state-alen-after-change.json — 1/11 stackar ändrad (governance-int-root), [CD run](https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22912613229) |
 | T6 | Cold start Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22644686558 |
 | T6 | Cold start Alen | 2026-03-10 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22905778818 |
-| T8 | Driftskydd deny assignments | | | |
 | T9 | Hemlighetshantering | | | |
