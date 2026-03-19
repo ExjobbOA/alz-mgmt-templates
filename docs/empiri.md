@@ -594,42 +594,46 @@ K5 PASSED: Change was contained to the expected scope.
 
 #### CD #5 — Idempotens (alla steg, inga ändringar)
 
-```powershell
-./scripts/Export-ALZStackState.ps1 `
-    -OutputFile "state-alen-before-cd5.json" `
-    -SubscriptionId "<ALENS_SUB_ID>" `
-    -TenantIntRootMgId "<ALENS_TENANT_GUID>"
-```
-
 | Fält | Värde |
 |------|-------|
-| Starttid | |
-| Sluttid | |
-| Varaktighet | |
-| Actions run URL | |
-| Slutstatus | |
-
-```powershell
-./scripts/Export-ALZStackState.ps1 `
-    -OutputFile "state-alen-after-cd5.json" `
-    -SubscriptionId "<ALENS_SUB_ID>" `
-    -TenantIntRootMgId "<ALENS_TENANT_GUID>"
-
-powershell -ExecutionPolicy Bypass -File ./scripts/Compare-ALZStackState.ps1 `
-    -BeforeFile "state-alen-before-cd5.json" `
-    -AfterFile "state-alen-after-cd5.json"
-```
-
-| Fält | Värde |
-|------|-------|
+| Starttid | 2026-03-19 12:26 |
+| Sluttid | 2026-03-19 13:45 |
+| Varaktighet | 1h 19m |
+| Actions run URL | https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/23292636478 |
+| Slutstatus | Succeeded |
 | Fil baseline | state-alen-before-cd5.json |
 | Fil efter | state-alen-after-cd5.json |
-| T1 utfall | |
+| T1 utfall | ✅ |
 
 **Compare-skript output:**
 
 ```
-(klistra in output här)
+============================================
+ ALZ Stack Diff Report
+============================================
+Before: state-alen-before-cd5.json
+After:  state-alen-after-cd5.json
+
+  REDEPLOYED (no content change): c785e463-29cf-46e6-9b1d-ae17db0a6ac4-governance-int-root
+  REDEPLOYED (no content change): alz-governance-platform
+  REDEPLOYED (no content change): alz-governance-landingzones
+  REDEPLOYED (no content change): alz-governance-landingzones-corp
+  REDEPLOYED (no content change): alz-governance-landingzones-online
+  REDEPLOYED (no content change): alz-governance-sandbox
+  REDEPLOYED (no content change): alz-governance-decommissioned
+  REDEPLOYED (no content change): alz-governance-platform-rbac
+  REDEPLOYED (no content change): alz-governance-landingzones-rbac
+  REDEPLOYED (no content change): alz-core-logging
+  REDEPLOYED (no content change): alz-networking-hub
+
+============================================
+ Summary
+============================================
+Content changed:  0
+Redeployed only:  11
+Unchanged:        0
+
+RESULT: No content changes detected.
 ```
 
 ---
@@ -701,4 +705,5 @@ grep -rEi "(password|secret|key|token|credential|connectionstring)\s*[:=]" \
 | T5 | Förändringspåverkan Alen (stack-diff) | 2026-03-10 | T5 PASSED | state-alen-baseline.json vs state-alen-after-change.json — 1/11 stackar ändrad (governance-int-root), [CD run](https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22912613229) |
 | T6 | Cold start Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22644686558 |
 | T6 | Cold start Alen | 2026-03-10 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22905778818 |
+| T1 | #3 Idempotent Alen full (stack-diff) | 2026-03-19 | ✅ T1 PASSED | state-alen-before-cd5.json vs state-alen-after-cd5.json — 0 content changes, 11 redeployed, [CD run](https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/23292636478) |
 | T9 | Hemlighetshantering (båda tenants) | 2026-03-19 | ✅ T9 PASSED | Grep: 0 faktiska hemligheter. `id-token: write` = OIDC-permission. `sharedKey`/`radiusServerSecret` = UDT-typdeklarationer, inga värden |
