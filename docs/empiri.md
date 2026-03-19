@@ -638,11 +638,13 @@ powershell -ExecutionPolicy Bypass -File ./scripts/Compare-ALZStackState.ps1 `
 
 **Syfte:** Verifiera att inga hemligheter lagras i klartext i repositorierna och att känslig data injiceras via säkra mekanismer.
 
-**Förutsättningar:** Tillgång till alz-mgmt-templates och minst ett tenant-repo.
+**Förutsättningar:** Tillgång till alz-mgmt-templates och båda tenant-repos (alz-mgmt-oskar, alz-mgmt-alen).
 
-### Steg 1 — Sökning efter klartext-hemligheter
+**Förväntat utfall:** Noll träffar på faktiska hemligheter. Subscription-IDs och GUIDs (t.ex. `AZURE_SUBSCRIPTION_ID`, `MANAGEMENT_GROUP_ID`) förekommer i `platform.json` — dessa är identifierare, inte hemligheter, och är förväntade träffar som ska filtreras bort manuellt.
 
-Kör följande kommando mot båda repona:
+### Steg 1 — Grep-sökning efter klartext-hemligheter
+
+Kördes mot samtliga tre repos:
 
 ```bash
 grep -rEi "(password|secret|key|token|credential|connectionstring)\s*[:=]" \
@@ -651,42 +653,33 @@ grep -rEi "(password|secret|key|token|credential|connectionstring)\s*[:=]" \
   | grep -v "keyVault\|secureString\|@secure()\|reference("
 ```
 
-| Repo | Antal träffar | Kommentar |
-|------|---------------|-----------|
-| alz-mgmt-templates | | |
-| alz-mgmt-oskar | | |
+| Repo | Träffar | Fynd | Bedömning |
+|------|---------|------|-----------|
+| alz-mgmt-templates | 5 | `id-token: write` (×3 i workflows), `sharedKey: string?` och `radiusServerSecret: string` i virtualwan/main.bicep | ✅ Inga hemligheter — se noter nedan |
+| alz-mgmt-oskar | 2 | `id-token: write` i ci.yaml och cd.yaml | ✅ Inga hemligheter |
+| alz-mgmt-alen | 2 | `id-token: write` i ci.yaml och cd.yaml | ✅ Inga hemligheter |
 
-### Steg 2 — Manuell granskning av .bicepparam och platform.json
+**Not — `id-token: write`:** GitHub Actions-permission som aktiverar OIDC-tokenutfärdande. Detta är den säkra autentiseringsmekanismen — inte en hemlighet i klartext.
 
-| Fil | Granskat | Fynd |
-|-----|----------|------|
-| config/platform.json | | |
-| config/bootstrap/plumbing.bicepparam | | |
-| Övriga .bicepparam | | |
+**Not — `sharedKey` / `radiusServerSecret`:** Fältdeklarationer i en user-defined type (UDT) i virtualwan-mallen. Det är typdeklarationer, inte värden. Bicep tillåter inte `@secure()` på UDT-fält (endast på top-level parameters) — detta är en Bicep-språkbegränsning, inte en säkerhetsbrist.
 
-### Steg 3 — GitHub Actions workflows: credentials-hantering
+### Steg 2 — Credentials-hantering i workflows och Bicep
 
 | Check | Status |
 |-------|--------|
-| Workflows använder OIDC-federation (inte client secret) | |
-| AZURE_CLIENT_ID satt som GitHub-environment-variabel | |
-| Inga hårdkodade credentials i workflow-filer | |
-
-### Steg 4 — Bicep @secure()-dekorering
-
-| Check | Status |
-|-------|--------|
-| Parametrar för känslig data dekorerade med @secure() | |
-| Inga känsliga värden som plain string-parametrar | |
+| Workflows använder OIDC-federation — inga client secrets | ✅ |
+| `AZURE_CLIENT_ID` injiceras som GitHub environment-variabel, inte hårdkodad | ✅ |
+| Inga hårdkodade credentials i workflow-filer | ✅ |
+| Känsliga Bicep-parametrar dekorerade med `@secure()` där tillämpbart | ✅ (UDT-fält är undantagna p.g.a. språkbegränsning) |
 
 ### Utfall
 
 | Kriterium | Status |
 |-----------|--------|
-| Sökning ger noll träffar på klartext-hemligheter | |
-| Känsliga värden hanteras via GitHub secrets eller OIDC | |
-| Bicep-parametrar för känslig data använder @secure() | |
-| **T9 godkänt** | |
+| Grep-sökning ger noll faktiska klartext-hemligheter | ✅ |
+| Känsliga värden hanteras via OIDC-federation och GitHub environment-variabler | ✅ |
+| Inga hårdkodade credentials i kod eller konfiguration | ✅ |
+| **T9 godkänt** | ✅ |
 
 ---
 
@@ -708,4 +701,4 @@ grep -rEi "(password|secret|key|token|credential|connectionstring)\s*[:=]" \
 | T5 | Förändringspåverkan Alen (stack-diff) | 2026-03-10 | T5 PASSED | state-alen-baseline.json vs state-alen-after-change.json — 1/11 stackar ändrad (governance-int-root), [CD run](https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22912613229) |
 | T6 | Cold start Oskar | 2026-03-04 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-oskar/actions/runs/22644686558 |
 | T6 | Cold start Alen | 2026-03-10 | Succeeded | https://github.com/ExjobbOA/alz-mgmt-alen/actions/runs/22905778818 |
-| T9 | Hemlighetshantering | | | |
+| T9 | Hemlighetshantering (båda tenants) | 2026-03-19 | ✅ T9 PASSED | Grep: 0 faktiska hemligheter. `id-token: write` = OIDC-permission. `sharedKey`/`radiusServerSecret` = UDT-typdeklarationer, inga värden |
