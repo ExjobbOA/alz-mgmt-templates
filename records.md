@@ -834,6 +834,32 @@ Our platform already solves this today via `readEnvironmentVariable()` + `platfo
 
 ---
 
+## Mar 24: Export-BrownfieldState.ps1 — Brownfield Discovery Script
+
+### Purpose
+
+`scripts/Export-BrownfieldState.ps1` scans a portal-deployed Azure Landing Zone tenant and exports its governance and infrastructure state as JSON. Output format mirrors `Export-ALZStackState.ps1` so `Compare-ALZStackState.ps1` can diff brownfield state against an engine-deployed state.
+
+Key difference from the stack-based export: no deployment stacks exist on a portal-deployed tenant, so resources are queried directly via Az PowerShell cmdlets.
+
+### Design notes
+
+- Captures: MG hierarchy, custom policy definitions (with SHA256 rule hash), policy set definitions, policy assignments, custom role definitions, role assignments, resource groups, and key infrastructure resources (LAW, Automation, VNets, Firewalls, DNS zones)
+- MG name normalization handles portal accelerator naming conventions (`ALZ-platform`, `ALZ-sandboxes`, etc.) — strips `ALZ-` prefix and normalizes plurals (`sandboxes` → `sandbox`) before matching well-known scope names
+- Uses a `Get-PropSafe` helper for all policy object property access — needed because Az.Resources 7.x changed the property structure of `PsPolicyDefinition`, `PsPolicySetDefinition`, and `PsPolicyAssignment` objects (e.g. `Scope` is now a direct property, not nested under `Properties`)
+- All `Get-Az*` results wrapped in `@()` to ensure array type and safe `.Count` access in strict mode
+- `DiscoveryMode: "brownfield"` field in output distinguishes these exports from stack-based ones
+
+### State snapshots
+
+All state JSON files moved to `state-snapshots/` folder.
+
+### Tested against
+
+Sylaviken tenant (portal-accelerator ALZ, `ALZ-` prefixed MG names, single platform subscription). Export produced 9 governance scopes + 1 infrastructure scope, 283 custom policy definitions, 53 initiatives.
+
+---
+
 ## Mar 13: Compare-ALZStackState.ps1 — False Positives Fixed
 
 ### Problem
