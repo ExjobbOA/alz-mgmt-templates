@@ -7,33 +7,13 @@ without disrupting workloads.
 
 ## Approach
 
-### Phase 1: Reference Analysis
-- Export state from decommissioned tenant (read-only)
-- Document structural characteristics: management groups, policies, 
-  subscriptions, RBAC
-- Identify brownfield patterns (drift, naming conventions, policy 
-  overlaps, orphaned resources)
+## Discovery
+We need to make a PowerShell script that takes a root management group ID as input, and recurses down the hierarchy, and at each node queries for the relevant resource types. 
 
-### Phase 2: Test Environment Replication
-- Create a controlled test tenant replicating brownfield 
-  characteristics
-- Deploy platform stacks in audit-only mode
-- Baseline compliance assessment
+We will use Get-AzManagementGroup -Recurse for the tree, but we will flatten it after.
 
-### Phase 3: Safe Migration Workflow
-- Move test subscription into platform hierarchy
-- Observe policy compliance evaluation
-- Categorize findings: compliant (green), out-of-scope (yellow), 
-  conflicting (red)
-- Document decision points and remediation steps
+Policy queries need to be scoped per MG since Get-AzPolicyAssignment takes a -Scope parameter
 
-### Phase 4: Iteration & Documentation
-- Repeat workflow with multiple test subscriptions
-- Build playbook of common conflict patterns and resolutions
-- Document safe sequence and guard rails
+Role assignments at MG scope use /providers/Microsoft.Management/managementGroups/{id} as the scope string
 
-## Deliverables
-1. State export/comparison tooling
-2. Test environment documentation
-3. Migration workflow playbook
-4. Evidence: compliance reports from test runs
+For subscription-level resources (the hub VNet, Log Analytics, etc.), you'll need to identify which subscriptions are "platform" subscriptions and query into them, probably by convention or by checking for known resource types
