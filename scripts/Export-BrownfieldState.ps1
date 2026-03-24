@@ -192,6 +192,8 @@ function Get-MgHierarchy ([string]$GroupId) {
         }
         if ($mgObj.Children) {
             foreach ($child in $mgObj.Children) {
+                # Skip subscription children — their Type is '/subscriptions'
+                if ($child.Type -ieq '/subscriptions') { continue }
                 $node.Children += ConvertTo-Node $child
             }
         }
