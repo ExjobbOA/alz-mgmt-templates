@@ -1006,6 +1006,44 @@ Result: only 3 genuinely non-standard assignments remain: `Deploy-ASC-Monitoring
 3. AMBA policies require separate classification. They are a known extension, not tenant-custom policies, and would be massively over-reported as non-standard without explicit handling.
 4. Assignment classification must check the ALZ assignment library, not just the referenced definition library. Many standard ALZ assignments reference built-in Microsoft-authored policies, which are not in the custom lib.
 
+**Iteration 7 — Deny-effect risk analysis**
+
+The 89 rule mismatches were all treated equally in the output. A Deny-effect policy rule change can block operations on existing resources (outage risk), while an Audit change is informational only. Operators need to know which mismatches are dangerous before deploying.
+
+Added effect extraction from the library JSON at load time (`Get-PolicyEffect` resolves the default value when the effect is a parameter reference like `[[parameters('effect')]`). Added `Get-IfResourceTypes` to recursively walk `allOf`/`anyOf`/`not` condition trees and extract the resource types the policy evaluates.
+
+Under `-Detailed`, each mismatch is now labelled by effect:
+- `[DENY RULE CHANGE]` — shows target resource types, which MG scopes the policy is assigned at, and a hard warning to verify compliance before deploying.
+- `[DINE RULE CHANGE]` — medium risk, may trigger remediations on existing resources.
+- `[MODIFY RULE CHANGE]` — medium risk, may change resource properties on next evaluation.
+- `[APPEND/AUDIT RULE CHANGE]` — low risk.
+
+Section 7 now breaks out the 89 mismatches by effect category. Traffic light is upgraded to RED when any Deny mismatches exist (previously all mismatches → YELLOW).
+
+Sylaviken breakdown: 54 Deny, 18 DINE, 2 Modify, 4 Append, 11 Audit. Risk rating upgraded to RED.
+
+**Iteration 8 — Initiative-aware assignment resolution**
+
+The "assigned at" field in the Deny output was empty for most policies because `$defAssignmentScopes` only tracked direct assignments. Most ALZ policies are deployed via initiatives (policy set definitions), not individual assignments — 46 of 74 assignments in the Sylaviken export reference a policy set, not a policy definition directly.
+
+Fix: at startup, build `$setMemberDefs` from the library `*.alz_policy_set_definition.json` files (set name → list of ALZ custom member definition names, extracted from `properties.policyDefinitions[].policyDefinitionId`). When iterating assignments, expand initiative assignments to all their member definitions and record the scope against each. Deduplicated so a definition that appears in multiple initiatives assigned at the same scope is listed once.
+
+Result: 13 Deny definitions now resolve to real MG assignment scopes (up from 3). The remainder correctly show "no assignments found" — either the initiative containing them isn't assigned in this tenant, or the policy isn't a member of any library initiative.
+
+### Final report numbers — Sylaviken (updated after iterations 7–8)
+
+**Policy definitions:** 3 standard exact, 89 standard rule mismatch (engine will overwrite on deploy), 0 non-standard, 123 AMBA, 68 deprecated.
+
+**Rule mismatches by effect:** 54 Deny, 18 DeployIfNotExists, 2 Modify, 4 Append, 11 Audit/AuditIfNotExists.
+
+**Policy set definitions:** 40 standard, 1 non-standard (`Enforce-Encryption-CMK`), 6 AMBA, 6 deprecated.
+
+**Assignments:** 3 non-standard (`Deploy-ASC-Monitoring`, `Deploy-AKS-Policy`, `Deploy-Log-Analytics`), 5 AMBA, remainder standard.
+
+**Infrastructure:** LAW named `ALZ-law` (engine would deploy `law-alz-swedencentral`), Automation Account `ALZ-aauto` (engine: `aa-alz-swedencentral`). 3 non-ALZ resource groups: `VisualStudioOnline-*`, `rg-copilot-weu`, `NetworkWatcherRG`. Drift detected in LAW references: stale subscription ID `10738f61-...` appearing in some assignment parameters alongside the correct `93ff5894-...`.
+
+**Risk rating:** RED — 54 Deny-effect policy rule changes require resource compliance verification before stack takeover.
+
 ### What's next
 
 Build/redesign `discover.ps1` — the compliance risk scanner (live subscription scan against ALZ deny policies). Then test the full three-script workflow end-to-end. These three scripts complete the brownfield integration tooling for iteration 2.
