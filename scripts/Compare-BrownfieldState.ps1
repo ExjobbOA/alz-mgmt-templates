@@ -355,19 +355,56 @@ $script:MismatchCountByEffect = @{
     Other             = 0
 }
 
-# Reverse lookup: policy definition name → list of MG scopes where it is assigned
-# Built from the brownfield export so Section 2 can show assignment context for Deny changes.
+# Build policy set name → ALZ custom member policy definition names from library.
+# Used below to expand initiative assignments to their individual member definitions.
+$setMemberDefs = @{}
+Get-ChildItem -Path $AlzLibraryPath -Filter '*.alz_policy_set_definition.json' -Recurse | ForEach-Object {
+    $j = Get-Content $_.FullName -Raw | ConvertFrom-Json
+    $members = [System.Collections.Generic.List[string]]::new()
+    if ($j.properties.PSObject.Properties['policyDefinitions']) {
+        foreach ($member in @($j.properties.policyDefinitions)) {
+            $memberName = ($member.policyDefinitionId -split '/')[-1]
+            if ($libPolicyDefs.ContainsKey($memberName)) {
+                [void]$members.Add($memberName)
+            }
+        }
+    }
+    if ($members.Count -gt 0) { $setMemberDefs[$j.name] = @($members) }
+}
+
+# Reverse lookup: policy definition name → list of MG scopes where it is assigned.
+# Handles both direct assignments and initiative (policy set) assignments.
 $defAssignmentScopes = @{}
+
+function Add-DefAssignmentScope ([string]$DefName, [string]$ScopeName, [string]$MgId) {
+    if (-not $defAssignmentScopes.ContainsKey($DefName)) {
+        $defAssignmentScopes[$DefName] = [System.Collections.Generic.List[object]]::new()
+    }
+    # Deduplicate — same def can be a member of multiple initiatives assigned at the same scope
+    $already = $defAssignmentScopes[$DefName] | Where-Object { $_.ScopeName -eq $ScopeName }
+    if (-not $already) {
+        $defAssignmentScopes[$DefName].Add([PSCustomObject]@{
+            ScopeName         = $ScopeName
+            ManagementGroupId = $MgId
+        })
+    }
+}
+
 foreach ($mgScope in @($export.Scopes | Where-Object { $_.Scope -eq 'managementGroup' })) {
     foreach ($a in @($mgScope.Resources.PolicyAssignments)) {
-        $defName = ($a.PolicyDefinitionId -split '/')[-1]
-        if (-not $defAssignmentScopes.ContainsKey($defName)) {
-            $defAssignmentScopes[$defName] = [System.Collections.Generic.List[object]]::new()
+        $defId   = $a.PolicyDefinitionId
+        $defName = ($defId -split '/')[-1]
+        if ($defId -match 'policySetDefinitions') {
+            # Initiative assignment — expand to all ALZ custom member definitions
+            if ($setMemberDefs.ContainsKey($defName)) {
+                foreach ($memberName in $setMemberDefs[$defName]) {
+                    Add-DefAssignmentScope $memberName $mgScope.Name $mgScope.ManagementGroupId
+                }
+            }
+        } else {
+            # Direct policy definition assignment
+            Add-DefAssignmentScope $defName $mgScope.Name $mgScope.ManagementGroupId
         }
-        $defAssignmentScopes[$defName].Add([PSCustomObject]@{
-            ScopeName         = $mgScope.Name
-            ManagementGroupId = $mgScope.ManagementGroupId
-        })
     }
 }
 
