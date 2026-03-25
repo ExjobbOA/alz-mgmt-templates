@@ -79,6 +79,30 @@ function Get-SHA256Short ([string]$InputString) {
 }
 
 # ============================================================
+# Helper: recursively sort object properties alphabetically so
+# that ConvertTo-Json produces a canonical, ordering-independent
+# string. Arrays preserve element order; only property names
+# within objects are sorted. Apply before hashing policy rules.
+# ============================================================
+function ConvertTo-SortedObject ($obj) {
+    if ($null -eq $obj) { return $null }
+    if ($obj -is [System.Collections.IList]) {
+        return @($obj | ForEach-Object { ConvertTo-SortedObject $_ })
+    }
+    if ($obj -is [System.Collections.IDictionary]) {
+        $ordered = [ordered]@{}
+        $obj.Keys | Sort-Object | ForEach-Object { $ordered[$_] = ConvertTo-SortedObject $obj[$_] }
+        return [PSCustomObject]$ordered
+    }
+    if ($obj -is [PSCustomObject]) {
+        $ordered = [ordered]@{}
+        $obj.PSObject.Properties | ForEach-Object { $_.Name } | Sort-Object | ForEach-Object { $ordered[$_] = ConvertTo-SortedObject $obj.$_ }
+        return [PSCustomObject]$ordered
+    }
+    return $obj
+}
+
+# ============================================================
 # Helper: safely get a property value from a PSObject without
 # throwing in strict mode if the property doesn't exist.
 # Tries each name in order and returns the first non-null value.
@@ -320,7 +344,7 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
         if ($rid -inotmatch "managementGroups/$MgId/") { continue }
 
         try {
-            $ruleJson = (Get-PropSafe $def 'PolicyRule', 'Properties') | ConvertTo-Json -Depth 20 -Compress
+            $ruleJson = (ConvertTo-SortedObject (Get-PropSafe $def 'PolicyRule', 'Properties')) | ConvertTo-Json -Depth 20 -Compress
             $hash     = Get-SHA256Short $ruleJson
         }
         catch {
@@ -332,6 +356,7 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
             Type           = 'policyDefinition'
             Name           = $def.Name
             DisplayName    = (Get-PropSafe $def 'DisplayName')
+            Version        = (Get-PropSafe $def 'Version')
             PolicyRuleHash = $hash
             Metadata       = (Get-PropSafe $def 'Metadata')
             Scope          = $scope
