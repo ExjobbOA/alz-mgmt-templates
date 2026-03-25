@@ -97,6 +97,72 @@ function Write-Colored ([string]$Label, [string]$Color, [string]$Msg) {
     }
 }
 
+# Resolve the effective policy effect from a policyRule object + parameters object.
+# Returns a normalized effect string (e.g. "Deny", "DeployIfNotExists") or "Unknown".
+function Get-PolicyEffect ([object]$PolicyRule, [object]$Parameters) {
+    if (-not $PolicyRule) { return 'Unknown' }
+    $thenProp = $PolicyRule.PSObject.Properties['then']
+    if (-not $thenProp -or -not $thenProp.Value) { return 'Unknown' }
+    $effectProp = $thenProp.Value.PSObject.Properties['effect']
+    if (-not $effectProp) { return 'Unknown' }
+    $raw = [string]$effectProp.Value
+    # Parameter reference pattern (ARM uses [[parameters('effect')] to escape the leading [)
+    if ($raw -match "parameters\(") {
+        if ($Parameters) {
+            $ep = $Parameters.PSObject.Properties['effect']
+            if ($ep -and $ep.Value -and $ep.Value.PSObject.Properties['defaultValue']) {
+                return [string]$ep.Value.defaultValue
+            }
+        }
+        return 'Unknown'
+    }
+    return $raw
+}
+
+# Recursively walk an if-condition tree and return all resource types referenced
+# via {"field":"type","equals":"..."} conditions. Handles allOf/anyOf/not nesting.
+function Get-IfResourceTypes ([object]$Condition) {
+    if (-not $Condition) { return @() }
+    $found = [System.Collections.Generic.List[string]]::new()
+    # Direct field=type condition
+    $fieldProp  = $Condition.PSObject.Properties['field']
+    $equalsProp = $Condition.PSObject.Properties['equals']
+    if ($fieldProp -and ($fieldProp.Value -ieq 'type') -and $equalsProp) {
+        [void]$found.Add([string]$equalsProp.Value)
+    }
+    # allOf / anyOf
+    foreach ($key in @('allOf','anyOf')) {
+        $prop = $Condition.PSObject.Properties[$key]
+        if ($prop -and $prop.Value) {
+            foreach ($item in @($prop.Value)) {
+                foreach ($t in (Get-IfResourceTypes $item)) {
+                    if (-not $found.Contains($t)) { [void]$found.Add($t) }
+                }
+            }
+        }
+    }
+    # not
+    $notProp = $Condition.PSObject.Properties['not']
+    if ($notProp -and $notProp.Value) {
+        foreach ($t in (Get-IfResourceTypes $notProp.Value)) {
+            if (-not $found.Contains($t)) { [void]$found.Add($t) }
+        }
+    }
+    return @($found)
+}
+
+# Normalize an effect string to a canonical category name.
+function Get-EffectCategory ([string]$Effect) {
+    switch -Regex ($Effect.ToLower()) {
+        '^deny(action)?$'      { return 'Deny' }
+        '^deployifnotexists$'  { return 'DeployIfNotExists' }
+        '^modify$'             { return 'Modify' }
+        '^append$'             { return 'Append' }
+        '^audit(ifnotexists)?$' { return 'Audit' }
+        '^disabled$'           { return 'Disabled' }
+        default                { return 'Other' }
+    }
+}
 
 #==============================================================================
 # Load and validate inputs
@@ -150,7 +216,11 @@ Get-ChildItem -Path $AlzLibraryPath -Filter '*.alz_policy_definition.json' -Recu
         $j.properties.metadata.version
     }
     else { '' }
-    $libPolicyDefs[$j.name] = [PSCustomObject]@{ DisplayName = $j.properties.displayName; Version = $version; PolicyRuleHash = $ruleHash }
+    $paramsObj      = if ($j.properties.PSObject.Properties['parameters']) { $j.properties.parameters } else { $null }
+    $effect         = Get-PolicyEffect $ruleObj $paramsObj
+    $ruleIfBlock    = if ($ruleObj -and $ruleObj.PSObject.Properties['if']) { $ruleObj.PSObject.Properties['if'].Value } else { $null }
+    $libResTypes    = @(Get-IfResourceTypes $ruleIfBlock)
+    $libPolicyDefs[$j.name] = [PSCustomObject]@{ DisplayName = $j.properties.displayName; Version = $version; PolicyRuleHash = $ruleHash; Effect = $effect; TargetResourceTypes = $libResTypes }
 }
 Get-ChildItem -Path $AlzLibraryPath -Filter '*.alz_policy_set_definition.json' -Recurse | ForEach-Object {
     $j = Get-Content $_.FullName -Raw | ConvertFrom-Json
@@ -271,9 +341,35 @@ function Extract-ConfigValues ([object]$Parameters) {
 }
 
 #==============================================================================
-# Report data accumulator
+# Report data accumulator + risk tracking
 #==============================================================================
 $reportScopes = @()
+
+# Per-effect mismatch counts — populated during Section 2, consumed in Section 7
+$script:MismatchCountByEffect = @{
+    Deny              = 0
+    DeployIfNotExists = 0
+    Modify            = 0
+    Append            = 0
+    Audit             = 0
+    Other             = 0
+}
+
+# Reverse lookup: policy definition name → list of MG scopes where it is assigned
+# Built from the brownfield export so Section 2 can show assignment context for Deny changes.
+$defAssignmentScopes = @{}
+foreach ($mgScope in @($export.Scopes | Where-Object { $_.Scope -eq 'managementGroup' })) {
+    foreach ($a in @($mgScope.Resources.PolicyAssignments)) {
+        $defName = ($a.PolicyDefinitionId -split '/')[-1]
+        if (-not $defAssignmentScopes.ContainsKey($defName)) {
+            $defAssignmentScopes[$defName] = [System.Collections.Generic.List[object]]::new()
+        }
+        $defAssignmentScopes[$defName].Add([PSCustomObject]@{
+            ScopeName         = $mgScope.Name
+            ManagementGroupId = $mgScope.ManagementGroupId
+        })
+    }
+}
 
 #==============================================================================
 # Section 1: Structural Overview
@@ -351,7 +447,14 @@ foreach ($scope in $mgScopes) {
         $scopeReport.PolicyDefs += $defEntry
         switch ($cls) {
             'Standard' { $stdDefs++ }
-            'StandardMismatch' { $stdMismatchDefs++; $stdMismatchDefList += $defEntry }
+            'StandardMismatch' {
+                $stdMismatchDefs++; $stdMismatchDefList += $defEntry
+                # Track effect category for Section 7 risk summary
+                $mLibEntry = $libPolicyDefs[$def.Name]
+                $mEffect   = if ($mLibEntry -and $mLibEntry.Effect) { $mLibEntry.Effect } else { 'Unknown' }
+                $mCat      = Get-EffectCategory $mEffect
+                $script:MismatchCountByEffect[$mCat]++
+            }
             'NonStandard' { $nonStdDefs++; $nonStdDefList += $defEntry }
             'AMBA' { $ambaDefs++; $ambaDefList += $defEntry }
             'Deprecated' { $deprDefs++; $deprDefList += $defEntry }
@@ -371,13 +474,59 @@ foreach ($scope in $mgScopes) {
 
         if ($Detailed) {
             foreach ($e in $stdMismatchDefList) {
-                $libEntry = $libPolicyDefs[$e.Name]
-                $bfVer = if ($e.Version) { $e.Version } else { '?' }
-                $libVer = if ($libEntry -and $libEntry.Version) { $libEntry.Version } else { '?' }
-                $libHash = if ($libEntry) { $libEntry.PolicyRuleHash } else { '?' }
-                Write-Warn "  [RULE-MISMATCH] $($e.Name)"
-                Write-Detail "    hash:    brownfield=$($e.BrownfieldHash)  library=$libHash"
-                Write-Detail "    version: brownfield=$bfVer  library=$libVer"
+                $libEntry  = $libPolicyDefs[$e.Name]
+                $bfVer     = if ($e.Version) { $e.Version } else { '?' }
+                $libVer    = if ($libEntry -and $libEntry.Version) { $libEntry.Version } else { '?' }
+                $effect    = if ($libEntry -and $libEntry.Effect) { $libEntry.Effect } else { 'Unknown' }
+                $resTypes  = if ($libEntry -and $libEntry.TargetResourceTypes -and $libEntry.TargetResourceTypes.Count -gt 0) {
+                    $libEntry.TargetResourceTypes -join ', '
+                } else { '(unknown)' }
+                $effCat = Get-EffectCategory $effect
+
+                switch ($effCat) {
+                    'Deny' {
+                        $assignScopes = @(if ($defAssignmentScopes.ContainsKey($e.Name)) { $defAssignmentScopes[$e.Name] })
+                        Write-Err "  [DENY RULE CHANGE] $($e.Name)"
+                        Write-Detail "    version: brownfield=$bfVer  library=$libVer"
+                        Write-Detail "    targets: $resTypes"
+                        if ($assignScopes.Count -gt 0) {
+                            $scopeStr = ($assignScopes | ForEach-Object { "$($_.ScopeName) ($($_.ManagementGroupId))" }) -join ', '
+                            Write-Detail "    assigned at: $scopeStr"
+                        } else {
+                            Write-Detail "    assigned at: (no assignments for this definition found in export)"
+                        }
+                        Write-Detail "    subscriptions in scope: (not tracked in export — subscription placement not captured per MG)"
+                        Write-Err   "    ⚠ Deny-effect rule is changing — verify resources of this type comply before deploying"
+                    }
+                    'DeployIfNotExists' {
+                        Write-Warn "  [DINE RULE CHANGE] $($e.Name)"
+                        Write-Detail "    version: brownfield=$bfVer  library=$libVer"
+                        Write-Detail "    targets: $resTypes"
+                        Write-Warn  "    (medium risk — may trigger remediation tasks on existing resources)"
+                    }
+                    'Modify' {
+                        Write-Warn "  [MODIFY RULE CHANGE] $($e.Name)"
+                        Write-Detail "    version: brownfield=$bfVer  library=$libVer"
+                        Write-Detail "    targets: $resTypes"
+                        Write-Warn  "    (medium risk — may change resource properties on next policy evaluation)"
+                    }
+                    'Append' {
+                        Write-Info "  [APPEND RULE CHANGE] $($e.Name)"
+                        Write-Detail "    version: brownfield=$bfVer  library=$libVer"
+                        Write-Detail "    targets: $resTypes"
+                        Write-Detail "    (low risk — append only adds properties on next resource update)"
+                    }
+                    'Audit' {
+                        Write-Info "  [AUDIT RULE CHANGE] $($e.Name)"
+                        Write-Detail "    version: brownfield=$bfVer  library=$libVer"
+                        Write-Detail "    (low risk — audit only, no operational impact)"
+                    }
+                    default {
+                        Write-Warn "  [RULE-MISMATCH] $($e.Name)  [effect: $effect]"
+                        Write-Detail "    version: brownfield=$bfVer  library=$libVer"
+                        Write-Detail "    targets: $resTypes"
+                    }
+                }
             }
             foreach ($e in $nonStdDefList) {
                 Write-Warn "  [NON-STD] $($e.Name)  —  $($e.DisplayName)"
@@ -750,7 +899,22 @@ foreach ($ir in $infraReport) {
 Write-Host ''
 Write-Host "  Policy Definitions:"
 if ($totalStdDefs -gt 0) { Write-Ok   "    Standard — exact match:   $totalStdDefs" }
-if ($totalStdMismatchDefs -gt 0) { Write-Warn "    Standard — rule mismatch: $totalStdMismatchDefs (engine will overwrite on deploy)" } else { Write-Ok "    Rule mismatches:          0" }
+if ($totalStdMismatchDefs -gt 0) {
+    $hasDenyMismatches = $script:MismatchCountByEffect['Deny'] -gt 0
+    if ($hasDenyMismatches) {
+        Write-Err  "    Standard — rule mismatch: $totalStdMismatchDefs (engine will overwrite on deploy)"
+    } else {
+        Write-Warn "    Standard — rule mismatch: $totalStdMismatchDefs (engine will overwrite on deploy)"
+    }
+    Write-Host ''
+    Write-Host '  Rule mismatches by effect:'
+    if ($script:MismatchCountByEffect['Deny']              -gt 0) { Write-Err  "    Deny:                   $($script:MismatchCountByEffect['Deny']) (review resource compliance before deploying)" }
+    if ($script:MismatchCountByEffect['DeployIfNotExists'] -gt 0) { Write-Warn "    DeployIfNotExists:      $($script:MismatchCountByEffect['DeployIfNotExists']) (may trigger remediations)" }
+    if ($script:MismatchCountByEffect['Modify']            -gt 0) { Write-Warn "    Modify:                 $($script:MismatchCountByEffect['Modify']) (may change resource properties)" }
+    if ($script:MismatchCountByEffect['Append']            -gt 0) { Write-Info "    Append:                 $($script:MismatchCountByEffect['Append']) (may add properties on next update)" }
+    if ($script:MismatchCountByEffect['Audit']             -gt 0) { Write-Ok   "    Audit/AuditIfNotExists: $($script:MismatchCountByEffect['Audit']) (informational only)" }
+    if ($script:MismatchCountByEffect['Other']             -gt 0) { Write-Warn "    Other/Unknown:          $($script:MismatchCountByEffect['Other'])" }
+} else { Write-Ok "    Rule mismatches:          0" }
 if ($totalNonStdDefs -gt 0) { Write-Warn "    Non-standard (review):    $totalNonStdDefs" } else { Write-Ok "    Non-standard:             0" }
 if ($totalAmbaDefs -gt 0) { Write-Amba "    AMBA (informational):     $totalAmbaDefs" }
 if ($totalDeprDefs -gt 0) { Write-Info "    Deprecated:               $totalDeprDefs" }
@@ -770,14 +934,22 @@ Write-Host "  Missing expected resources:   $totalMissingInfra"
 
 # Traffic light — AMBA does NOT count as non-standard for risk assessment
 Write-Host ''
-$hasReviewItems = $totalNonStdDefs -gt 0 -or $totalNonStdSets -gt 0 -or $totalStdMismatchDefs -gt 0
-$hasMinorDrift = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0
+$hasDenyMismatches = $script:MismatchCountByEffect['Deny'] -gt 0
+$hasReviewItems    = $totalNonStdDefs -gt 0 -or $totalNonStdSets -gt 0 -or $totalStdMismatchDefs -gt 0
+$hasMinorDrift     = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0
 
 if (-not $hasReviewItems -and -not $hasMinorDrift) {
     Write-Colored 'GREEN' 'Green' "Brownfield is a clean portal accelerator deployment. Low risk for engine adoption."
     if ($totalAmbaDefs -gt 0 -or $totalAmbaSets -gt 0) {
         Write-Amba "  Note: AMBA monitoring stack detected ($totalAmbaDefs defs, $totalAmbaSets sets) — informational only."
     }
+}
+elseif ($hasDenyMismatches) {
+    Write-Colored 'RED' 'Red' "Brownfield has Deny-effect policy rule changes — resource compliance must be verified before deploying."
+    Write-Host '  Recommendation: Run with -Detailed to see which policies change and which resource types they target.'
+    Write-Host '    a) Verify existing resources of those types comply with the updated rules'
+    Write-Host '    b) Test in DoNotEnforce mode first if compliance status is uncertain'
+    Write-Host '    c) Consider deploying governance-only first, then re-enable enforcement after remediation'
 }
 elseif ($hasReviewItems) {
     Write-Colored 'YELLOW' 'Yellow' "Brownfield has customizations or version drift that need operator decisions."
@@ -824,6 +996,15 @@ if ($OutputFile -ne '') {
             TotalCustomRoles                = $totalCustomRoles
             TotalNonAlzRgs                  = $totalNonAlzRgs
             TotalMissingInfra               = $totalMissingInfra
+            MismatchByEffect                = [PSCustomObject]@{
+                Deny              = $script:MismatchCountByEffect['Deny']
+                DeployIfNotExists = $script:MismatchCountByEffect['DeployIfNotExists']
+                Modify            = $script:MismatchCountByEffect['Modify']
+                Append            = $script:MismatchCountByEffect['Append']
+                Audit             = $script:MismatchCountByEffect['Audit']
+                Other             = $script:MismatchCountByEffect['Other']
+            }
+            HasDenyMismatches               = ($script:MismatchCountByEffect['Deny'] -gt 0)
         }
     }
     $fullReport | ConvertTo-Json -Depth 10 | Set-Content $OutputFile
