@@ -934,3 +934,78 @@ Engine repo, `.bicepparam` format, `readEnvironmentVariable()` pattern, `platfor
 `git diff`-based matrix detection works for config changes but not for engine repo changes. When a template is updated in `alz-mgmt-templates`, no change lands in `alz-mgmt` — CI does not auto-trigger. Options: (1) repository dispatch webhook from templates repo to config repo on release tag push, (2) scheduled nightly validation, (3) manual trigger. This is an unresolved CI design problem to address during iteration 2 implementation.
 
 Full trade-off analysis: `docs/iteration2-repo-architecture-tradeoff.md`.
+
+---
+
+## Mar 25: Iteration 2 — Brownfield Tooling Session (Compare-BrownfieldState)
+
+### Context
+
+Late-night session (~01:30–04:00 CET) building and iterating on the offline analysis half of the brownfield integration tooling. Target tenant throughout: Sylaviken — portal-deployed ALZ from April 2024, uppercase MG naming (`ALZ`, `ALZ-platform`, etc.), AMBA deployed alongside standard ALZ, single platform subscription `93ff5894-...`.
+
+### Three-script architecture (established)
+
+The session confirmed a clean three-script separation for brownfield integration, all read-only:
+
+- **`Export-BrownfieldState.ps1`** — live Azure scan, produces a single JSON snapshot of governance (MG hierarchy, policy defs/sets/assignments, RBAC) and infrastructure (resource groups, Log Analytics, Automation Accounts, VNets). Built and tested in a prior session.
+- **`Compare-BrownfieldState.ps1`** — offline analysis, takes the export JSON and compares against the engine's ALZ library. Produces a seven-section adoption readiness report. Built and iterated heavily in this session.
+- **`discover.ps1`** — live scan, checks subscription resources against ALZ deny policies for compliance risk. Not yet built — next priority.
+
+Operator workflow: `export → compare → discover`. Compare and discover both consume the export snapshot but are independent of each other.
+
+### Iteration history (Compare-BrownfieldState)
+
+**Iteration 1 — Initial build**
+
+Seven-section report: structural overview, policy library comparison, assignment inventory, RBAC summary, infrastructure assessment, config extraction, risk summary. First run against Sylaviken showed 123 non-standard policy definitions — suspiciously high.
+
+**Iteration 2 — AMBA classification**
+
+All 123 "non-standard" definitions were Azure Monitor Baseline Alerts (AMBA), a known supported extension deployed by the portal accelerator. Added AMBA detection via metadata (`_deployed_by_amba == "True"` or `source` containing `azure-monitor-baseline-alerts`). Result: 0 genuinely non-standard definitions, 123 correctly classified as AMBA. Also surfaced `Enforce-Encryption-CMK` as the only genuinely non-standard policy set definition.
+
+**Iteration 3 — Policy rule hash verification**
+
+The 92 "standard" definitions were matched by name only. If the brownfield had an older version the engine would silently overwrite it on deploy without any warning. Added SHA256 hash comparison of the `policyRule` object between the brownfield export and the library JSON files. Initial result: version string comparison showed 5 mismatches, but unreliable because most brownfield definitions lacked version metadata in the export.
+
+**Iteration 4 — Hash normalization**
+
+All 92 showed as mismatches because Azure API responses and library JSON files serialize object properties in different order, producing different hashes for identical policy rules. Fix: added `ConvertTo-SortedObject` recursive deep-sort applied before hashing in both `Export-BrownfieldState.ps1` and `Compare-BrownfieldState.ps1`. Result after normalization: 3 exact matches, 89 genuine rule mismatches.
+
+Verified one manually: `Deny-Subnet-Without-Nsg` — brownfield `SystemDataCreatedAt: 2024-04-17`, version `1.0.0`. Library is `2.0.0` (adds GatewaySubnet/AzureFirewallSubnet exclusions, documented in Enterprise-Scale changelog). All 89 mismatches are real governance drift — the portal accelerator does not auto-update policy definitions after initial deployment.
+
+Notable finding: many definitions show the same version string in both brownfield and library but different hashes — the ALZ team has updated rule logic without bumping version numbers. This proves hash comparison is necessary; version strings alone are insufficient for detecting drift.
+
+**Iteration 5 — Version display fix**
+
+Brownfield version showed as `?` in the mismatch output because the export script was reading `metadata.version` instead of the top-level `Version` property. Fixed export capture and compare display. Output now shows `brownfield=1.0.0  library=2.0.0` cleanly.
+
+**Iteration 6 — Assignment classification fix**
+
+42 assignments were falsely flagged as `[non-std]` because the classification logic extracted the last segment of `PolicyDefinitionId` and looked it up in the custom ALZ definition library. For assignments that reference built-in Azure policies (Microsoft-authored), the last segment is a GUID — not in the library. Examples: `Deny-Classic-Resources`, `Deny-IP-forwarding`, `Deny-Storage-http`, `Deploy-VM-Monitoring`, `Deploy-VM-Backup`.
+
+Fix: loaded `*.alz_policy_assignment.json` files (78 found) as an additional reference set. Assignments are now matched by their own name (`$aName`, last segment of the assignment resource ID) against this set. An assignment is standard if its name is in the ALZ assignment library OR its referenced definition is a known custom ALZ def/set.
+
+Result: only 3 genuinely non-standard assignments remain: `Deploy-ASC-Monitoring`, `Deploy-AKS-Policy`, `Deploy-Log-Analytics`.
+
+### Final report numbers — Sylaviken
+
+**Policy definitions:** 3 standard exact, 89 standard rule mismatch (engine will overwrite on deploy), 0 non-standard, 123 AMBA, 68 deprecated.
+
+**Policy set definitions:** 40 standard, 1 non-standard (`Enforce-Encryption-CMK`), 6 AMBA, 6 deprecated.
+
+**Assignments:** 3 non-standard (`Deploy-ASC-Monitoring`, `Deploy-AKS-Policy`, `Deploy-Log-Analytics`), 5 AMBA, remainder standard.
+
+**Infrastructure:** LAW named `ALZ-law` (engine would deploy `law-alz-swedencentral`), Automation Account `ALZ-aauto` (engine: `aa-alz-swedencentral`). 3 non-ALZ resource groups: `VisualStudioOnline-*`, `rg-copilot-weu`, `NetworkWatcherRG`. Drift detected in LAW references: stale subscription ID `10738f61-...` appearing in some assignment parameters alongside the correct `93ff5894-...`.
+
+**Risk rating:** YELLOW — customizations and version drift present, operator decisions required before stack takeover.
+
+### Key thesis findings
+
+1. Portal-deployed ALZ tenants do not receive policy definition updates automatically. 89 of 92 standard definitions had different policy rule hashes from the library, all at `v1.0.0` from April 2024.
+2. Version strings alone are unreliable for detecting policy drift — the ALZ team updates rule logic without bumping version numbers. Hash comparison is necessary.
+3. AMBA policies require separate classification. They are a known extension, not tenant-custom policies, and would be massively over-reported as non-standard without explicit handling.
+4. Assignment classification must check the ALZ assignment library, not just the referenced definition library. Many standard ALZ assignments reference built-in Microsoft-authored policies, which are not in the custom lib.
+
+### What's next
+
+Build/redesign `discover.ps1` — the compliance risk scanner (live subscription scan against ALZ deny policies). Then test the full three-script workflow end-to-end. These three scripts complete the brownfield integration tooling for iteration 2.
