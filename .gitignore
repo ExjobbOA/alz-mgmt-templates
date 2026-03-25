@@ -1,0 +1,5 @@
+# Tenant-specific state snapshots (may contain private subscription IDs)
+state-snapshots/state-sylaviken-brownfield.json
+
+# Local script output / scratch files
+compare-output.txt
