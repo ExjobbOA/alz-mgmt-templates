@@ -1047,3 +1047,13 @@ Result: 13 Deny definitions now resolve to real MG assignment scopes (up from 3)
 ### What's next
 
 Build/redesign `discover.ps1` — the compliance risk scanner (live subscription scan against ALZ deny policies). Then test the full three-script workflow end-to-end. These three scripts complete the brownfield integration tooling for iteration 2.
+
+**Iteration 9 — Fix `Get-IfResourceTypes`: `in` operator and ARM expression sentinel**
+
+Two bugs fixed in `Get-IfResourceTypes` in `Compare-BrownfieldState.ps1`:
+
+1. The function only handled `{"field":"type","equals":"..."}` conditions. ALZ uses `{"field":"type","in":[...]}` for multi-type policies (e.g. `DenyAction-DeleteResources`). These fell through and the resource type showed as `(unknown)` in `-Detailed` output. Added an `in`-array branch alongside the existing `equals` branch.
+
+2. When the matched type value is an ARM parameter expression like `[[parameters('resourceType')]`, the raw expression was leaking into the `-Detailed` report. Added a normalization step: any value starting with `[` or containing `parameters(` is replaced with the sentinel string `(parameterized)`.
+
+Non-detailed output is unaffected (these fields only appear under `-Detailed`). Numbers on Sylaviken are unchanged.
