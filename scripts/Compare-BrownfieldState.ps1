@@ -120,15 +120,32 @@ function Get-PolicyEffect ([object]$PolicyRule, [object]$Parameters) {
 }
 
 # Recursively walk an if-condition tree and return all resource types referenced
-# via {"field":"type","equals":"..."} conditions. Handles allOf/anyOf/not nesting.
+# via {"field":"type","equals":"..."} or {"field":"type","in":[...]} conditions.
+# Handles allOf/anyOf/not nesting. ARM parameter expressions (e.g. [[parameters('x')])
+# are returned as the sentinel string "(parameterized)".
 function Get-IfResourceTypes ([object]$Condition) {
     if (-not $Condition) { return @() }
     $found = [System.Collections.Generic.List[string]]::new()
-    # Direct field=type condition
+    # Helper: normalize a raw type value — if it looks like an ARM expression, replace with sentinel
+    $normalizeType = {
+        param([string]$raw)
+        if ($raw.StartsWith('[') -or $raw -match 'parameters\(') { return '(parameterized)' }
+        return $raw
+    }
+    # Direct field=type condition with "equals"
     $fieldProp  = $Condition.PSObject.Properties['field']
     $equalsProp = $Condition.PSObject.Properties['equals']
     if ($fieldProp -and ($fieldProp.Value -ieq 'type') -and $equalsProp) {
-        [void]$found.Add([string]$equalsProp.Value)
+        $v = & $normalizeType ([string]$equalsProp.Value)
+        if (-not $found.Contains($v)) { [void]$found.Add($v) }
+    }
+    # Direct field=type condition with "in" (array)
+    $inProp = $Condition.PSObject.Properties['in']
+    if ($fieldProp -and ($fieldProp.Value -ieq 'type') -and $inProp -and $inProp.Value) {
+        foreach ($item in @($inProp.Value)) {
+            $v = & $normalizeType ([string]$item)
+            if (-not $found.Contains($v)) { [void]$found.Add($v) }
+        }
     }
     # allOf / anyOf
     foreach ($key in @('allOf','anyOf')) {
