@@ -26,12 +26,20 @@
 
 .PARAMETER Detailed
     Show individual resource listings (non-standard/deprecated items), not just counts.
+    Deny-effect mismatches are split into ASSIGNED (active risk) and UNASSIGNED (no current risk) blocks.
+
+.PARAMETER IncludeAmba
+    When combined with -Detailed, also expands individual AMBA and deprecated policy listings.
+    Without this switch, -Detailed shows AMBA and deprecated items as counts only.
 
 .EXAMPLE
     ./scripts/Compare-BrownfieldState.ps1 -BrownfieldExport ./state-snapshots/state-sylaviken-brownfield.json
 
 .EXAMPLE
-    ./scripts/Compare-BrownfieldState.ps1 -BrownfieldExport ./state-snapshots/state-sylaviken-brownfield.json -Detailed -OutputFile ./report.json
+    ./scripts/Compare-BrownfieldState.ps1 -BrownfieldExport ./state-snapshots/state-sylaviken-brownfield.json -Detailed
+
+.EXAMPLE
+    ./scripts/Compare-BrownfieldState.ps1 -BrownfieldExport ./state-snapshots/state-sylaviken-brownfield.json -Detailed -IncludeAmba -OutputFile ./report.json
 #>
 
 [CmdletBinding()]
@@ -43,7 +51,9 @@ param(
 
     [string]$OutputFile = '',
 
-    [switch]$Detailed
+    [switch]$Detailed,
+
+    [switch]$IncludeAmba
 )
 
 Set-StrictMode -Version Latest
@@ -195,6 +205,18 @@ if (-not (Test-Path $BrownfieldExport)) {
 }
 
 $export = Get-Content $BrownfieldExport -Raw | ConvertFrom-Json
+
+# Build MG -> direct subscription lookup from SubscriptionPlacement (added by Export-BrownfieldState v2+).
+# Falls back to empty if the export was produced by an older version of the export script.
+$mgSubscriptions = @{}
+if ($export.PSObject.Properties['SubscriptionPlacement'] -and $export.SubscriptionPlacement) {
+    $sp = $export.SubscriptionPlacement
+    if ($sp -is [PSCustomObject]) {
+        $sp.PSObject.Properties | ForEach-Object { $mgSubscriptions[$_.Name] = @($_.Value) }
+    } elseif ($sp -is [hashtable]) {
+        $mgSubscriptions = $sp
+    }
+}
 
 # Auto-detect library path relative to this script
 if ($AlzLibraryPath -eq '') {
@@ -364,7 +386,9 @@ $reportScopes = @()
 
 # Per-effect mismatch counts — populated during Section 2, consumed in Section 7
 $script:MismatchCountByEffect = @{
-    Deny              = 0
+    Deny              = 0   # total = DenyAssigned + DenyUnassigned
+    DenyAssigned      = 0   # Deny rules that are currently assigned (active risk)
+    DenyUnassigned    = 0   # Deny rules that exist but are not assigned (no current impact)
     DeployIfNotExists = 0
     Modify            = 0
     Append            = 0
@@ -423,6 +447,45 @@ foreach ($mgScope in @($export.Scopes | Where-Object { $_.Scope -eq 'managementG
             Add-DefAssignmentScope $defName $mgScope.Name $mgScope.ManagementGroupId
         }
     }
+}
+
+# Recursively collect all MG IDs under a hierarchy node (used for subscription resolution)
+function Get-AllMgIdsUnderNode ([object]$Node) {
+    $ids = [System.Collections.Generic.List[string]]::new()
+    [void]$ids.Add($Node.Name)
+    if ($Node.Children) {
+        foreach ($child in @($Node.Children)) {
+            foreach ($childId in @(Get-AllMgIdsUnderNode $child)) { [void]$ids.Add($childId) }
+        }
+    }
+    return @($ids)
+}
+
+# Find a node in the MG hierarchy by ID
+function Find-HierarchyNode ([object]$Node, [string]$TargetId) {
+    if ($Node.Name -ieq $TargetId) { return $Node }
+    if ($Node.Children) {
+        foreach ($child in @($Node.Children)) {
+            $found = Find-HierarchyNode $child $TargetId
+            if ($found) { return $found }
+        }
+    }
+    return $null
+}
+
+# Return all subscriptions placed under $MgId (including descendant MGs), using SubscriptionPlacement data.
+# Returns objects with Id and DisplayName. Returns empty array if SubscriptionPlacement is not in the export.
+function Get-SubsUnderMg ([string]$MgId) {
+    if ($mgSubscriptions.Count -eq 0) { return @() }
+    $node = Find-HierarchyNode $export.ManagementGroupHierarchy $MgId
+    if (-not $node) { return @() }
+    $subs = [System.Collections.Generic.List[object]]::new()
+    foreach ($id in @(Get-AllMgIdsUnderNode $node)) {
+        if ($mgSubscriptions.ContainsKey($id)) {
+            foreach ($sub in @($mgSubscriptions[$id])) { [void]$subs.Add($sub) }
+        }
+    }
+    return @($subs)
 }
 
 #==============================================================================
@@ -507,7 +570,14 @@ foreach ($scope in $mgScopes) {
                 $mLibEntry = $libPolicyDefs[$def.Name]
                 $mEffect   = if ($mLibEntry -and $mLibEntry.Effect) { $mLibEntry.Effect } else { 'Unknown' }
                 $mCat      = Get-EffectCategory $mEffect
-                $script:MismatchCountByEffect[$mCat]++
+                if ($mCat -eq 'Deny') {
+                    $script:MismatchCountByEffect['Deny']++
+                    $isAssigned = $defAssignmentScopes.ContainsKey($def.Name) -and $defAssignmentScopes[$def.Name].Count -gt 0
+                    if ($isAssigned) { $script:MismatchCountByEffect['DenyAssigned']++ }
+                    else             { $script:MismatchCountByEffect['DenyUnassigned']++ }
+                } else {
+                    $script:MismatchCountByEffect[$mCat]++
+                }
             }
             'NonStandard' { $nonStdDefs++; $nonStdDefList += $defEntry }
             'AMBA' { $ambaDefs++; $ambaDefList += $defEntry }
@@ -527,6 +597,7 @@ foreach ($scope in $mgScopes) {
         if ($deprDefs -gt 0) { Write-Info "Policy Definitions:     $deprDefs deprecated" }
 
         if ($Detailed) {
+            # Non-Deny mismatches first (DINE, Modify, Append, Audit, Other)
             foreach ($e in $stdMismatchDefList) {
                 $libEntry  = $libPolicyDefs[$e.Name]
                 $bfVer     = if ($e.Version) { $e.Version } else { '?' }
@@ -536,22 +607,8 @@ foreach ($scope in $mgScopes) {
                     $libEntry.TargetResourceTypes -join ', '
                 } else { '(unknown)' }
                 $effCat = Get-EffectCategory $effect
-
+                if ($effCat -eq 'Deny') { continue }   # handled in the two Deny blocks below
                 switch ($effCat) {
-                    'Deny' {
-                        $assignScopes = @(if ($defAssignmentScopes.ContainsKey($e.Name)) { $defAssignmentScopes[$e.Name] })
-                        Write-Err "  [DENY RULE CHANGE] $($e.Name)"
-                        Write-Detail "    version: brownfield=$bfVer  library=$libVer"
-                        Write-Detail "    targets: $resTypes"
-                        if ($assignScopes.Count -gt 0) {
-                            $scopeStr = ($assignScopes | ForEach-Object { "$($_.ScopeName) ($($_.ManagementGroupId))" }) -join ', '
-                            Write-Detail "    assigned at: $scopeStr"
-                        } else {
-                            Write-Detail "    assigned at: (no assignments for this definition found in export)"
-                        }
-                        Write-Detail "    subscriptions in scope: (not tracked in export — subscription placement not captured per MG)"
-                        Write-Err   "    ⚠ Deny-effect rule is changing — verify resources of this type comply before deploying"
-                    }
                     'DeployIfNotExists' {
                         Write-Warn "  [DINE RULE CHANGE] $($e.Name)"
                         Write-Detail "    version: brownfield=$bfVer  library=$libVer"
@@ -582,14 +639,85 @@ foreach ($scope in $mgScopes) {
                     }
                 }
             }
+
+            # Deny mismatches — split into ASSIGNED (active risk) and UNASSIGNED (no current risk)
+            $denyMismatches = @($stdMismatchDefList | Where-Object {
+                $mLib = $libPolicyDefs[$_.Name]
+                $eff  = if ($mLib -and $mLib.Effect) { $mLib.Effect } else { 'Unknown' }
+                (Get-EffectCategory $eff) -eq 'Deny'
+            })
+            if ($denyMismatches.Count -gt 0) {
+                $denyAssigned   = @($denyMismatches | Where-Object {
+                    $defAssignmentScopes.ContainsKey($_.Name) -and $defAssignmentScopes[$_.Name].Count -gt 0
+                })
+                $denyUnassigned = @($denyMismatches | Where-Object {
+                    -not ($defAssignmentScopes.ContainsKey($_.Name) -and $defAssignmentScopes[$_.Name].Count -gt 0)
+                })
+
+                if ($denyAssigned.Count -gt 0) {
+                    Write-Host ''
+                    Write-Err "  ── Deny-effect rule changes: ASSIGNED ($($denyAssigned.Count) — active risk) ──"
+                    foreach ($e in $denyAssigned) {
+                        $libEntry  = $libPolicyDefs[$e.Name]
+                        $bfVer     = if ($e.Version) { $e.Version } else { '?' }
+                        $libVer    = if ($libEntry -and $libEntry.Version) { $libEntry.Version } else { '?' }
+                        $resTypes  = if ($libEntry -and $libEntry.TargetResourceTypes -and $libEntry.TargetResourceTypes.Count -gt 0) {
+                            $libEntry.TargetResourceTypes -join ', '
+                        } else { '(unknown)' }
+                        $assignScopes = @($defAssignmentScopes[$e.Name])
+                        $scopeStr = ($assignScopes | ForEach-Object { "$($_.ScopeName) ($($_.ManagementGroupId))" }) -join ', '
+                        Write-Err    "  [DENY RULE CHANGE] $($e.Name)"
+                        Write-Detail "    version: brownfield=$bfVer  library=$libVer"
+                        Write-Detail "    targets: $resTypes"
+                        Write-Detail "    assigned at: $scopeStr"
+                        if ($mgSubscriptions.Count -gt 0) {
+                            $allSubsInScope = [System.Collections.Generic.List[string]]::new()
+                            foreach ($as in $assignScopes) {
+                                foreach ($sub in @(Get-SubsUnderMg $as.ManagementGroupId)) {
+                                    $subLabel = if ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { "$($sub.DisplayName) ($($sub.Id))" } else { $sub.Id }
+                                    if (-not $allSubsInScope.Contains($subLabel)) { [void]$allSubsInScope.Add($subLabel) }
+                                }
+                            }
+                            if ($allSubsInScope.Count -gt 0) {
+                                Write-Detail "    subscriptions in scope: $($allSubsInScope -join ', ')"
+                            } else {
+                                Write-Detail "    subscriptions in scope: (none placed under assigned MGs)"
+                            }
+                        } else {
+                            Write-Detail "    subscriptions in scope: (re-run Export-BrownfieldState.ps1 to capture subscription placement)"
+                        }
+                        Write-Err    "    ⚠ Deny-effect rule is changing — verify resources of this type comply before deploying"
+                    }
+                }
+
+                if ($denyUnassigned.Count -gt 0) {
+                    Write-Host ''
+                    Write-Warn "  ── Deny-effect rule changes: UNASSIGNED ($($denyUnassigned.Count) — no current risk) ──"
+                    foreach ($e in $denyUnassigned) {
+                        $libEntry  = $libPolicyDefs[$e.Name]
+                        $bfVer     = if ($e.Version) { $e.Version } else { '?' }
+                        $libVer    = if ($libEntry -and $libEntry.Version) { $libEntry.Version } else { '?' }
+                        $resTypes  = if ($libEntry -and $libEntry.TargetResourceTypes -and $libEntry.TargetResourceTypes.Count -gt 0) {
+                            $libEntry.TargetResourceTypes -join ', '
+                        } else { '(unknown)' }
+                        Write-Warn   "  [DENY RULE CHANGE] $($e.Name)"
+                        Write-Detail "    version: brownfield=$bfVer  library=$libVer"
+                        Write-Detail "    targets: $resTypes"
+                        Write-Detail "    (definition exists but is not assigned — no operational impact unless assigned later)"
+                    }
+                }
+            }
+
             foreach ($e in $nonStdDefList) {
                 Write-Warn "  [NON-STD] $($e.Name)  —  $($e.DisplayName)"
             }
-            foreach ($e in $ambaDefList) {
-                Write-Amba "  [AMBA] $($e.Name)  —  $($e.DisplayName)"
-            }
-            foreach ($e in $deprDefList) {
-                Write-Info "  [DEPRECATED] $($e.Name)  —  $($e.DisplayName)"
+            if ($Detailed -and $IncludeAmba) {
+                foreach ($e in $ambaDefList) {
+                    Write-Amba "  [AMBA] $($e.Name)  —  $($e.DisplayName)"
+                }
+                foreach ($e in $deprDefList) {
+                    Write-Info "  [DEPRECATED] $($e.Name)  —  $($e.DisplayName)"
+                }
             }
         }
     }
@@ -629,11 +757,13 @@ foreach ($scope in $mgScopes) {
             foreach ($e in $nonStdSetList) {
                 Write-Warn "  [NON-STD] $($e.Name)  —  $($e.DisplayName)"
             }
-            foreach ($e in $ambaSetList) {
-                Write-Amba "  [AMBA] $($e.Name)  —  $($e.DisplayName)"
-            }
-            foreach ($e in $deprSetList) {
-                Write-Info "  [DEPRECATED] $($e.Name)  —  $($e.DisplayName)"
+            if ($IncludeAmba) {
+                foreach ($e in $ambaSetList) {
+                    Write-Amba "  [AMBA] $($e.Name)  —  $($e.DisplayName)"
+                }
+                foreach ($e in $deprSetList) {
+                    Write-Info "  [DEPRECATED] $($e.Name)  —  $($e.DisplayName)"
+                }
             }
         }
     }
@@ -907,6 +1037,77 @@ if ($script:CollectedUamiIds.Count -gt 0) {
     foreach ($id in $script:CollectedUamiIds) { Write-Detail "    $id" }
 }
 
+# Platform subscription mapping from SubscriptionPlacement (requires Export-BrownfieldState v2+)
+Write-Host ''
+Write-Host '  Platform subscription mapping (from MG placement):'
+if ($mgSubscriptions.Count -gt 0) {
+    $platformMgMap = @{
+        'management'   = 'SUBSCRIPTION_ID_MANAGEMENT'
+        'connectivity' = 'SUBSCRIPTION_ID_CONNECTIVITY'
+        'identity'     = 'SUBSCRIPTION_ID_IDENTITY'
+        'security'     = 'SUBSCRIPTION_ID_SECURITY'
+    }
+    # Build normalized name -> actual MG ID from hierarchy
+    $normalizedToActualMg = @{}
+    if ($export.ManagementGroupHierarchy) {
+        foreach ($id in @(Get-AllMgIdsUnderNode $export.ManagementGroupHierarchy)) {
+            $norm = $id -replace '(?i)^alz-', ''
+            $normalizedToActualMg[$norm.ToLower()] = $id
+        }
+    }
+    foreach ($normName in @('management', 'connectivity', 'identity', 'security')) {
+        $key = $platformMgMap[$normName]
+        $actualId = if ($normalizedToActualMg.ContainsKey($normName)) { $normalizedToActualMg[$normName] } else { $normName }
+        $subs = @(Get-SubsUnderMg $actualId)
+        if ($subs.Count -eq 1) {
+            $sub = $subs[0]
+            $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '(unknown)' }
+            $subName = if ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { " ($($sub.DisplayName))" } else { '' }
+            Write-Ok "    $key`: $subId$subName"
+        } elseif ($subs.Count -gt 1) {
+            Write-Warn "    $key`: multiple subscriptions found under $actualId — check placement:"
+            foreach ($sub in $subs) {
+                $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '?' }
+                $subName = if ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { $sub.DisplayName } else { '' }
+                Write-Detail "      $subId ($subName)"
+            }
+        } else {
+            Write-Detail "    $key`: (none found — check tenant root for unplaced subs or MG named '$actualId')"
+        }
+    }
+} else {
+    Write-Detail "    (not available — re-run Export-BrownfieldState.ps1 to capture subscription placement)"
+}
+
+# Hub networking from infrastructure scan
+Write-Host ''
+Write-Host '  Hub networking (from infrastructure scan):'
+$hubVnets      = @($infraReport | ForEach-Object { $_.KeyResources } | Where-Object { $_.Type -eq 'hubVirtualNetwork' })
+$firewalls     = @($infraReport | ForEach-Object { $_.KeyResources } | Where-Object { $_.Type -eq 'azureFirewall' })
+$privateDnsZones = @($infraReport | ForEach-Object { $_.KeyResources } | Where-Object { $_.Type -eq 'privateDnsZone' })
+
+if ($hubVnets.Count -gt 0) {
+    foreach ($vnet in $hubVnets) {
+        $addrSpace = if ($vnet.PSObject.Properties['AddressSpace'] -and $vnet.AddressSpace) { $vnet.AddressSpace -join ', ' } else { '(unknown)' }
+        Write-Ok "    Hub VNet: $($vnet.Name) ($addrSpace) in $($vnet.ResourceGroup)"
+    }
+} else {
+    Write-Detail "    Hub VNet: (none found — check -PlatformSubscriptionIds covers the connectivity sub)"
+}
+if ($firewalls.Count -gt 0) {
+    foreach ($fw in $firewalls) {
+        Write-Ok "    Azure Firewall: $($fw.Name) in $($fw.ResourceGroup)"
+    }
+} else {
+    Write-Detail "    Azure Firewall: (none found)"
+}
+if ($privateDnsZones.Count -gt 0) {
+    $zoneRgs = @($privateDnsZones | ForEach-Object { $_.ResourceGroup } | Sort-Object -Unique)
+    Write-Ok "    Private DNS zones: $($privateDnsZones.Count) zone(s) in $($zoneRgs -join ', ')"
+} else {
+    Write-Detail "    Private DNS zones: (none found)"
+}
+
 #==============================================================================
 # Section 7: Risk Summary
 #==============================================================================
@@ -954,15 +1155,16 @@ Write-Host ''
 Write-Host "  Policy Definitions:"
 if ($totalStdDefs -gt 0) { Write-Ok   "    Standard — exact match:   $totalStdDefs" }
 if ($totalStdMismatchDefs -gt 0) {
-    $hasDenyMismatches = $script:MismatchCountByEffect['Deny'] -gt 0
-    if ($hasDenyMismatches) {
+    $hasDenyAssigned = $script:MismatchCountByEffect['DenyAssigned'] -gt 0
+    if ($hasDenyAssigned) {
         Write-Err  "    Standard — rule mismatch: $totalStdMismatchDefs (engine will overwrite on deploy)"
     } else {
         Write-Warn "    Standard — rule mismatch: $totalStdMismatchDefs (engine will overwrite on deploy)"
     }
     Write-Host ''
     Write-Host '  Rule mismatches by effect:'
-    if ($script:MismatchCountByEffect['Deny']              -gt 0) { Write-Err  "    Deny:                   $($script:MismatchCountByEffect['Deny']) (review resource compliance before deploying)" }
+    if ($script:MismatchCountByEffect['DenyAssigned']      -gt 0) { Write-Err  "    Deny (assigned):        $($script:MismatchCountByEffect['DenyAssigned']) (active risk — review resource compliance before deploying)" }
+    if ($script:MismatchCountByEffect['DenyUnassigned']    -gt 0) { Write-Warn "    Deny (unassigned):      $($script:MismatchCountByEffect['DenyUnassigned']) (definition-only — no current impact)" }
     if ($script:MismatchCountByEffect['DeployIfNotExists'] -gt 0) { Write-Warn "    DeployIfNotExists:      $($script:MismatchCountByEffect['DeployIfNotExists']) (may trigger remediations)" }
     if ($script:MismatchCountByEffect['Modify']            -gt 0) { Write-Warn "    Modify:                 $($script:MismatchCountByEffect['Modify']) (may change resource properties)" }
     if ($script:MismatchCountByEffect['Append']            -gt 0) { Write-Info "    Append:                 $($script:MismatchCountByEffect['Append']) (may add properties on next update)" }
@@ -986,11 +1188,12 @@ Write-Host "  Custom role definitions:      $totalCustomRoles"
 Write-Host "  Non-ALZ resource groups:      $totalNonAlzRgs"
 Write-Host "  Missing expected resources:   $totalMissingInfra"
 
-# Traffic light — AMBA does NOT count as non-standard for risk assessment
+# Traffic light — AMBA does NOT count as non-standard for risk assessment.
+# Only ASSIGNED Deny mismatches trigger RED; unassigned-only Deny mismatches are YELLOW.
 Write-Host ''
-$hasDenyMismatches = $script:MismatchCountByEffect['Deny'] -gt 0
-$hasReviewItems    = $totalNonStdDefs -gt 0 -or $totalNonStdSets -gt 0 -or $totalStdMismatchDefs -gt 0
-$hasMinorDrift     = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0
+$hasDenyAssigned = $script:MismatchCountByEffect['DenyAssigned'] -gt 0
+$hasReviewItems  = $totalNonStdDefs -gt 0 -or $totalNonStdSets -gt 0 -or $totalStdMismatchDefs -gt 0
+$hasMinorDrift   = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0
 
 if (-not $hasReviewItems -and -not $hasMinorDrift) {
     Write-Colored 'GREEN' 'Green' "Brownfield is a clean portal accelerator deployment. Low risk for engine adoption."
@@ -998,8 +1201,8 @@ if (-not $hasReviewItems -and -not $hasMinorDrift) {
         Write-Amba "  Note: AMBA monitoring stack detected ($totalAmbaDefs defs, $totalAmbaSets sets) — informational only."
     }
 }
-elseif ($hasDenyMismatches) {
-    Write-Colored 'RED' 'Red' "Brownfield has Deny-effect policy rule changes — resource compliance must be verified before deploying."
+elseif ($hasDenyAssigned) {
+    Write-Colored 'RED' 'Red' "Brownfield has assigned Deny-effect policy rule changes — resource compliance must be verified before deploying."
     Write-Host '  Recommendation: Run with -Detailed to see which policies change and which resource types they target.'
     Write-Host '    a) Verify existing resources of those types comply with the updated rules'
     Write-Host '    b) Test in DoNotEnforce mode first if compliance status is uncertain'
@@ -1051,6 +1254,8 @@ if ($OutputFile -ne '') {
             TotalNonAlzRgs                  = $totalNonAlzRgs
             TotalMissingInfra               = $totalMissingInfra
             MismatchByEffect                = [PSCustomObject]@{
+                DenyAssigned      = $script:MismatchCountByEffect['DenyAssigned']
+                DenyUnassigned    = $script:MismatchCountByEffect['DenyUnassigned']
                 Deny              = $script:MismatchCountByEffect['Deny']
                 DeployIfNotExists = $script:MismatchCountByEffect['DeployIfNotExists']
                 Modify            = $script:MismatchCountByEffect['Modify']
@@ -1058,6 +1263,7 @@ if ($OutputFile -ne '') {
                 Audit             = $script:MismatchCountByEffect['Audit']
                 Other             = $script:MismatchCountByEffect['Other']
             }
+            HasDenyAssignedMismatches       = ($script:MismatchCountByEffect['DenyAssigned'] -gt 0)
             HasDenyMismatches               = ($script:MismatchCountByEffect['Deny'] -gt 0)
         }
     }
