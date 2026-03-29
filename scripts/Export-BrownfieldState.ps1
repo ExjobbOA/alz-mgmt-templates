@@ -358,6 +358,7 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
             DisplayName    = (Get-PropSafe $def 'DisplayName')
             Version        = (Get-PropSafe $def 'Version')
             PolicyRuleHash = $hash
+            PolicyRule     = (Get-PropSafe $def 'PolicyRule', 'Properties')
             Metadata       = (Get-PropSafe $def 'Metadata')
             Scope          = $scope
         }

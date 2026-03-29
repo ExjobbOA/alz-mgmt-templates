@@ -32,6 +32,10 @@
     When combined with -Detailed, also expands individual AMBA and deprecated policy listings.
     Without this switch, -Detailed shows AMBA and deprecated items as counts only.
 
+.PARAMETER DiffReport
+    Optional path to write an HTML side-by-side diff report for Deny-effect policy rule mismatches.
+    Requires Python 3 and scripts/diff-deny-rules.py. Opens in any browser.
+
 .EXAMPLE
     ./scripts/Compare-BrownfieldState.ps1 -BrownfieldExport ./state-snapshots/state-sylaviken-brownfield.json
 
@@ -40,6 +44,9 @@
 
 .EXAMPLE
     ./scripts/Compare-BrownfieldState.ps1 -BrownfieldExport ./state-snapshots/state-sylaviken-brownfield.json -Detailed -IncludeAmba -OutputFile ./report.json
+
+.EXAMPLE
+    ./scripts/Compare-BrownfieldState.ps1 -BrownfieldExport ./state-snapshots/state-sylaviken-brownfield.json -Detailed -DiffReport ./deny-diff-report.html
 #>
 
 [CmdletBinding()]
@@ -50,6 +57,8 @@ param(
     [string]$AlzLibraryPath = '',
 
     [string]$OutputFile = '',
+
+    [string]$DiffReport = '',
 
     [switch]$Detailed,
 
@@ -1273,3 +1282,30 @@ if ($OutputFile -ne '') {
 }
 
 Write-Host ''
+
+#==============================================================================
+# Optional: generate HTML diff report for Deny-effect rule mismatches
+#==============================================================================
+if ($DiffReport -ne '') {
+    $pythonScript = Join-Path $PSScriptRoot 'diff-deny-rules.py'
+    if (-not (Test-Path $pythonScript)) {
+        Write-Warn "diff-deny-rules.py not found at $pythonScript — skipping diff report"
+    } else {
+        $python = if (Get-Command python3 -ErrorAction SilentlyContinue) { 'python3' }
+                  elseif (Get-Command python -ErrorAction SilentlyContinue) { 'python' }
+                  else { $null }
+        if (-not $python) {
+            Write-Warn 'Python 3 not found in PATH — skipping diff report'
+        } else {
+            Write-Info "Generating Deny rule diff report: $DiffReport"
+            & $python $pythonScript `
+                --export $BrownfieldExport `
+                --library $AlzLibraryPath `
+                --output $DiffReport `
+                --deny-only
+            if (Test-Path $DiffReport) {
+                Write-Ok "Diff report written to: $DiffReport"
+            }
+        }
+    }
+}
