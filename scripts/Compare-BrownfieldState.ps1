@@ -1055,24 +1055,58 @@ if ($mgSubscriptions.Count -gt 0) {
             $normalizedToActualMg[$norm.ToLower()] = $id
         }
     }
+    # Check whether dedicated child MGs exist for any of the four platform roles
+    $anyDedicatedMgFound = $false
     foreach ($normName in @('management', 'connectivity', 'identity', 'security')) {
-        $key = $platformMgMap[$normName]
-        $actualId = if ($normalizedToActualMg.ContainsKey($normName)) { $normalizedToActualMg[$normName] } else { $normName }
-        $subs = @(Get-SubsUnderMg $actualId)
-        if ($subs.Count -eq 1) {
-            $sub = $subs[0]
+        if ($normalizedToActualMg.ContainsKey($normName)) { $anyDedicatedMgFound = $true; break }
+    }
+
+    if ($anyDedicatedMgFound) {
+        # Full platform layout — each role has its own child MG
+        foreach ($normName in @('management', 'connectivity', 'identity', 'security')) {
+            $key = $platformMgMap[$normName]
+            $actualId = if ($normalizedToActualMg.ContainsKey($normName)) { $normalizedToActualMg[$normName] } else { $normName }
+            $subs = @(Get-SubsUnderMg $actualId)
+            if ($subs.Count -eq 1) {
+                $sub = $subs[0]
+                $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '(unknown)' }
+                $subName = if ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { " — $($sub.DisplayName)" } else { '' }
+                Write-Ok "    $key`: $subId$subName (under $actualId)"
+            } elseif ($subs.Count -gt 1) {
+                Write-Warn "    $key`: multiple subscriptions found under $actualId — check placement:"
+                foreach ($sub in $subs) {
+                    $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '?' }
+                    $subName = if ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { $sub.DisplayName } else { '' }
+                    Write-Detail "      $subId ($subName)"
+                }
+            } else {
+                Write-Detail "    $key`: (none found — check tenant root for unplaced subs or MG named '$actualId')"
+            }
+        }
+    } else {
+        # Simple platform layout — look for subs directly under the platform MG
+        $platformActualId = if ($normalizedToActualMg.ContainsKey('platform')) { $normalizedToActualMg['platform'] } else { 'platform' }
+        $platformSubs = @(Get-SubsUnderMg $platformActualId)
+        Write-Info '    Simple platform layout detected — no dedicated child MGs (management/connectivity/identity/security)'
+        if ($platformSubs.Count -eq 1) {
+            $sub = $platformSubs[0]
             $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '(unknown)' }
-            $subName = if ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { " ($($sub.DisplayName))" } else { '' }
-            Write-Ok "    $key`: $subId$subName"
-        } elseif ($subs.Count -gt 1) {
-            Write-Warn "    $key`: multiple subscriptions found under $actualId — check placement:"
-            foreach ($sub in $subs) {
+            $subName = if ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { " — $($sub.DisplayName)" } else { '' }
+            Write-Ok "    SUBSCRIPTION_ID_PLATFORM`: $subId$subName (under $platformActualId)"
+            Write-Info '    Set PLATFORM_MODE=simple and assign this sub to all four SUBSCRIPTION_ID_* fields'
+        } elseif ($platformSubs.Count -gt 1) {
+            Write-Warn "    Multiple subscriptions found under $platformActualId — assign roles manually:"
+            foreach ($sub in $platformSubs) {
                 $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '?' }
                 $subName = if ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { $sub.DisplayName } else { '' }
                 Write-Detail "      $subId ($subName)"
             }
         } else {
-            Write-Detail "    $key`: (none found — check tenant root for unplaced subs or MG named '$actualId')"
+            Write-Detail "    (no subscriptions found under $platformActualId — check -PlatformSubscriptionIds or MG placement)"
+        }
+        foreach ($normName in @('management', 'connectivity', 'identity', 'security')) {
+            $key = $platformMgMap[$normName]
+            Write-Warn "    $key`: (not found — no '$normName' child MG exists under $platformActualId)"
         }
     }
 } else {
