@@ -177,9 +177,9 @@ function Resolve-RootManagementGroup {
 
         $childNames        = @($expanded.Children | ForEach-Object { $_.Name })
         $normalizedChildren = $childNames | ForEach-Object { Get-NormalizedMgName $_ }
-        $matches            = $normalizedChildren | Where-Object { $AlzWellKnownChildMgs -contains $_ }
+        $matchedMgs         = @($normalizedChildren | Where-Object { $AlzWellKnownChildMgs -contains $_ })
 
-        if ($matches.Count -ge 2) {
+        if ($matchedMgs.Count -ge 2) {
             $Script:RootManagementGroupId = $mg.Name
             Write-Info "ALZ intermediate root detected: $Script:RootManagementGroupId (children: $($childNames -join ', '))"
             return
@@ -755,6 +755,7 @@ $Script:RootManagementGroupId    = $RootManagementGroupId
 $Script:PlatformSubscriptionIds  = $PlatformSubscriptionIds
 $Script:Warnings                 = @()
 $Script:ActualMgIds              = @()   # populated after hierarchy build; used for normalized MG lookups
+$Script:SubscriptionPlacement    = @{}  # MG ID -> array of { Id, DisplayName } for subscriptions directly under it
 
 Resolve-TenantId
 Resolve-RootManagementGroup
@@ -772,6 +773,26 @@ if ($Script:RootManagementGroupId -ne '') {
         $allIds = Get-AllMgIds -HierarchyNode $mgHierarchy
         $Script:ActualMgIds = $allIds
         Write-Ok "MG hierarchy built — $($allIds.Count) management group(s)"
+
+        # Collect direct subscription membership for each MG.
+        # Used by Compare-BrownfieldState.ps1 to resolve which subscriptions are in scope
+        # for assigned Deny-effect policies.
+        Write-Step 'Collecting subscription placement'
+        foreach ($mgId in $allIds) {
+            $response = Invoke-AzRestMethod `
+                -Path "/providers/Microsoft.Management/managementGroups/$mgId/subscriptions?api-version=2020-05-01" `
+                -Method GET -ErrorAction SilentlyContinue
+            if ($response -and $response.StatusCode -eq 200) {
+                $subs = ($response.Content | ConvertFrom-Json).value
+                if ($subs) {
+                    $Script:SubscriptionPlacement[$mgId] = @($subs | ForEach-Object {
+                        @{ Id = $_.name; DisplayName = $_.properties.displayName }
+                    })
+                }
+            }
+        }
+        $placedCount = ($Script:SubscriptionPlacement.Values | ForEach-Object { @($_).Count } | Measure-Object -Sum).Sum
+        Write-Ok "Subscription placement collected — $placedCount subscription(s) across $($Script:SubscriptionPlacement.Count) MG(s)"
     }
     else {
         $msg = "Could not expand MG hierarchy from root '$Script:RootManagementGroupId'."
@@ -869,13 +890,14 @@ if ($Script:PlatformSubscriptionIds.Count -gt 0) {
 Write-Step 'Writing output'
 
 $export = @{
-    ExportTimestamp        = (Get-Date -Format 'o')
-    TenantId               = $Script:TenantId
-    RootManagementGroupId  = $Script:RootManagementGroupId
-    DiscoveryMode          = 'brownfield'
+    ExportTimestamp          = (Get-Date -Format 'o')
+    TenantId                 = $Script:TenantId
+    RootManagementGroupId    = $Script:RootManagementGroupId
+    DiscoveryMode            = 'brownfield'
     ManagementGroupHierarchy = $mgHierarchy
-    Scopes                 = @($governanceScopes) + @($infrastructureScopes)
-    Warnings               = $Script:Warnings
+    SubscriptionPlacement    = $Script:SubscriptionPlacement
+    Scopes                   = @($governanceScopes) + @($infrastructureScopes)
+    Warnings                 = $Script:Warnings
 }
 
 $export | ConvertTo-Json -Depth 30 | Out-File -FilePath $OutputFile -Encoding utf8
