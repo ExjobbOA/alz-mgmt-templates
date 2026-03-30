@@ -345,6 +345,7 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
 
         try {
             $ruleJson = (ConvertTo-SortedObject (Get-PropSafe $def 'PolicyRule', 'Properties')) | ConvertTo-Json -Depth 20 -Compress
+            $ruleJson = $ruleJson -replace '\[\[', '['  # normalize ARM escaping before hashing
             $hash     = Get-SHA256Short $ruleJson
         }
         catch {
@@ -358,6 +359,7 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
             DisplayName    = (Get-PropSafe $def 'DisplayName')
             Version        = (Get-PropSafe $def 'Version')
             PolicyRuleHash = $hash
+            PolicyRule     = (Get-PropSafe $def 'PolicyRule', 'Properties')
             Metadata       = (Get-PropSafe $def 'Metadata')
             Scope          = $scope
         }
@@ -371,14 +373,22 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
         if (-not $rid) { continue }
         if ($rid -inotmatch "managementGroups/$MgId/") { continue }
 
+        $defCount  = 0
+        $polDefIds = @()
         try {
-            $polDefs   = Get-PropSafe $set 'PolicyDefinition', 'PolicyDefinitions'
-            $defCount  = if ($polDefs -is [string]) { ($polDefs | ConvertFrom-Json).Count }
-                         elseif ($polDefs) { @($polDefs).Count }
-                         else { 0 }
+            $polDefs      = Get-PropSafe $set 'PolicyDefinition', 'PolicyDefinitions'
+            $polDefArray  = if ($polDefs -is [string]) { @($polDefs | ConvertFrom-Json) }
+                            elseif ($polDefs)           { @($polDefs) }
+                            else                        { @() }
+            $defCount     = $polDefArray.Count
+            $polDefIds    = @($polDefArray | ForEach-Object {
+                $id = Get-PropSafe $_ 'policyDefinitionId', 'PolicyDefinitionId'
+                if ($id) { $id }
+            } | Where-Object { $_ })
         }
         catch {
-            $defCount = 0
+            $defCount  = 0
+            $polDefIds = @()
         }
 
         $resources.PolicySetDefinitions += @{
@@ -387,6 +397,7 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
             Name                  = $set.Name
             DisplayName           = (Get-PropSafe $set 'DisplayName')
             PolicyDefinitionCount = $defCount
+            PolicyDefinitions     = $polDefIds
             Scope                 = $scope
         }
     }
