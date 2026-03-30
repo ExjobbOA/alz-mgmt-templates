@@ -259,7 +259,11 @@ Get-ChildItem -Path $AlzLibraryPath -Filter '*.alz_policy_definition.json' -Recu
         $j.policyRule
     }
     else { $null }
-    $ruleHash = if ($ruleObj) { Get-SHA256Short ((ConvertTo-SortedObject $ruleObj) | ConvertTo-Json -Depth 20 -Compress) } else { '' }
+    $ruleHash = if ($ruleObj) {
+        $ruleJson = (ConvertTo-SortedObject $ruleObj) | ConvertTo-Json -Depth 20 -Compress
+        $ruleJson = $ruleJson -replace '\[\[', '['  # normalize ARM escaping: library uses [[, Azure API returns [
+        Get-SHA256Short $ruleJson
+    } else { '' }
     $version = if ($j.properties.PSObject.Properties['metadata'] -and $j.properties.metadata.PSObject.Properties['version']) {
         $j.properties.metadata.version
     }
@@ -405,11 +409,30 @@ $script:MismatchCountByEffect = @{
     Other             = 0
 }
 
+# All StandardMismatch entries across all scopes — consumed by the DiffReport block
+$script:AllStdMismatchDefList = [System.Collections.Generic.List[object]]::new()
+
 # Build policy set name → ALZ custom member policy definition names from library.
 # Used below to expand initiative assignments to their individual member definitions.
+# Seed from the export's PolicySetDefinitions.PolicyDefinitions field (populated by the
+# updated Export-BrownfieldState.ps1). Fall back to ALZ library files for any sets that
+# the export did not capture (e.g. older exports or non-custom sets).
 $setMemberDefs = @{}
+
+foreach ($mgScope in @($export.Scopes | Where-Object { $_.Scope -eq 'managementGroup' })) {
+    foreach ($ps in @($mgScope.Resources.PolicySetDefinitions)) {
+        $psName = $ps.Name
+        $exportMembers = @($ps.PSObject.Properties['PolicyDefinitions'] | Select-Object -ExpandProperty Value)
+        if ($exportMembers.Count -gt 0 -and -not $setMemberDefs.ContainsKey($psName)) {
+            $setMemberDefs[$psName] = @($exportMembers | ForEach-Object { ($_ -split '/')[-1] } | Where-Object { $_ })
+        }
+    }
+}
+
+# Library fallback — fills gaps for sets not present in the export
 Get-ChildItem -Path $AlzLibraryPath -Filter '*.alz_policy_set_definition.json' -Recurse | ForEach-Object {
     $j = Get-Content $_.FullName -Raw | ConvertFrom-Json
+    if ($setMemberDefs.ContainsKey($j.name)) { return }  # export already has this set
     $members = [System.Collections.Generic.List[string]]::new()
     if ($j.properties.PSObject.Properties['policyDefinitions']) {
         foreach ($member in @($j.properties.policyDefinitions)) {
@@ -574,14 +597,20 @@ foreach ($scope in $mgScopes) {
         switch ($cls) {
             'Standard' { $stdDefs++ }
             'StandardMismatch' {
-                $stdMismatchDefs++; $stdMismatchDefList += $defEntry
+                $stdMismatchDefs++
+                # Compute effect and assignment status for all mismatches (used in Section 7 and DiffReport)
+                $mLibEntry  = $libPolicyDefs[$def.Name]
+                $mEffect    = if ($mLibEntry -and $mLibEntry.Effect) { $mLibEntry.Effect } else { 'Unknown' }
+                $mCat       = Get-EffectCategory $mEffect
+                $isAssigned = $defAssignmentScopes.ContainsKey($def.Name) -and $defAssignmentScopes[$def.Name].Count -gt 0
+                # Enrich the entry with effect and assignment status for DiffReport consumption
+                $defEntry | Add-Member -NotePropertyName Effect     -NotePropertyValue $mEffect    -Force
+                $defEntry | Add-Member -NotePropertyName IsAssigned -NotePropertyValue $isAssigned -Force
+                $stdMismatchDefList += $defEntry
+                [void]$script:AllStdMismatchDefList.Add($defEntry)
                 # Track effect category for Section 7 risk summary
-                $mLibEntry = $libPolicyDefs[$def.Name]
-                $mEffect   = if ($mLibEntry -and $mLibEntry.Effect) { $mLibEntry.Effect } else { 'Unknown' }
-                $mCat      = Get-EffectCategory $mEffect
                 if ($mCat -eq 'Deny') {
                     $script:MismatchCountByEffect['Deny']++
-                    $isAssigned = $defAssignmentScopes.ContainsKey($def.Name) -and $defAssignmentScopes[$def.Name].Count -gt 0
                     if ($isAssigned) { $script:MismatchCountByEffect['DenyAssigned']++ }
                     else             { $script:MismatchCountByEffect['DenyUnassigned']++ }
                 } else {
@@ -1297,14 +1326,31 @@ if ($DiffReport -ne '') {
         if (-not $python) {
             Write-Warn 'Python 3 not found in PATH — skipping diff report'
         } else {
-            Write-Info "Generating Deny rule diff report: $DiffReport"
-            & $python $pythonScript `
-                --export $BrownfieldExport `
-                --library $AlzLibraryPath `
-                --output $DiffReport `
-                --deny-only
-            if (Test-Path $DiffReport) {
-                Write-Ok "Diff report written to: $DiffReport"
+            Write-Info "Generating policy rule diff report: $DiffReport"
+            # Build mismatch info from Compare's authoritative list and pass to Python.
+            # Python renders diffs; Compare is the authority on what's actually different.
+            $mismatchInfoArr = @($script:AllStdMismatchDefList | ForEach-Object {
+                [ordered]@{
+                    Name        = $_.Name
+                    DisplayName = if ($_.PSObject.Properties['DisplayName']) { $_.DisplayName } else { '' }
+                    Effect      = if ($_.PSObject.Properties['Effect'])      { $_.Effect }      else { 'Unknown' }
+                    IsAssigned  = if ($_.PSObject.Properties['IsAssigned'])  { [bool]$_.IsAssigned } else { $false }
+                    Version     = if ($_.PSObject.Properties['Version'])     { $_.Version }     else { '' }
+                }
+            })
+            $tempFile = [System.IO.Path]::GetTempFileName() + '.json'
+            ($mismatchInfoArr | ConvertTo-Json -Depth 3) | Set-Content -Path $tempFile -Encoding UTF8
+            try {
+                & $python $pythonScript `
+                    --export $BrownfieldExport `
+                    --library $AlzLibraryPath `
+                    --output $DiffReport `
+                    --mismatch-info $tempFile
+                if (Test-Path $DiffReport) {
+                    Write-Ok "Diff report written to: $DiffReport"
+                }
+            } finally {
+                Remove-Item $tempFile -ErrorAction SilentlyContinue
             }
         }
     }
