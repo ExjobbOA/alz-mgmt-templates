@@ -345,7 +345,7 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
 
         try {
             $ruleJson = (ConvertTo-SortedObject (Get-PropSafe $def 'PolicyRule', 'Properties')) | ConvertTo-Json -Depth 20 -Compress
-            $ruleJson = $ruleJson -replace '\[\[', '['  # normalize ARM escaping before hashing
+            $ruleJson = $ruleJson -replace '\[{2,}', '['  # normalize ARM escaping: [[ or [[[ (nested DINE templates) → [
             $hash     = Get-SHA256Short $ruleJson
         }
         catch {
