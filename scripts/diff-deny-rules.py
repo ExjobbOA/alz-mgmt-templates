@@ -55,9 +55,10 @@ def normalize_arm_expressions(text: str) -> str:
     """
     Normalize ARM template expression escaping.
     Library JSON uses [[parameters( (escaped for ARM), Azure API returns [parameters(.
-    Strip the leading extra [ so both sides compare equal.
+    DINE policies with nested deployment templates can have [[[parameters( (three brackets).
+    Replace any run of 2+ consecutive [ with a single [ so all levels normalize to one.
     """
-    return re.sub(r'\[\[', '[', text)
+    return re.sub(r'\[{2,}', '[', text)
 
 
 def pretty(obj) -> str:
@@ -405,13 +406,14 @@ def build_html(tier1: list, tier2: list, tier3: list, tier4: list,
     if tier4:
         parts.append('<div class="toc-tier"><div class="toc-tier-header">Tier 4 — Unassigned (no current risk)</div><ul>\n')
         for e in tier4:
+            anchor = make_anchor(e['name'])
             effect_label = e.get('effect', '').upper()
             badge_cls = effect_badge_class(e.get('effect', ''))
             parts.append(
                 f'  <li>'
                 f'<span class="badge badge-unassigned">UNASSIGNED</span>'
                 f'<span class="badge {badge_cls}">{html_mod.escape(effect_label)}</span>'
-                f'<span class="toc-name">{html_mod.escape(e["name"])}</span> '
+                f'<a href="#{anchor}" class="toc-name">{html_mod.escape(e["name"])}</a> '
                 f'<span class="toc-dname">— {html_mod.escape(e.get("display_name", ""))}</span> '
                 f'<span class="toc-ver">{html_mod.escape(e.get("bf_version", "?"))} &rarr; {html_mod.escape(e.get("lib_version", "?"))}</span>'
                 f'</li>\n'
@@ -512,34 +514,38 @@ def build_html(tier1: list, tier2: list, tier3: list, tier4: list,
                 f'</div>\n'
             )
 
-    # --- Tier 4: Unassigned, compact table ---
+    # --- Tier 4: Unassigned, diff cards ---
     if tier4:
         parts.append(
             '<div class="tier-header">'
             '<h2>Tier 4 — Unassigned</h2>'
-            '<p>These definitions are not assigned — no current operational risk. '
-            'The engine will overwrite them on deploy. Listed for completeness.</p>'
+            '<p>These definitions are not currently assigned — no operational risk. '
+            'The engine will overwrite them on deploy. Diffs shown for reference.</p>'
             '</div>\n'
         )
-        parts.append(
-            '<div class="card"><table class="t4-table"><thead><tr>'
-            '<th>Effect</th><th>Policy Name</th><th>Display Name</th>'
-            '<th>BF Version</th><th>Library Version</th>'
-            '</tr></thead><tbody>\n'
-        )
         for e in tier4:
-            effect_label = e.get('effect', '').upper()
-            badge_cls = effect_badge_class(e.get('effect', ''))
+            anchor = make_anchor(e['name'])
+            effect = e.get('effect', '')
+            effect_label = effect.upper()
+            badge_cls = effect_badge_class(effect)
+            note = EFFECT_RISK_NOTES.get(effect.lower(), 'Review before deploying.')
+            diff_html = render_unified_diff(e['bf_rule_text'], e['lib_rule_text'])
             parts.append(
-                f'<tr>'
-                f'<td><span class="badge {badge_cls}">{html_mod.escape(effect_label)}</span></td>'
-                f'<td>{html_mod.escape(e["name"])}</td>'
-                f'<td>{html_mod.escape(e.get("display_name", ""))}</td>'
-                f'<td>{html_mod.escape(e.get("bf_version", "?"))}</td>'
-                f'<td>{html_mod.escape(e.get("lib_version", "?"))}</td>'
-                f'</tr>\n'
+                f'<div class="card" id="{anchor}" style="opacity:0.75">'
+                f'<div class="card-title">'
+                f'<span class="badge badge-unassigned">UNASSIGNED</span>'
+                f'<span class="badge {badge_cls}">{html_mod.escape(effect_label)}</span>'
+                f'{html_mod.escape(e["name"])}'
+                f'</div>'
+                f'<div class="card-meta">Display name: <span>{html_mod.escape(e.get("display_name", ""))}</span></div>'
+                f'<div class="card-meta">Targets: <span>{html_mod.escape(e.get("targets", ""))}</span></div>'
+                f'<div class="card-meta">Version: <span>{html_mod.escape(e.get("bf_version", "?"))}</span>'
+                f' &rarr; <span>{html_mod.escape(e.get("lib_version", "?"))}</span></div>'
+                f'<div class="card-note" style="background:#1e2228; border-color:#30363d; color:#8b949e">'
+                f'Not assigned — no current impact. {html_mod.escape(note)}</div>'
+                f'{diff_html}'
+                f'</div>\n'
             )
-        parts.append('</tbody></table></div>\n')
 
     parts.append(HTML_FOOT)
     return ''.join(parts)

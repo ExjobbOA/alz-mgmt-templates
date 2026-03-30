@@ -261,7 +261,7 @@ Get-ChildItem -Path $AlzLibraryPath -Filter '*.alz_policy_definition.json' -Recu
     else { $null }
     $ruleHash = if ($ruleObj) {
         $ruleJson = (ConvertTo-SortedObject $ruleObj) | ConvertTo-Json -Depth 20 -Compress
-        $ruleJson = $ruleJson -replace '\[\[', '['  # normalize ARM escaping: library uses [[, Azure API returns [
+        $ruleJson = $ruleJson -replace '\[{2,}', '['  # normalize ARM escaping: [[ or [[[ (nested DINE templates) → [
         Get-SHA256Short $ruleJson
     } else { '' }
     $version = if ($j.properties.PSObject.Properties['metadata'] -and $j.properties.metadata.PSObject.Properties['version']) {
