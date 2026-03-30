@@ -412,6 +412,9 @@ $script:MismatchCountByEffect = @{
 # All StandardMismatch entries across all scopes — consumed by the DiffReport block
 $script:AllStdMismatchDefList = [System.Collections.Generic.List[object]]::new()
 
+# All Deprecated entries across all scopes — consumed by Section 7 assigned-deprecated check
+$script:AllDeprDefList = [System.Collections.Generic.List[object]]::new()
+
 # Build policy set name → ALZ custom member policy definition names from library.
 # Used below to expand initiative assignments to their individual member definitions.
 # Seed from the export's PolicySetDefinitions.PolicyDefinitions field (populated by the
@@ -619,7 +622,7 @@ foreach ($scope in $mgScopes) {
             }
             'NonStandard' { $nonStdDefs++; $nonStdDefList += $defEntry }
             'AMBA' { $ambaDefs++; $ambaDefList += $defEntry }
-            'Deprecated' { $deprDefs++; $deprDefList += $defEntry }
+            'Deprecated' { $deprDefs++; $deprDefList += $defEntry; [void]$script:AllDeprDefList.Add($defEntry) }
         }
     }
 
@@ -1211,7 +1214,29 @@ if ($totalStdMismatchDefs -gt 0) {
 } else { Write-Ok "    Rule mismatches:          0" }
 if ($totalNonStdDefs -gt 0) { Write-Warn "    Non-standard (review):    $totalNonStdDefs" } else { Write-Ok "    Non-standard:             0" }
 if ($totalAmbaDefs -gt 0) { Write-Amba "    AMBA (informational):     $totalAmbaDefs" }
-if ($totalDeprDefs -gt 0) { Write-Info "    Deprecated:               $totalDeprDefs" }
+if ($totalDeprDefs -gt 0) {
+    $deprAssigned   = @($script:AllDeprDefList | Where-Object {
+        $defAssignmentScopes.ContainsKey($_.Name) -and $defAssignmentScopes[$_.Name].Count -gt 0
+    })
+    $deprUnassigned = $totalDeprDefs - $deprAssigned.Count
+    if ($deprAssigned.Count -gt 0) {
+        Write-Warn "    Deprecated (assigned):    $($deprAssigned.Count) (engine will replace with successor — review before deploying)"
+        Write-Info "    Deprecated (unassigned):  $deprUnassigned"
+        if ($Detailed) {
+            Write-Host ''
+            Write-Warn "  ── Deprecated definitions still assigned ──"
+            foreach ($e in $deprAssigned) {
+                $assignScopes = @($defAssignmentScopes[$e.Name])
+                $scopeStr = ($assignScopes | ForEach-Object { "$($_.ScopeName) ($($_.ManagementGroupId))" }) -join ', '
+                Write-Warn   "  [DEPRECATED ASSIGNED] $($e.Name)"
+                Write-Detail "    display name: $($e.DisplayName)"
+                Write-Detail "    assigned at:  $scopeStr"
+            }
+        }
+    } else {
+        Write-Info "    Deprecated:               $totalDeprDefs"
+    }
+}
 
 Write-Host ''
 Write-Host "  Policy Set Definitions:"
