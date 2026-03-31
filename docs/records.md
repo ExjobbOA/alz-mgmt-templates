@@ -1057,3 +1057,130 @@ Two bugs fixed in `Get-IfResourceTypes` in `Compare-BrownfieldState.ps1`:
 2. When the matched type value is an ARM parameter expression like `[[parameters('resourceType')]`, the raw expression was leaking into the `-Detailed` report. Added a normalization step: any value starting with `[` or containing `parameters(` is replaced with the sentinel string `(parameterized)`.
 
 Non-detailed output is unaffected (these fields only appear under `-Detailed`). Numbers on Sylaviken are unchanged.
+
+---
+
+## Mar 29: Compare-BrownfieldState — Report Quality Pass (PR #158)
+
+### Changes
+
+**Deny mismatch split — assigned vs unassigned**
+
+All 54 Deny-effect rule mismatches were previously treated as equal risk. A mismatch on an unassigned definition has zero operational impact (the definition exists on the tenant but nothing is currently enforcing it). Split the output and the Section 7 risk summary:
+
+- ASSIGNED Deny mismatches (definition is active via a direct or initiative assignment) → `Write-Err`, appear under `── Deny-effect rule changes: ASSIGNED ──` block
+- UNASSIGNED Deny mismatches → `Write-Warn`, appear under a separate `── Deny-effect rule changes: UNASSIGNED ──` block
+
+Traffic light now only turns RED for ASSIGNED Deny mismatches. UNASSIGNED-only Deny mismatches produce YELLOW. Section 7 reports `Deny (assigned)` and `Deny (unassigned)` counts separately.
+
+**`-IncludeAmba` switch**
+
+`-Detailed` previously expanded all 123 AMBA definition names into the output — 123 lines of noise on every run. AMBA items are now suppressed in detailed output by default. Added `-IncludeAmba` switch: when combined with `-Detailed`, AMBA and deprecated items are individually listed. Without it, they show as counts only.
+
+**Subscription placement in Deny detail output**
+
+The "subscriptions in scope" field in Deny mismatch detail was a placeholder in the previous session. Now reads from `SubscriptionPlacement` data (captured by Export) and shows actual subscription IDs and display names under each assigned MG scope.
+
+**Section 6 expansion**
+
+Added to the config extraction section:
+- Platform subscription mapping: reads `SubscriptionPlacement` to match MG names (management, connectivity, identity, security) to subscription IDs and outputs them as draft `SUBSCRIPTION_ID_*` values for `platform.json`
+- Hub networking summary: VNet names, address spaces, Firewall names, Private DNS zone counts — derived from the infrastructure scan
+
+**Export: SubscriptionPlacement collection**
+
+`Export-BrownfieldState.ps1` now collects `SubscriptionPlacement` during the MG hierarchy build step — for each MG ID in the hierarchy it calls the REST API to get directly placed subscriptions and stores them as `MG ID → [{Id, DisplayName}]`. Exported as top-level `SubscriptionPlacement` key in the JSON.
+
+### Sylaviken numbers (unchanged by this PR)
+
+Policy definitions: 3 standard exact, 89 rule mismatch, 0 non-standard, 123 AMBA, 68 deprecated. Rule mismatches by effect: 54 Deny (13 assigned, 41 unassigned), 18 DINE, 2 Modify, 4 Append, 11 Audit. Risk rating: RED (assigned Deny mismatches present).
+
+---
+
+## Mar 30: diff-deny-rules.py — HTML Diff Report (PRs #159, #160, #161)
+
+### Problem
+
+The terminal output identifies WHICH policy rules are changing but not HOW. An operator needing to verify resource compliance before deploying needs to see the actual diff — what changed in the `policyRule.if` block, the `then.details` block, etc.
+
+### Architecture decision: Compare as mismatch authority
+
+Initial prototype of `diff-deny-rules.py` detected mismatches independently using its own normalized text comparison. Ran into a 49-mismatch discrepancy — Python saw 49 DINE mismatches, Compare saw 9. Root cause: PowerShell `ConvertTo-Json` and Python `json.dumps` serialize nested objects differently — property ordering diverges in deeply nested DINE deployment templates, producing different hashes even after sorting.
+
+Decision: make Compare the authority on what is and isn't a mismatch. Python only renders diffs — it receives a JSON file listing every mismatched policy name (with Effect, IsAssigned, Version) from Compare, and looks up the actual rule objects to diff. Eliminates the serialization divergence entirely.
+
+### Tier structure
+
+Four tiers in the HTML report:
+
+| Tier | Condition | Colour |
+|------|-----------|--------|
+| 1 | Assigned, Deny/DenyAction, rule changed | Red |
+| 2 | Assigned, DINE/Modify/Append, rule changed | Yellow |
+| 3 | Assigned, no real rule change after normalization | Green note |
+| 4 | Unassigned, rule changed | Grey (muted) |
+
+Tier 3 catches cases where Compare's hash detects a difference but normalized text comparison shows identical content — serialization artifact, no action needed. Tier 4 diffs are shown with `opacity: 0.75` so priority ordering is visually clear.
+
+### ARM bracket normalization bug
+
+`[[parameters(` in library JSON (ARM escape) vs `[parameters(` from Azure API. Initially used `re.sub(r'\[\[', '[', text)` (single-pass), which left `[[[parameters(` in DINE policies with nested deployment templates (e.g. `Deploy-Custom-Route-Table`). A three-bracket run `[[[` → first pass replaces `[[` → `[[` → leaving `[[`. Fix: `re.sub(r'\[{2,}', '[', text)` and PowerShell `-replace '\[{2,}', '['` collapse any run of 2+ brackets to one in a single pass. Reduces real mismatch count from 9 to 8 (Deploy-Custom-Route-Table drops out — was a normalization artifact, not a real diff).
+
+### Deprecated-assigned detection in Section 7
+
+68 deprecated policy definitions in Sylaviken. Previously reported as a single count. Added logic to cross-reference the deprecated list against `defAssignmentScopes`: 60 are assigned (via the `Deploy-Resource-Diag` initiative, which still lists the deprecated `Deploy-Diagnostics-*` members). 8 are unassigned.
+
+Section 7 now reports:
+- `Deprecated (assigned): 60` with `Write-Warn` + note about engine replacement
+- `Deprecated (unassigned): 8` with `Write-Info`
+- Under `-Detailed`: each assigned deprecated definition listed with display name and which scope(s) it's assigned at
+
+The 60 "assigned" count is via initiative expansion — the `Deploy-Resource-Diag` initiative is what's actually assigned, and it references all the deprecated diagnostics policies as members. The engine will replace them with the newer `Deploy-Diag-LogsCat` initiative on deploy.
+
+### Final numbers — Sylaviken
+
+Mismatches passed to Python: 8. Tier 1: 1 (Deny, assigned). Tier 2: 1 (DINE, assigned). Tier 3: 0. Tier 4: 6 (unassigned, various effects).
+
+### Housekeeping
+
+Generated output files (`compare-output-detailed.txt`, `deny-diff-report.html`) removed from git tracking and added to `.gitignore`. These are local operator artifacts, not repo content.
+
+---
+
+## Mar 31: Brownfield Tooling — Subscription-Level Governance (Task 1)
+
+### Problem
+
+`Export-BrownfieldState.ps1` only scanned MG-scoped policy assignments. Brownfield tenants commonly have policy assignments scoped directly to subscriptions (e.g. MDFC/Defender plans add assignments at subscription scope automatically). These were invisible to Compare, so a Deny-effect policy assigned at subscription scope would be misclassified as "unassigned" — underreporting active risk.
+
+Policy exemptions also only exist at subscription/resource group level (not MG level) and were not captured at all.
+
+### Export changes
+
+New function `Get-SubscriptionGovernance`:
+- Called for **all** subscriptions in `SubscriptionPlacement` — not just platform subs. Landing zone subs are where Deny-effect policies most often affect workloads.
+- Collects policy assignments filtered to exact subscription scope (same pattern as MG-level scope filtering)
+- Collects policy exemptions via REST `GET /subscriptions/{id}/providers/Microsoft.Authorization/policyExemptions?api-version=2022-07-01-preview` (no clean Az PowerShell cmdlet)
+- Exported under new top-level key `SubscriptionGovernance` — backward compatible; older exports that lack this key are handled gracefully in Compare
+
+**Bug fixed during testing:** `SubscriptionPlacement` entries are hashtables (written in-memory during the export run, not deserialized from JSON). `$sub.PSObject.Properties['Id']` doesn't resolve hashtable keys — only works on PSCustomObjects. Fixed to use `$sub -is [hashtable]` + `ContainsKey('Id')` check. Without this fix 0 subscriptions were scanned.
+
+### Compare changes
+
+- Loads `SubscriptionGovernance` from export (graceful fallback to empty array for older exports)
+- Builds `subIdToMgId` reverse-lookup from `SubscriptionPlacement` (sub ID → parent MG ID)
+- Feeds sub-level assignments into `defAssignmentScopes` using scope name `"sub-{subscriptionId}"` — this fixes the misclassification of sub-scoped Deny assignments as "unassigned"
+- New **Section 3b**: per-sub assignment counts with std/non-std/AMBA classification; per-sub exemption listing with Deny-effect exemption flagging (always shown regardless of `-Detailed`)
+- Section 7 adds `Subscription-level governance:` block with non-standard assignment count and exemption count; Deny exemptions contribute to `$hasMinorDrift`
+- Sub-level counts included in `-OutputFile` JSON report
+
+### Sylaviken findings
+
+Section 3b found:
+- Sylaviken Mgmt Sub (`93ff5894-...`): 2 non-standard direct assignments — `DataProtectionSecurityCenter` and `OpenSourceRelationalDatabasesProtectionSecurityCenter` (MDFC/Defender plan auto-assignments, expected noise)
+- Sylaviken Corp Sub (`db8f96fe-...`): 1 non-standard direct assignment — same ASC assignment
+- 0 policy exemptions across all subs
+
+Section 7: `Non-standard direct assignments: 3`, `Policy exemptions: 0`.
+
+These MDFC assignments are built-in Azure Security Center assignments automatically created when Defender plans are enabled — not ALZ library entries, correct to flag as non-standard.
