@@ -415,6 +415,11 @@ $script:AllStdMismatchDefList = [System.Collections.Generic.List[object]]::new()
 # All Deprecated entries across all scopes — consumed by Section 7 assigned-deprecated check
 $script:AllDeprDefList = [System.Collections.Generic.List[object]]::new()
 
+# Subscription-level governance counters — populated by Section 3b
+$script:TotalSubLevelNonStdAssignments = 0
+$script:TotalSubLevelExemptions        = 0
+$script:TotalDenyExemptions            = 0
+
 # Build policy set name → ALZ custom member policy definition names from library.
 # Used below to expand initiative assignments to their individual member definitions.
 # Seed from the export's PolicySetDefinitions.PolicyDefinitions field (populated by the
@@ -480,6 +485,49 @@ foreach ($mgScope in @($export.Scopes | Where-Object { $_.Scope -eq 'managementG
         } else {
             # Direct policy definition assignment
             Add-DefAssignmentScope $defName $mgScope.Name $mgScope.ManagementGroupId
+        }
+    }
+}
+
+# Load SubscriptionGovernance from the export (added by Export-BrownfieldState v3+).
+# Falls back to empty if the export was produced by an older version.
+$subscriptionGovernance = @()
+if ($export.PSObject.Properties['SubscriptionGovernance'] -and $export.SubscriptionGovernance) {
+    $subscriptionGovernance = @($export.SubscriptionGovernance)
+}
+
+# Build reverse-lookup: subscription ID -> parent MG ID (from SubscriptionPlacement).
+# Used to populate ManagementGroupId when feeding sub-level assignments into defAssignmentScopes.
+$subIdToMgId = @{}
+foreach ($mgId in $mgSubscriptions.Keys) {
+    foreach ($sub in @($mgSubscriptions[$mgId])) {
+        $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } elseif ($sub -is [string]) { $sub } else { $null }
+        if ($subId -and -not $subIdToMgId.ContainsKey($subId)) {
+            $subIdToMgId[$subId] = $mgId
+        }
+    }
+}
+
+# Feed subscription-level assignments into defAssignmentScopes so that assigned-vs-unassigned
+# classification in Compare accounts for sub-scoped direct assignments.
+foreach ($subGov in $subscriptionGovernance) {
+    $subId = if ($subGov.PSObject.Properties['SubscriptionId']) { $subGov.SubscriptionId } else { $null }
+    if (-not $subId) { continue }
+    $parentMgId = if ($subIdToMgId.ContainsKey($subId)) { $subIdToMgId[$subId] } else { '' }
+    $subScopeName = "sub-$subId"
+
+    foreach ($a in @($subGov.PolicyAssignments)) {
+        $defId   = if ($a.PSObject.Properties['PolicyDefinitionId']) { $a.PolicyDefinitionId } else { '' }
+        $defName = ($defId -split '/')[-1]
+        if (-not $defName) { continue }
+        if ($defId -match 'policySetDefinitions') {
+            if ($setMemberDefs.ContainsKey($defName)) {
+                foreach ($memberName in $setMemberDefs[$defName]) {
+                    Add-DefAssignmentScope $memberName $subScopeName $parentMgId
+                }
+            }
+        } else {
+            Add-DefAssignmentScope $defName $subScopeName $parentMgId
         }
     }
 }
@@ -909,6 +957,115 @@ foreach ($scope in $mgScopes) {
 }
 
 #==============================================================================
+# Section 3b: Subscription-Level Assignments & Exemptions
+#==============================================================================
+Write-Step 'Section 3b: Subscription-Level Assignments & Exemptions'
+
+$script:TotalSubLevelNonStdAssignments = 0
+$script:TotalSubLevelExemptions        = 0
+$script:TotalDenyExemptions            = 0
+
+if ($subscriptionGovernance.Count -eq 0) {
+    Write-Info '  No subscription governance data in export.'
+    Write-Info '  Re-run Export-BrownfieldState.ps1 to capture subscription-level assignments and exemptions.'
+}
+else {
+    foreach ($subGov in $subscriptionGovernance) {
+        $subId          = if ($subGov.PSObject.Properties['SubscriptionId']) { $subGov.SubscriptionId } else { '(unknown)' }
+        $subDisplayName = if ($subGov.PSObject.Properties['DisplayName'] -and $subGov.DisplayName) { $subGov.DisplayName } else { $subId }
+        $subAssignments = @(if ($subGov.PSObject.Properties['PolicyAssignments']) { $subGov.PolicyAssignments } else { @() })
+        $subExemptions  = @(if ($subGov.PSObject.Properties['PolicyExemptions'])  { $subGov.PolicyExemptions  } else { @() })
+
+        if ($subAssignments.Count -eq 0 -and $subExemptions.Count -eq 0) { continue }
+
+        Write-Host ''
+        Write-Host "  ── Subscription: $subDisplayName ($subId) ──"
+
+        # --- Assignments ---
+        if ($subAssignments.Count -gt 0) {
+            $stdA = 0; $nonStdA = 0; $ambaA = 0; $dneA = 0
+            foreach ($a in $subAssignments) {
+                $defId   = if ($a.PSObject.Properties['PolicyDefinitionId']) { $a.PolicyDefinitionId } else { '' }
+                $defName = ($defId -split '/')[-1]
+                $aName   = if ($a.PSObject.Properties['ResourceId']) { ($a.ResourceId -split '/')[-1] } else { '' }
+                $em      = if ($a.PSObject.Properties['EnforcementMode']) { $a.EnforcementMode } else { 'Default' }
+
+                $refStd  = $libPolicyDefs.ContainsKey($defName) -or $libPolicySetDefs.ContainsKey($defName) -or $libAssignmentNames.Contains($aName)
+                $refAmba = $ambaDefNames.Contains($defName) -or $ambaSetNames.Contains($defName)
+
+                if ($em -eq 'DoNotEnforce') { $dneA++ }
+                if ($refAmba)      { $ambaA++ }
+                elseif ($refStd)   { $stdA++ }
+                else               { $nonStdA++; $script:TotalSubLevelNonStdAssignments++ }
+
+                if ($Detailed) {
+                    $emLabel  = if ($em -eq 'DoNotEnforce') { 'DoNotEnforce' } else { 'Enforced' }
+                    $refLabel = if ($refStd) { '[std]' } elseif ($refAmba) { '[amba]' } else { '[non-std]' }
+                    if ($refAmba) {
+                        Write-Amba "  $aName  ($emLabel, $refLabel)"
+                        Write-Detail "    $($a.DisplayName)"
+                    }
+                    elseif (-not $refStd) {
+                        Write-Warn "  $aName  ($emLabel, $refLabel)"
+                        Write-Detail "    $($a.DisplayName)"
+                    }
+                    else {
+                        Write-Detail "  $aName  ($emLabel, $refLabel)  $($a.DisplayName)"
+                    }
+                }
+            }
+
+            if (-not $Detailed) {
+                Write-Ok "  $($subAssignments.Count) direct policy assignment(s)"
+                if ($nonStdA -gt 0) { Write-Warn "    $nonStdA reference non-standard definitions" }
+                if ($ambaA   -gt 0) { Write-Amba "    $ambaA reference AMBA definitions" }
+                if ($dneA    -gt 0) { Write-Info "    $dneA in DoNotEnforce mode" }
+            }
+        }
+
+        # --- Exemptions ---
+        if ($subExemptions.Count -gt 0) {
+            $script:TotalSubLevelExemptions += $subExemptions.Count
+
+            foreach ($ex in $subExemptions) {
+                $exName     = if ($ex.PSObject.Properties['Name'])            { $ex.Name }            else { '(unknown)' }
+                $exDisplay  = if ($ex.PSObject.Properties['DisplayName'] -and $ex.DisplayName) { $ex.DisplayName } else { $exName }
+                $exCat      = if ($ex.PSObject.Properties['ExemptionCategory']) { $ex.ExemptionCategory } else { '(unknown)' }
+                $exAssignId = if ($ex.PSObject.Properties['PolicyAssignmentId']) { $ex.PolicyAssignmentId } else { '' }
+
+                # Check if the exempted assignment targets a Deny-effect policy
+                $exAssignDefName = ($exAssignId -split '/')[-1]
+                $isDenyExemption = $false
+                if ($libPolicyDefs.ContainsKey($exAssignDefName)) {
+                    $exEffect = $libPolicyDefs[$exAssignDefName].Effect
+                    $isDenyExemption = (Get-EffectCategory $exEffect) -eq 'Deny'
+                }
+                if ($isDenyExemption) { $script:TotalDenyExemptions++ }
+
+                if ($isDenyExemption) {
+                    Write-Warn "  [EXEMPTION] $exDisplay  (category: $exCat)"
+                    Write-Warn "    ⚠ Exempts a Deny-effect policy — verify this exemption is intentional"
+                    Write-Detail "    assignment: $exAssignId"
+                }
+                elseif ($Detailed) {
+                    Write-Info "  [EXEMPTION] $exDisplay  (category: $exCat)"
+                    Write-Detail "    assignment: $exAssignId"
+                }
+                else {
+                    Write-Info "  $($subExemptions.Count) policy exemption(s)  (use -Detailed to list)"
+                    break  # summarised — don't print per-exemption in non-detailed mode
+                }
+            }
+        }
+    }
+
+    if ($subscriptionGovernance.Count -gt 0 -and
+        ($subscriptionGovernance | ForEach-Object { $_.PolicyAssignments.Count + $_.PolicyExemptions.Count } | Measure-Object -Sum).Sum -eq 0) {
+        Write-Info '  No subscription-level assignments or exemptions found.'
+    }
+}
+
+#==============================================================================
 # Section 4: RBAC Summary
 #==============================================================================
 Write-Step 'Section 4: RBAC Summary'
@@ -1251,12 +1408,37 @@ Write-Host "  Custom role definitions:      $totalCustomRoles"
 Write-Host "  Non-ALZ resource groups:      $totalNonAlzRgs"
 Write-Host "  Missing expected resources:   $totalMissingInfra"
 
+Write-Host ''
+Write-Host '  Subscription-level governance:'
+if ($subscriptionGovernance.Count -eq 0) {
+    Write-Detail '    (not captured — re-run Export-BrownfieldState.ps1 to include subscription-level data)'
+}
+else {
+    if ($script:TotalSubLevelNonStdAssignments -gt 0) {
+        Write-Warn "    Non-standard direct assignments: $($script:TotalSubLevelNonStdAssignments) (review required)"
+    }
+    else {
+        Write-Ok "    Non-standard direct assignments: 0"
+    }
+    if ($script:TotalSubLevelExemptions -gt 0) {
+        if ($script:TotalDenyExemptions -gt 0) {
+            Write-Warn "    Policy exemptions: $($script:TotalSubLevelExemptions) total  ($($script:TotalDenyExemptions) exempt Deny-effect — review)"
+        }
+        else {
+            Write-Info "    Policy exemptions: $($script:TotalSubLevelExemptions)"
+        }
+    }
+    else {
+        Write-Ok "    Policy exemptions:               0"
+    }
+}
+
 # Traffic light — AMBA does NOT count as non-standard for risk assessment.
 # Only ASSIGNED Deny mismatches trigger RED; unassigned-only Deny mismatches are YELLOW.
 Write-Host ''
 $hasDenyAssigned = $script:MismatchCountByEffect['DenyAssigned'] -gt 0
 $hasReviewItems  = $totalNonStdDefs -gt 0 -or $totalNonStdSets -gt 0 -or $totalStdMismatchDefs -gt 0
-$hasMinorDrift   = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0
+$hasMinorDrift   = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0 -or $script:TotalSubLevelNonStdAssignments -gt 0 -or $script:TotalDenyExemptions -gt 0
 
 if (-not $hasReviewItems -and -not $hasMinorDrift) {
     Write-Colored 'GREEN' 'Green' "Brownfield is a clean portal accelerator deployment. Low risk for engine adoption."
@@ -1316,6 +1498,9 @@ if ($OutputFile -ne '') {
             TotalCustomRoles                = $totalCustomRoles
             TotalNonAlzRgs                  = $totalNonAlzRgs
             TotalMissingInfra               = $totalMissingInfra
+            SubLevelNonStdAssignments       = $script:TotalSubLevelNonStdAssignments
+            SubLevelExemptions              = $script:TotalSubLevelExemptions
+            SubLevelDenyExemptions          = $script:TotalDenyExemptions
             MismatchByEffect                = [PSCustomObject]@{
                 DenyAssigned      = $script:MismatchCountByEffect['DenyAssigned']
                 DenyUnassigned    = $script:MismatchCountByEffect['DenyUnassigned']
