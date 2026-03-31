@@ -1007,11 +1007,17 @@ if ($Script:SubscriptionPlacement.Count -gt 0) {
     $allSubsList = [System.Collections.Generic.List[object]]::new()
     foreach ($mgSubs in $Script:SubscriptionPlacement.Values) {
         foreach ($sub in @($mgSubs)) {
-            $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id }
+            # SubscriptionPlacement entries are hashtables written directly by this script.
+            # Use hashtable key access (ContainsKey) rather than .PSObject.Properties which
+            # only works on PSCustomObjects, not hashtables.
+            $subId = if ($sub -is [hashtable] -and $sub.ContainsKey('Id')) { $sub['Id'] }
+                     elseif ($sub.PSObject.Properties['Id']) { $sub.Id }
                      elseif ($sub -is [string]) { $sub }
                      else { $null }
             if ($subId -and $allSubsSeen.Add($subId)) {
-                $displayName = if ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { $sub.DisplayName } else { $subId }
+                $displayName = if ($sub -is [hashtable] -and $sub.ContainsKey('DisplayName') -and $sub['DisplayName']) { $sub['DisplayName'] }
+                               elseif ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { $sub.DisplayName }
+                               else { $subId }
                 [void]$allSubsList.Add(@{ Id = $subId; DisplayName = $displayName })
             }
         }
