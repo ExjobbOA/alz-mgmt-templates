@@ -3,3 +3,5 @@ state-snapshots/state-sylaviken-brownfield.json
 
 # Local script output / scratch files
 compare-output.txt
+compare-output-detailed.txt
+deny-diff-report.html

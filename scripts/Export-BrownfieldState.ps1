@@ -495,7 +495,103 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
 }
 
 # ============================================================
-# Step 7: Discover infrastructure resources for a subscription
+# Step 7: Discover subscription-level policy assignments and
+#         policy exemptions for a single subscription.
+#         Called for EVERY subscription in SubscriptionPlacement,
+#         not just platform subs — landing zone subs are where
+#         Deny-effect policies most often affect workloads.
+# ============================================================
+function Get-SubscriptionGovernance ([string]$SubscriptionId, [string]$DisplayName) {
+    Write-Info "  Scanning subscription governance: $DisplayName ($SubscriptionId)"
+
+    $scope = "/subscriptions/$SubscriptionId"
+
+    $ctx = Set-AzContext -SubscriptionId $SubscriptionId -ErrorAction SilentlyContinue
+    if (-not $ctx) {
+        $msg = "Could not set context for subscription $SubscriptionId — skipping subscription governance scan."
+        $Script:Warnings += $msg
+        Write-Warn $msg
+        return $null
+    }
+
+    # --- Policy assignments scoped directly to this subscription ---
+    $assignments = @(Get-AzPolicyAssignment -Scope $scope -ErrorAction SilentlyContinue)
+    $subAssignments = @()
+    foreach ($a in $assignments) {
+        # Only include assignments whose scope equals exactly this subscription (not child scopes)
+        $aScope = Get-PropSafe $a 'Scope'
+        if (-not $aScope) {
+            $props = Get-PropSafe $a 'Properties'
+            if ($props) { $aScope = $props.scope }
+        }
+        if ($aScope -and ($aScope -ine $scope)) { continue }
+
+        $params = $null
+        try {
+            $rawParams = Get-PropSafe $a 'Parameter', 'Parameters'
+            $params = if ($rawParams -is [string]) { $rawParams | ConvertFrom-Json }
+                      else { $rawParams | ConvertTo-Json -Depth 10 | ConvertFrom-Json }
+        }
+        catch { }
+
+        $identity = $null
+        $aIdentity = Get-PropSafe $a 'Identity'
+        if ($aIdentity) {
+            $identity = @{
+                Type        = (Get-PropSafe $aIdentity 'Type')
+                PrincipalId = (Get-PropSafe $aIdentity 'PrincipalId')
+            }
+        }
+
+        $rid = Get-PropSafe $a 'ResourceId', 'PolicyAssignmentId', 'Id'
+        $subAssignments += @{
+            ResourceId         = $rid
+            Type               = 'policyAssignment'
+            DisplayName        = (Get-PropSafe $a 'DisplayName')
+            PolicyDefinitionId = (Get-PropSafe $a 'PolicyDefinitionId')
+            Parameters         = $params
+            EnforcementMode    = (Get-PropSafe $a 'EnforcementMode')
+            Identity           = $identity
+            Scope              = $scope
+        }
+    }
+    if ($subAssignments.Count -gt 0) { Write-Info "    PolicyAssignments: $($subAssignments.Count)" }
+
+    # --- Policy exemptions (no clean Az cmdlet — use REST) ---
+    $subExemptions = @()
+    $exemptionResponse = Invoke-AzRestMethod `
+        -Path "$scope/providers/Microsoft.Authorization/policyExemptions?api-version=2022-07-01-preview" `
+        -Method GET `
+        -ErrorAction SilentlyContinue
+    if ($exemptionResponse -and $exemptionResponse.StatusCode -eq 200) {
+        $exemptionData = $exemptionResponse.Content | ConvertFrom-Json -ErrorAction SilentlyContinue
+        if ($exemptionData -and $exemptionData.PSObject.Properties['value']) {
+            foreach ($ex in @($exemptionData.value)) {
+                $props = if ($ex.PSObject.Properties['properties']) { $ex.properties } else { $ex }
+                $subExemptions += @{
+                    ResourceId                  = $ex.id
+                    Name                        = $ex.name
+                    DisplayName                 = (Get-PropSafe $props 'displayName', 'DisplayName')
+                    ExemptionCategory           = (Get-PropSafe $props 'exemptionCategory', 'ExemptionCategory')
+                    PolicyAssignmentId          = (Get-PropSafe $props 'policyAssignmentId', 'PolicyAssignmentId')
+                    PolicyDefinitionReferenceIds = @(if ($props.PSObject.Properties['policyDefinitionReferenceIds']) { $props.policyDefinitionReferenceIds } else { @() })
+                    Scope                       = $scope
+                }
+            }
+        }
+    }
+    if ($subExemptions.Count -gt 0) { Write-Info "    PolicyExemptions: $($subExemptions.Count)" }
+
+    return @{
+        SubscriptionId    = $SubscriptionId
+        DisplayName       = $DisplayName
+        PolicyAssignments = $subAssignments
+        PolicyExemptions  = $subExemptions
+    }
+}
+
+# ============================================================
+# Step 8: Discover infrastructure resources for a subscription
 # ============================================================
 function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
     Write-Info "  Scanning infrastructure scope: $ScopeName (sub: $SubscriptionId)"
@@ -896,6 +992,63 @@ if ($Script:PlatformSubscriptionIds.Count -gt 0) {
 }
 
 # ============================================================
+# Subscription-level governance (assignments + exemptions)
+# Scans ALL subscriptions in SubscriptionPlacement — not just
+# platform subs — because landing zone subs are where Deny-effect
+# policies most commonly affect workloads.
+# ============================================================
+$subscriptionGovernanceScopes = @()
+
+if ($Script:SubscriptionPlacement.Count -gt 0) {
+    Write-Step 'Scanning subscription-level governance'
+
+    # Build a de-duplicated flat list of all subscriptions across all MGs
+    $allSubsSeen = [System.Collections.Generic.HashSet[string]]::new()
+    $allSubsList = [System.Collections.Generic.List[object]]::new()
+    foreach ($mgSubs in $Script:SubscriptionPlacement.Values) {
+        foreach ($sub in @($mgSubs)) {
+            # SubscriptionPlacement entries are hashtables written directly by this script.
+            # Use hashtable key access (ContainsKey) rather than .PSObject.Properties which
+            # only works on PSCustomObjects, not hashtables.
+            $subId = if ($sub -is [hashtable] -and $sub.ContainsKey('Id')) { $sub['Id'] }
+                     elseif ($sub.PSObject.Properties['Id']) { $sub.Id }
+                     elseif ($sub -is [string]) { $sub }
+                     else { $null }
+            if ($subId -and $allSubsSeen.Add($subId)) {
+                $displayName = if ($sub -is [hashtable] -and $sub.ContainsKey('DisplayName') -and $sub['DisplayName']) { $sub['DisplayName'] }
+                               elseif ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { $sub.DisplayName }
+                               else { $subId }
+                [void]$allSubsList.Add(@{ Id = $subId; DisplayName = $displayName })
+            }
+        }
+    }
+
+    Write-Info "  $($allSubsList.Count) subscription(s) to scan"
+
+    foreach ($sub in $allSubsList) {
+        try {
+            $subGov = Get-SubscriptionGovernance -SubscriptionId $sub.Id -DisplayName $sub.DisplayName
+            if ($subGov) {
+                $subscriptionGovernanceScopes += $subGov
+            }
+        }
+        catch {
+            $msg = "Subscription governance scan failed for $($sub.Id): $($_.Exception.Message)"
+            $Script:Warnings += $msg
+            Write-Warn $msg
+        }
+    }
+
+    $totalSubAssignments = ($subscriptionGovernanceScopes | ForEach-Object { $_.PolicyAssignments.Count } | Measure-Object -Sum).Sum
+    $totalSubExemptions  = ($subscriptionGovernanceScopes | ForEach-Object { $_.PolicyExemptions.Count }  | Measure-Object -Sum).Sum
+    Write-Ok "Subscription governance collected — $totalSubAssignments assignment(s), $totalSubExemptions exemption(s) across $($subscriptionGovernanceScopes.Count) subscription(s)"
+}
+else {
+    Write-Info 'No subscription placement data — skipping subscription-level governance scan.'
+    Write-Info '  (Re-run after MG hierarchy is built and subscriptions are placed under it)'
+}
+
+# ============================================================
 # Assemble and write output
 # ============================================================
 Write-Step 'Writing output'
@@ -907,6 +1060,7 @@ $export = @{
     DiscoveryMode            = 'brownfield'
     ManagementGroupHierarchy = $mgHierarchy
     SubscriptionPlacement    = $Script:SubscriptionPlacement
+    SubscriptionGovernance   = $subscriptionGovernanceScopes
     Scopes                   = @($governanceScopes) + @($infrastructureScopes)
     Warnings                 = $Script:Warnings
 }
@@ -915,9 +1069,10 @@ $export | ConvertTo-Json -Depth 30 | Out-File -FilePath $OutputFile -Encoding ut
 
 Write-Host ''
 Write-Ok "Export complete: $OutputFile"
-Write-Info "Total scopes exported: $($export.Scopes.Count)"
-Write-Info "Governance scopes:     $($governanceScopes.Count)"
-Write-Info "Infrastructure scopes: $($infrastructureScopes.Count)"
+Write-Info "Total scopes exported:       $($export.Scopes.Count)"
+Write-Info "Governance scopes:           $($governanceScopes.Count)"
+Write-Info "Infrastructure scopes:       $($infrastructureScopes.Count)"
+Write-Info "Subscription governance:     $($subscriptionGovernanceScopes.Count) subscription(s)"
 
 if ($Script:Warnings.Count -gt 0) {
     Write-Host ''
