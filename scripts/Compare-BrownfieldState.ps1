@@ -1600,16 +1600,19 @@ if ($mgSubscriptions.Count -gt 0) {
             $normalizedToActualMg[$norm.ToLower()] = $id
         }
     }
+    $fullModeSubsFound = 0
     foreach ($normName in @('management', 'connectivity', 'identity', 'security')) {
         $key = $platformMgMap[$normName]
         $actualId = if ($normalizedToActualMg.ContainsKey($normName)) { $normalizedToActualMg[$normName] } else { $normName }
         $subs = @(Get-SubsUnderMg $actualId)
         if ($subs.Count -eq 1) {
+            $fullModeSubsFound++
             $sub = $subs[0]
             $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '(unknown)' }
             $subName = if ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { " ($($sub.DisplayName))" } else { '' }
             Write-Ok "    $key`: $subId$subName"
         } elseif ($subs.Count -gt 1) {
+            $fullModeSubsFound++
             Write-Warn "    $key`: multiple subscriptions found under $actualId — check placement:"
             foreach ($sub in $subs) {
                 $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '?' }
@@ -1617,7 +1620,32 @@ if ($mgSubscriptions.Count -gt 0) {
                 Write-Detail "      $subId ($subName)"
             }
         } else {
-            Write-Detail "    $key`: (none found — check tenant root for unplaced subs or MG named '$actualId')"
+            Write-Detail "    $key`: (none found)"
+        }
+    }
+
+    # PLATFORM_MODE=simple: one subscription placed directly under the platform MG rather
+    # than under the four child MGs. Detect this and suggest SUBSCRIPTION_ID_PLATFORM.
+    if ($fullModeSubsFound -eq 0) {
+        $platformActualId = if ($normalizedToActualMg.ContainsKey('platform')) { $normalizedToActualMg['platform'] } else { 'platform' }
+        $platformDirectSubs = @(if ($mgSubscriptions.ContainsKey($platformActualId)) { $mgSubscriptions[$platformActualId] } else { @() })
+        if ($platformDirectSubs.Count -eq 1) {
+            $sub = $platformDirectSubs[0]
+            $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '(unknown)' }
+            $subName = if ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { " ($($sub.DisplayName))" } else { '' }
+            Write-Ok  "    SUBSCRIPTION_ID_PLATFORM (simple mode): $subId$subName"
+            Write-Detail "    Set PLATFORM_MODE=simple and SUBSCRIPTION_ID_PLATFORM in platform.json."
+            Write-Detail "    The four full-mode sub IDs should also be set to this value (schema requires all keys)."
+        } elseif ($platformDirectSubs.Count -gt 1) {
+            Write-Warn "    Multiple subscriptions found directly under platform MG ($platformActualId) — check placement:"
+            foreach ($sub in $platformDirectSubs) {
+                $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '?' }
+                $subName = if ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { $sub.DisplayName } else { '' }
+                Write-Detail "      $subId ($subName)"
+            }
+        } else {
+            Write-Warn "    No subscriptions found under management/connectivity/identity/security or platform MG."
+            Write-Detail "    Re-run Export-BrownfieldState.ps1 and ensure -PlatformSubscriptionIds covers the correct subscriptions."
         }
     }
 } else {
