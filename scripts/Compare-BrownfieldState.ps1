@@ -412,6 +412,20 @@ $script:MismatchCountByEffect = @{
 # All StandardMismatch entries across all scopes — consumed by the DiffReport block
 $script:AllStdMismatchDefList = [System.Collections.Generic.List[object]]::new()
 
+# All Deprecated entries across all scopes — consumed by Section 7 assigned-deprecated check
+$script:AllDeprDefList = [System.Collections.Generic.List[object]]::new()
+
+# Subscription-level governance counters — populated by Section 3b
+$script:TotalSubLevelNonStdAssignments = 0
+$script:TotalSubLevelExemptions        = 0
+$script:TotalDenyExemptions            = 0
+
+# Networking risk counter — incremented in Section 5 for cost-duplicate scenarios
+$script:NetworkingRiskCount = 0
+
+# DNS duplicate-zone risk counter — incremented in Section 5 when brownfield zones are in the wrong RG
+$script:DnsDuplicateRiskCount = 0
+
 # Build policy set name → ALZ custom member policy definition names from library.
 # Used below to expand initiative assignments to their individual member definitions.
 # Seed from the export's PolicySetDefinitions.PolicyDefinitions field (populated by the
@@ -477,6 +491,49 @@ foreach ($mgScope in @($export.Scopes | Where-Object { $_.Scope -eq 'managementG
         } else {
             # Direct policy definition assignment
             Add-DefAssignmentScope $defName $mgScope.Name $mgScope.ManagementGroupId
+        }
+    }
+}
+
+# Load SubscriptionGovernance from the export (added by Export-BrownfieldState v3+).
+# Falls back to empty if the export was produced by an older version.
+$subscriptionGovernance = @()
+if ($export.PSObject.Properties['SubscriptionGovernance'] -and $export.SubscriptionGovernance) {
+    $subscriptionGovernance = @($export.SubscriptionGovernance)
+}
+
+# Build reverse-lookup: subscription ID -> parent MG ID (from SubscriptionPlacement).
+# Used to populate ManagementGroupId when feeding sub-level assignments into defAssignmentScopes.
+$subIdToMgId = @{}
+foreach ($mgId in $mgSubscriptions.Keys) {
+    foreach ($sub in @($mgSubscriptions[$mgId])) {
+        $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } elseif ($sub -is [string]) { $sub } else { $null }
+        if ($subId -and -not $subIdToMgId.ContainsKey($subId)) {
+            $subIdToMgId[$subId] = $mgId
+        }
+    }
+}
+
+# Feed subscription-level assignments into defAssignmentScopes so that assigned-vs-unassigned
+# classification in Compare accounts for sub-scoped direct assignments.
+foreach ($subGov in $subscriptionGovernance) {
+    $subId = if ($subGov.PSObject.Properties['SubscriptionId']) { $subGov.SubscriptionId } else { $null }
+    if (-not $subId) { continue }
+    $parentMgId = if ($subIdToMgId.ContainsKey($subId)) { $subIdToMgId[$subId] } else { '' }
+    $subScopeName = "sub-$subId"
+
+    foreach ($a in @($subGov.PolicyAssignments)) {
+        $defId   = if ($a.PSObject.Properties['PolicyDefinitionId']) { $a.PolicyDefinitionId } else { '' }
+        $defName = ($defId -split '/')[-1]
+        if (-not $defName) { continue }
+        if ($defId -match 'policySetDefinitions') {
+            if ($setMemberDefs.ContainsKey($defName)) {
+                foreach ($memberName in $setMemberDefs[$defName]) {
+                    Add-DefAssignmentScope $memberName $subScopeName $parentMgId
+                }
+            }
+        } else {
+            Add-DefAssignmentScope $defName $subScopeName $parentMgId
         }
     }
 }
@@ -619,7 +676,7 @@ foreach ($scope in $mgScopes) {
             }
             'NonStandard' { $nonStdDefs++; $nonStdDefList += $defEntry }
             'AMBA' { $ambaDefs++; $ambaDefList += $defEntry }
-            'Deprecated' { $deprDefs++; $deprDefList += $defEntry }
+            'Deprecated' { $deprDefs++; $deprDefList += $defEntry; [void]$script:AllDeprDefList.Add($defEntry) }
         }
     }
 
@@ -906,6 +963,115 @@ foreach ($scope in $mgScopes) {
 }
 
 #==============================================================================
+# Section 3b: Subscription-Level Assignments & Exemptions
+#==============================================================================
+Write-Step 'Section 3b: Subscription-Level Assignments & Exemptions'
+
+$script:TotalSubLevelNonStdAssignments = 0
+$script:TotalSubLevelExemptions        = 0
+$script:TotalDenyExemptions            = 0
+
+if ($subscriptionGovernance.Count -eq 0) {
+    Write-Info '  No subscription governance data in export.'
+    Write-Info '  Re-run Export-BrownfieldState.ps1 to capture subscription-level assignments and exemptions.'
+}
+else {
+    foreach ($subGov in $subscriptionGovernance) {
+        $subId          = if ($subGov.PSObject.Properties['SubscriptionId']) { $subGov.SubscriptionId } else { '(unknown)' }
+        $subDisplayName = if ($subGov.PSObject.Properties['DisplayName'] -and $subGov.DisplayName) { $subGov.DisplayName } else { $subId }
+        $subAssignments = @(if ($subGov.PSObject.Properties['PolicyAssignments']) { $subGov.PolicyAssignments } else { @() })
+        $subExemptions  = @(if ($subGov.PSObject.Properties['PolicyExemptions'])  { $subGov.PolicyExemptions  } else { @() })
+
+        if ($subAssignments.Count -eq 0 -and $subExemptions.Count -eq 0) { continue }
+
+        Write-Host ''
+        Write-Host "  ── Subscription: $subDisplayName ($subId) ──"
+
+        # --- Assignments ---
+        if ($subAssignments.Count -gt 0) {
+            $stdA = 0; $nonStdA = 0; $ambaA = 0; $dneA = 0
+            foreach ($a in $subAssignments) {
+                $defId   = if ($a.PSObject.Properties['PolicyDefinitionId']) { $a.PolicyDefinitionId } else { '' }
+                $defName = ($defId -split '/')[-1]
+                $aName   = if ($a.PSObject.Properties['ResourceId']) { ($a.ResourceId -split '/')[-1] } else { '' }
+                $em      = if ($a.PSObject.Properties['EnforcementMode']) { $a.EnforcementMode } else { 'Default' }
+
+                $refStd  = $libPolicyDefs.ContainsKey($defName) -or $libPolicySetDefs.ContainsKey($defName) -or $libAssignmentNames.Contains($aName)
+                $refAmba = $ambaDefNames.Contains($defName) -or $ambaSetNames.Contains($defName)
+
+                if ($em -eq 'DoNotEnforce') { $dneA++ }
+                if ($refAmba)      { $ambaA++ }
+                elseif ($refStd)   { $stdA++ }
+                else               { $nonStdA++; $script:TotalSubLevelNonStdAssignments++ }
+
+                if ($Detailed) {
+                    $emLabel  = if ($em -eq 'DoNotEnforce') { 'DoNotEnforce' } else { 'Enforced' }
+                    $refLabel = if ($refStd) { '[std]' } elseif ($refAmba) { '[amba]' } else { '[non-std]' }
+                    if ($refAmba) {
+                        Write-Amba "  $aName  ($emLabel, $refLabel)"
+                        Write-Detail "    $($a.DisplayName)"
+                    }
+                    elseif (-not $refStd) {
+                        Write-Warn "  $aName  ($emLabel, $refLabel)"
+                        Write-Detail "    $($a.DisplayName)"
+                    }
+                    else {
+                        Write-Detail "  $aName  ($emLabel, $refLabel)  $($a.DisplayName)"
+                    }
+                }
+            }
+
+            if (-not $Detailed) {
+                Write-Ok "  $($subAssignments.Count) direct policy assignment(s)"
+                if ($nonStdA -gt 0) { Write-Warn "    $nonStdA reference non-standard definitions" }
+                if ($ambaA   -gt 0) { Write-Amba "    $ambaA reference AMBA definitions" }
+                if ($dneA    -gt 0) { Write-Info "    $dneA in DoNotEnforce mode" }
+            }
+        }
+
+        # --- Exemptions ---
+        if ($subExemptions.Count -gt 0) {
+            $script:TotalSubLevelExemptions += $subExemptions.Count
+
+            foreach ($ex in $subExemptions) {
+                $exName     = if ($ex.PSObject.Properties['Name'])            { $ex.Name }            else { '(unknown)' }
+                $exDisplay  = if ($ex.PSObject.Properties['DisplayName'] -and $ex.DisplayName) { $ex.DisplayName } else { $exName }
+                $exCat      = if ($ex.PSObject.Properties['ExemptionCategory']) { $ex.ExemptionCategory } else { '(unknown)' }
+                $exAssignId = if ($ex.PSObject.Properties['PolicyAssignmentId']) { $ex.PolicyAssignmentId } else { '' }
+
+                # Check if the exempted assignment targets a Deny-effect policy
+                $exAssignDefName = ($exAssignId -split '/')[-1]
+                $isDenyExemption = $false
+                if ($libPolicyDefs.ContainsKey($exAssignDefName)) {
+                    $exEffect = $libPolicyDefs[$exAssignDefName].Effect
+                    $isDenyExemption = (Get-EffectCategory $exEffect) -eq 'Deny'
+                }
+                if ($isDenyExemption) { $script:TotalDenyExemptions++ }
+
+                if ($isDenyExemption) {
+                    Write-Warn "  [EXEMPTION] $exDisplay  (category: $exCat)"
+                    Write-Warn "    ⚠ Exempts a Deny-effect policy — verify this exemption is intentional"
+                    Write-Detail "    assignment: $exAssignId"
+                }
+                elseif ($Detailed) {
+                    Write-Info "  [EXEMPTION] $exDisplay  (category: $exCat)"
+                    Write-Detail "    assignment: $exAssignId"
+                }
+                else {
+                    Write-Info "  $($subExemptions.Count) policy exemption(s)  (use -Detailed to list)"
+                    break  # summarised — don't print per-exemption in non-detailed mode
+                }
+            }
+        }
+    }
+
+    if ($subscriptionGovernance.Count -gt 0 -and
+        ($subscriptionGovernance | ForEach-Object { $_.PolicyAssignments.Count + $_.PolicyExemptions.Count } | Measure-Object -Sum).Sum -eq 0) {
+        Write-Info '  No subscription-level assignments or exemptions found.'
+    }
+}
+
+#==============================================================================
 # Section 4: RBAC Summary
 #==============================================================================
 Write-Step 'Section 4: RBAC Summary'
@@ -1015,12 +1181,142 @@ foreach ($ss in @($subScope)) {
     if (-not $foundTypes.ContainsKey('automationAccount')) { $missing += 'Automation Account' }
     foreach ($m in $missing) { Write-Warn "  Missing expected resource: $m" }
 
+    # --- Hub Networking Assessment ---
+    $networkingWarnings = [System.Collections.Generic.List[string]]::new()
+
+    $ddosFound    = @($keyRes | Where-Object { $_.Type -eq 'ddosProtectionPlan' })
+    $firewallsF   = @($keyRes | Where-Object { $_.Type -eq 'azureFirewall' })
+    $vpnGwsFound  = @($keyRes | Where-Object { $_.Type -eq 'vpnGateway' })
+    $erGwsFound   = @($keyRes | Where-Object { $_.Type -eq 'expressRouteGateway' })
+    $bastionsF    = @($keyRes | Where-Object { $_.Type -eq 'bastionHost' })
+    $fwPoliciesF  = @($keyRes | Where-Object { $_.Type -eq 'firewallPolicy' })
+    $resolversF   = @($keyRes | Where-Object { $_.Type -eq 'dnsPrivateResolver' })
+    $dcrsF        = @($keyRes | Where-Object { $_.Type -eq 'dataCollectionRule' })
+    $uamisF       = @($keyRes | Where-Object { $_.Type -eq 'userAssignedIdentity' })
+    $hubVnetsF    = @($keyRes | Where-Object { $_.Type -eq 'hubVirtualNetwork' })
+    $routeTablesF = @($keyRes | Where-Object { $_.Type -eq 'routeTable' })
+
+    $hasAnyNetworking = $ddosFound.Count -gt 0 -or $firewallsF.Count -gt 0 -or $vpnGwsFound.Count -gt 0 -or
+                        $erGwsFound.Count -gt 0 -or $bastionsF.Count -gt 0 -or $fwPoliciesF.Count -gt 0 -or
+                        $resolversF.Count -gt 0 -or $hubVnetsF.Count -gt 0
+    if ($hasAnyNetworking) {
+        Write-Host ''
+        Write-Host "  Hub Networking Assessment:"
+
+        # DDoS Protection Plans
+        if ($ddosFound.Count -gt 0) {
+            foreach ($ddos in $ddosFound) {
+                Write-Warn "  [COST]  DDoS Protection Plan: $($ddos.Name) (~`$2,944/month)"
+                Write-Detail "          Engine would deploy: YES (unless deployDdosProtectionPlan=false in hubnetworking params)"
+                Write-Detail "          Risk: DUPLICATE COST — pass existing plan ID as override or disable engine DDoS deployment"
+                [void]$networkingWarnings.Add("DDoS plan exists: $($ddos.Name)")
+                $script:NetworkingRiskCount++
+            }
+        }
+
+        # Azure Firewalls
+        if ($firewallsF.Count -gt 0) {
+            foreach ($fw in $firewallsF) {
+                $fwSku = if ($fw.PSObject.Properties['Sku'] -and $fw.Sku) {
+                    $skuObj = $fw.Sku
+                    if ($skuObj -is [hashtable]) { " (SKU: $($skuObj.Name)/$($skuObj.Tier))" }
+                    elseif ($skuObj.PSObject.Properties['Name']) { " (SKU: $($skuObj.Name)/$($skuObj.Tier))" }
+                    else { '' }
+                } else { '' }
+                Write-Warn "  [COST]  Azure Firewall: $($fw.Name)$fwSku"
+                Write-Detail "          Engine deploys its own firewall by default with hubnetworking"
+                Write-Detail "          Risk: DUPLICATE if both target AzureFirewallSubnet in the same VNet"
+                [void]$networkingWarnings.Add("Firewall exists: $($fw.Name) — engine deploys its own by default")
+            }
+        }
+
+        # VPN Gateways
+        if ($vpnGwsFound.Count -gt 0) {
+            foreach ($gw in $vpnGwsFound) {
+                $skuStr = if ($gw.PSObject.Properties['Sku'] -and $gw.Sku) { " (SKU: $($gw.Sku))" } else { '' }
+                Write-Warn "  [COST]  VPN Gateway: $($gw.Name)$skuStr (30+ min deploy, significant monthly cost)"
+                Write-Detail "          Engine deploys VPN gateway if enabled in hubnetworking config"
+                Write-Detail "          Risk: DUPLICATE COST — disable engine VPN gateway or reuse existing"
+                [void]$networkingWarnings.Add("VPN gateway exists: $($gw.Name) — disable engine VPN gateway or reuse")
+                $script:NetworkingRiskCount++
+            }
+        }
+
+        # ExpressRoute Gateways
+        if ($erGwsFound.Count -gt 0) {
+            foreach ($gw in $erGwsFound) {
+                $skuStr = if ($gw.PSObject.Properties['Sku'] -and $gw.Sku) { " (SKU: $($gw.Sku))" } else { '' }
+                Write-Warn "  [COST]  ExpressRoute Gateway: $($gw.Name)$skuStr (significant monthly cost)"
+                Write-Detail "          Engine deploys ER gateway if enabled in hubnetworking config"
+                Write-Detail "          Risk: DUPLICATE COST — disable engine ER gateway or reuse existing"
+                [void]$networkingWarnings.Add("ExpressRoute gateway exists: $($gw.Name) — disable engine ER gateway or reuse")
+                $script:NetworkingRiskCount++
+            }
+        }
+
+        # Bastion Hosts
+        if ($bastionsF.Count -gt 0) {
+            foreach ($b in $bastionsF) {
+                $skuStr = if ($b.PSObject.Properties['Sku'] -and $b.Sku) { " (SKU: $($b.Sku))" } else { '' }
+                Write-Info "  [INFO]  Bastion Host: $($b.Name)$skuStr"
+                Write-Detail "          Engine deploys Bastion by default — verify AzureBastionSubnet not duplicated"
+            }
+        }
+
+        # Firewall Policies
+        if ($fwPoliciesF.Count -gt 0) {
+            foreach ($fp in $fwPoliciesF) {
+                $tierStr = if ($fp.PSObject.Properties['SkuTier'] -and $fp.SkuTier) { " (tier: $($fp.SkuTier))" } else { '' }
+                Write-Warn "  [INFO]  Firewall Policy: $($fp.Name)$tierStr"
+                Write-Detail "          Engine creates its own policy unless firewallPolicyId override is provided"
+                Write-Detail "          Existing policy ResourceId (for override): $($fp.ResourceId)"
+                [void]$networkingWarnings.Add("Firewall policy exists: $($fp.Name) — set as firewallPolicyId override if desired")
+            }
+        }
+
+        # Hub VNets + route table notes
+        if ($hubVnetsF.Count -gt 0) {
+            foreach ($vnet in $hubVnetsF) {
+                $addrStr = if ($vnet.PSObject.Properties['AddressSpace'] -and $vnet.AddressSpace) { $vnet.AddressSpace -join ', ' } else { '(unknown)' }
+                Write-Info "  [INFO]  Hub VNet: $($vnet.Name) ($addrStr)"
+                Write-Detail "          Engine default hub address: 10.20.0.0/16 — verify no overlap with workload spokes"
+            }
+            if ($routeTablesF.Count -gt 0) {
+                Write-Info "  [INFO]  Route tables: $($routeTablesF.Count) found"
+                Write-Detail "          Engine creates route tables pointing 0.0.0.0/0 → firewall private IP"
+                Write-Detail "          If existing route tables use a different firewall IP, traffic will reroute on first deploy"
+            }
+        }
+
+        # DNS Private Resolvers
+        if ($resolversF.Count -gt 0) {
+            foreach ($r in $resolversF) {
+                Write-Warn "  [INFO]  DNS Private Resolver: $($r.Name)"
+                Write-Detail "          Engine conditionally deploys a resolver — verify DNS chain does not conflict"
+                Write-Detail "          Engine DNS chain: Resolver → FW Policy DNS proxy → VNet custom DNS"
+                [void]$networkingWarnings.Add("DNS Private Resolver exists: $($r.Name) — verify engine DNS chain compatibility")
+            }
+        }
+
+        # DCRs and UAMIs
+        if ($dcrsF.Count -gt 0) {
+            Write-Info "  [INFO]  Data Collection Rules: $($dcrsF.Count)"
+            Write-Detail "          Engine deploys 3 DCRs (VM Insights, Change Tracking, MDFC SQL)"
+            Write-Detail "          Existing DCRs are not removed; workloads referencing old DCRs are unaffected"
+        }
+        if ($uamisF.Count -gt 0) {
+            Write-Info "  [INFO]  User Assigned Managed Identities: $($uamisF.Count)"
+            Write-Detail "          Engine creates its own UAMI for AMA — coexists with existing UAMIs"
+        }
+    }
+
     $infraReport += [PSCustomObject]@{
-        SubscriptionId   = $ss.SubscriptionId
-        ResourceGroups   = $rgs
-        KeyResources     = $keyRes
-        NonAlzRgs        = $nonAlzRgs
-        MissingResources = $missing
+        SubscriptionId     = $ss.SubscriptionId
+        ResourceGroups     = $rgs
+        KeyResources       = $keyRes
+        NonAlzRgs          = $nonAlzRgs
+        MissingResources   = $missing
+        NetworkingWarnings = @($networkingWarnings)
     }
 }
 
@@ -1075,6 +1371,15 @@ if ($script:CollectedUamiIds.Count -gt 0) {
     foreach ($id in $script:CollectedUamiIds) { Write-Detail "    $id" }
 }
 
+if ($script:DnsDuplicateRiskCount -gt 0) {
+    Write-Host ''
+    Write-Warn "  Private DNS zone config (DUPLICATE_RISK detected):"
+    Write-Detail "    Engine DNS RG naming: rg-alz-dns-{location}  (parDnsResourceGroupNamePrefix)"
+    Write-Detail "    To avoid duplicates, either move brownfield zones to that RG pre-migration,"
+    Write-Detail "    or add to hubnetworking bicepparam:"
+    Write-Detail '      privateDnsSettings: { deployPrivateDnsZones: false }'
+}
+
 # Platform subscription mapping from SubscriptionPlacement (requires Export-BrownfieldState v2+)
 Write-Host ''
 Write-Host '  Platform subscription mapping (from MG placement):'
@@ -1120,9 +1425,17 @@ if ($mgSubscriptions.Count -gt 0) {
 # Hub networking from infrastructure scan
 Write-Host ''
 Write-Host '  Hub networking (from infrastructure scan):'
-$hubVnets      = @($infraReport | ForEach-Object { $_.KeyResources } | Where-Object { $_.Type -eq 'hubVirtualNetwork' })
-$firewalls     = @($infraReport | ForEach-Object { $_.KeyResources } | Where-Object { $_.Type -eq 'azureFirewall' })
+$hubVnets        = @($infraReport | ForEach-Object { $_.KeyResources } | Where-Object { $_.Type -eq 'hubVirtualNetwork' })
+$firewalls       = @($infraReport | ForEach-Object { $_.KeyResources } | Where-Object { $_.Type -eq 'azureFirewall' })
 $privateDnsZones = @($infraReport | ForEach-Object { $_.KeyResources } | Where-Object { $_.Type -eq 'privateDnsZone' })
+$ddosPlansAll    = @($infraReport | ForEach-Object { $_.KeyResources } | Where-Object { $_.Type -eq 'ddosProtectionPlan' })
+$vpnGwsAll       = @($infraReport | ForEach-Object { $_.KeyResources } | Where-Object { $_.Type -eq 'vpnGateway' })
+$erGwsAll        = @($infraReport | ForEach-Object { $_.KeyResources } | Where-Object { $_.Type -eq 'expressRouteGateway' })
+$bastionsAll     = @($infraReport | ForEach-Object { $_.KeyResources } | Where-Object { $_.Type -eq 'bastionHost' })
+$fwPoliciesAll   = @($infraReport | ForEach-Object { $_.KeyResources } | Where-Object { $_.Type -eq 'firewallPolicy' })
+$resolversAll    = @($infraReport | ForEach-Object { $_.KeyResources } | Where-Object { $_.Type -eq 'dnsPrivateResolver' })
+$dcrsAll         = @($infraReport | ForEach-Object { $_.KeyResources } | Where-Object { $_.Type -eq 'dataCollectionRule' })
+$uamisAll        = @($infraReport | ForEach-Object { $_.KeyResources } | Where-Object { $_.Type -eq 'userAssignedIdentity' })
 
 if ($hubVnets.Count -gt 0) {
     foreach ($vnet in $hubVnets) {
@@ -1134,16 +1447,210 @@ if ($hubVnets.Count -gt 0) {
 }
 if ($firewalls.Count -gt 0) {
     foreach ($fw in $firewalls) {
-        Write-Ok "    Azure Firewall: $($fw.Name) in $($fw.ResourceGroup)"
+        Write-Warn "    Azure Firewall: $($fw.Name) in $($fw.ResourceGroup) [engine will also deploy one by default]"
     }
 } else {
     Write-Detail "    Azure Firewall: (none found)"
 }
-if ($privateDnsZones.Count -gt 0) {
-    $zoneRgs = @($privateDnsZones | ForEach-Object { $_.ResourceGroup } | Sort-Object -Unique)
-    Write-Ok "    Private DNS zones: $($privateDnsZones.Count) zone(s) in $($zoneRgs -join ', ')"
+if ($ddosPlansAll.Count -gt 0) {
+    foreach ($d in $ddosPlansAll) {
+        Write-Warn "    DDoS Protection Plan: $($d.Name) (~`$2,944/month — engine may deploy a second)"
+    }
 } else {
-    Write-Detail "    Private DNS zones: (none found)"
+    Write-Detail "    DDoS Protection Plan: (none found)"
+}
+if ($vpnGwsAll.Count -gt 0) {
+    foreach ($gw in $vpnGwsAll) { Write-Warn "    VPN Gateway: $($gw.Name) (cost + 30-min deploy — engine may add another if enabled)" }
+} else {
+    Write-Detail "    VPN Gateway: (none found)"
+}
+if ($erGwsAll.Count -gt 0) {
+    foreach ($gw in $erGwsAll) { Write-Warn "    ExpressRoute Gateway: $($gw.Name) (significant cost — engine may add another if enabled)" }
+} else {
+    Write-Detail "    ExpressRoute Gateway: (none found)"
+}
+if ($bastionsAll.Count -gt 0) {
+    foreach ($b in $bastionsAll) { Write-Info "    Bastion Host: $($b.Name)" }
+} else {
+    Write-Detail "    Bastion Host: (none found)"
+}
+if ($fwPoliciesAll.Count -gt 0) {
+    foreach ($fp in $fwPoliciesAll) {
+        Write-Info "    Firewall Policy: $($fp.Name) (engine creates its own unless firewallPolicyId override is set)"
+    }
+}
+if ($resolversAll.Count -gt 0) {
+    foreach ($r in $resolversAll) { Write-Warn "    DNS Private Resolver: $($r.Name) (verify DNS chain compatibility with engine)" }
+}
+# ── Private DNS Zone Assessment ──
+Write-Host ''
+Write-Host '  Private DNS Zone Assessment:'
+if ($privateDnsZones.Count -eq 0) {
+    Write-Detail "    (none found — engine will create the full Private Link zone set on deployment)"
+} else {
+    # Zone inventory by resource group
+    $zonesByRg = [ordered]@{}
+    foreach ($z in ($privateDnsZones | Sort-Object ResourceGroup, Name)) {
+        if (-not $zonesByRg.ContainsKey($z.ResourceGroup)) {
+            $zonesByRg[$z.ResourceGroup] = [System.Collections.Generic.List[object]]::new()
+        }
+        $zonesByRg[$z.ResourceGroup].Add($z)
+    }
+    Write-Info "    Zone inventory ($($privateDnsZones.Count) total):"
+    foreach ($rg in $zonesByRg.Keys) {
+        Write-Detail "      $rg ($($zonesByRg[$rg].Count) zones)"
+    }
+
+    # Engine default zones (avm/ptn/network/private-link-private-dns-zones:0.7.2)
+    # Source: state-snapshots/state-alen-after-cd4.json — update if AVM module version changes
+    $engineDefaultZones = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    @(
+        'privatelink.adf.azure.com'
+        'privatelink.agentsvc.azure-automation.net'
+        'privatelink.afs.azure.net'
+        'privatelink.api.adu.microsoft.com'
+        'privatelink.api.azureml.ms'
+        'privatelink.azure-automation.net'
+        'privatelink.azure-devices.net'
+        'privatelink.azure-devices-provisioning.net'
+        'privatelink.azurecr.io'
+        'privatelink.azuredatabricks.net'
+        'privatelink.azurehdinsight.net'
+        'privatelink.azureiotcentral.com'
+        'privatelink.azurewebsites.net'
+        'privatelink.batch.azure.com'
+        'privatelink.blob.core.windows.net'
+        'privatelink.cassandra.cosmos.azure.com'
+        'privatelink.cognitiveservices.azure.com'
+        'privatelink.datafactory.azure.net'
+        'privatelink.dev.azuresynapse.net'
+        'privatelink.dfs.core.windows.net'
+        'privatelink.directline.botframework.com'
+        'privatelink.documents.azure.com'
+        'privatelink.dp.kubernetesconfiguration.azure.com'
+        'privatelink.eventgrid.azure.net'
+        'privatelink.file.core.windows.net'
+        'privatelink.grafana.azure.com'
+        'privatelink.gremlin.cosmos.azure.com'
+        'privatelink.guestconfiguration.azure.com'
+        'privatelink.his.arc.azure.com'
+        'privatelink.media.azure.net'
+        'privatelink.mongo.cosmos.azure.com'
+        'privatelink.monitor.azure.com'
+        'privatelink.notebooks.azure.net'
+        'privatelink.ods.opinsights.azure.com'
+        'privatelink.oms.opinsights.azure.com'
+        'privatelink.prod.migration.windowsazure.com'
+        'privatelink.queue.core.windows.net'
+        'privatelink.redis.cache.windows.net'
+        'privatelink.search.windows.net'
+        'privatelink.service.signalr.net'
+        'privatelink.servicebus.windows.net'
+        'privatelink.siterecovery.windowsazure.com'
+        'privatelink.sql.azuresynapse.net'
+        'privatelink.table.core.windows.net'
+        'privatelink.table.cosmos.azure.com'
+        'privatelink.vaultcore.azure.net'
+        'privatelink.web.core.windows.net'
+        'privatelink.wvd.microsoft.com'
+    ) | ForEach-Object { [void]$engineDefaultZones.Add($_) }
+
+    # Hub VNet resource IDs for link detection
+    $hubVnetIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($vnet in $hubVnets) {
+        if ($vnet.PSObject.Properties['ResourceId'] -and $vnet.ResourceId) {
+            [void]$hubVnetIds.Add($vnet.ResourceId)
+        }
+    }
+
+    $matchCount          = 0
+    $duplicateRiskCount  = 0
+    $extraCount          = 0
+    $activeCount         = 0
+    $hubLinkedCount      = 0
+    $dnsRgSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    # Engine DNS RG pattern: parDnsResourceGroupNamePrefix (default 'rg-alz-dns') + '-' + location
+    $engineDnsRgPattern = 'rg-alz-dns-*'
+
+    Write-Host ''
+    foreach ($zone in ($privateDnsZones | Sort-Object Name)) {
+        # Engine default check — also matches region-parameterized backup zone
+        $isEngineZone = $engineDefaultZones.Contains($zone.Name) -or
+                        ($zone.Name -match '^privatelink\.\w+\.backup\.windowsazure\.com$')
+
+        $recordCount      = if ($zone.PSObject.Properties['RecordSetCount']) { $zone.RecordSetCount } else { $null }
+        $hasActiveRecords = $null -ne $recordCount -and $recordCount -gt 2
+
+        $vnetLinks  = if ($zone.PSObject.Properties['VNetLinks']) { @($zone.VNetLinks) } else { @() }
+        $hubLinks   = @($vnetLinks | Where-Object {
+            $_.PSObject.Properties['VirtualNetworkId'] -and $hubVnetIds.Contains($_.VirtualNetworkId)
+        })
+        $spokeLinks = @($vnetLinks | Where-Object {
+            -not ($_.PSObject.Properties['VirtualNetworkId'] -and $hubVnetIds.Contains($_.VirtualNetworkId))
+        })
+
+        $flags = [System.Collections.Generic.List[string]]::new()
+        if ($hasActiveRecords)       { [void]$flags.Add("ACTIVE_RECORDS:$recordCount") }
+        if ($hubLinks.Count -gt 0)   { [void]$flags.Add('HUB_LINKED') }
+        if ($spokeLinks.Count -gt 0) { [void]$flags.Add("SPOKE_LINKS:$($spokeLinks.Count)") }
+        $flagStr = if ($flags.Count -gt 0) { "  [$($flags -join ', ')]" } else { '' }
+
+        if ($isEngineZone) {
+            if ($zone.ResourceGroup -like $engineDnsRgPattern) {
+                $matchCount++
+                Write-Ok   "    MATCH           $($zone.Name)$flagStr"
+            } else {
+                $duplicateRiskCount++
+                $script:DnsDuplicateRiskCount++
+                [void]$dnsRgSet.Add($zone.ResourceGroup)
+                Write-Err  "    DUPLICATE_RISK  $($zone.Name)  (in $($zone.ResourceGroup))$flagStr"
+            }
+        } else {
+            $extraCount++
+            Write-Info "    EXTRA           $($zone.Name)$flagStr"
+        }
+
+        if ($hasActiveRecords)     { $activeCount++ }
+        if ($hubLinks.Count -gt 0) { $hubLinkedCount++ }
+    }
+
+    # MISSING: engine defaults not present in brownfield
+    $brownfieldZoneSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($z in $privateDnsZones) { [void]$brownfieldZoneSet.Add($z.Name) }
+    $missingCount = 0
+    foreach ($ez in $engineDefaultZones) {
+        if (-not $brownfieldZoneSet.Contains($ez)) { $missingCount++ }
+    }
+
+    Write-Host ''
+    if ($matchCount -gt 0)         { Write-Ok   "    MATCH:          $matchCount — in engine DNS RG, fully managed" }
+    if ($duplicateRiskCount -gt 0) { Write-Err  "    DUPLICATE_RISK: $duplicateRiskCount — wrong RG, engine will create conflicting duplicates" }
+    if ($extraCount -gt 0)         { Write-Info "    EXTRA:          $extraCount — not in engine defaults, engine won't touch these" }
+    if ($missingCount -gt 0)       { Write-Info "    MISSING:        $missingCount engine default zones not yet deployed (will be created)" }
+    if ($activeCount -gt 0)        { Write-Warn "    ACTIVE_RECORDS: $activeCount zone(s) have records beyond SOA+NS — orphaning breaks Private Link resolution" }
+    if ($hubLinkedCount -gt 0)     { Write-Warn "    HUB_LINKED:     $hubLinkedCount zone(s) already linked to hub VNet — verify engine link creation is idempotent" }
+
+    if ($duplicateRiskCount -gt 0) {
+        Write-Host ''
+        Write-Warn "    ! DUPLICATE_RISK — action required before engine deployment:"
+        Write-Detail "      Option A: Move brownfield zones to engine DNS RG (rg-alz-dns-{location})"
+        Write-Detail "      Option B: Set privateDnsSettings.deployPrivateDnsZones = false in hubnetworking config"
+        Write-Detail "                and manage zone-to-VNet links via Azure Policy parameter overrides."
+        if ($dnsRgSet.Count -gt 0) {
+            Write-Detail "      Brownfield DNS RG(s): $($dnsRgSet -join ', ')"
+        }
+    }
+    if ($hubLinkedCount -gt 0 -and $duplicateRiskCount -eq 0) {
+        Write-Host ''
+        Write-Warn "    ! Engine will create hub VNet links for these zones — verify existing link names won't conflict."
+    }
+}
+if ($dcrsAll.Count -gt 0) {
+    Write-Info "    Data Collection Rules: $($dcrsAll.Count) (engine deploys 3 more — existing unaffected)"
+}
+if ($uamisAll.Count -gt 0) {
+    Write-Info "    User Assigned Managed Identities: $($uamisAll.Count)"
 }
 
 #==============================================================================
@@ -1211,7 +1718,29 @@ if ($totalStdMismatchDefs -gt 0) {
 } else { Write-Ok "    Rule mismatches:          0" }
 if ($totalNonStdDefs -gt 0) { Write-Warn "    Non-standard (review):    $totalNonStdDefs" } else { Write-Ok "    Non-standard:             0" }
 if ($totalAmbaDefs -gt 0) { Write-Amba "    AMBA (informational):     $totalAmbaDefs" }
-if ($totalDeprDefs -gt 0) { Write-Info "    Deprecated:               $totalDeprDefs" }
+if ($totalDeprDefs -gt 0) {
+    $deprAssigned   = @($script:AllDeprDefList | Where-Object {
+        $defAssignmentScopes.ContainsKey($_.Name) -and $defAssignmentScopes[$_.Name].Count -gt 0
+    })
+    $deprUnassigned = $totalDeprDefs - $deprAssigned.Count
+    if ($deprAssigned.Count -gt 0) {
+        Write-Warn "    Deprecated (assigned):    $($deprAssigned.Count) (engine will replace with successor — review before deploying)"
+        Write-Info "    Deprecated (unassigned):  $deprUnassigned"
+        if ($Detailed) {
+            Write-Host ''
+            Write-Warn "  ── Deprecated definitions still assigned ──"
+            foreach ($e in $deprAssigned) {
+                $assignScopes = @($defAssignmentScopes[$e.Name])
+                $scopeStr = ($assignScopes | ForEach-Object { "$($_.ScopeName) ($($_.ManagementGroupId))" }) -join ', '
+                Write-Warn   "  [DEPRECATED ASSIGNED] $($e.Name)"
+                Write-Detail "    display name: $($e.DisplayName)"
+                Write-Detail "    assigned at:  $scopeStr"
+            }
+        }
+    } else {
+        Write-Info "    Deprecated:               $totalDeprDefs"
+    }
+}
 
 Write-Host ''
 Write-Host "  Policy Set Definitions:"
@@ -1225,13 +1754,73 @@ Write-Host "  Assignments:                  Non-standard refs: $totalNonStdAssig
 Write-Host "  Custom role definitions:      $totalCustomRoles"
 Write-Host "  Non-ALZ resource groups:      $totalNonAlzRgs"
 Write-Host "  Missing expected resources:   $totalMissingInfra"
+if ($script:NetworkingRiskCount -gt 0) {
+    Write-Warn "  Networking cost-duplicate risk: $($script:NetworkingRiskCount) item(s) — DDoS plan/VPN/ER gateway may be deployed twice"
+} else {
+    Write-Ok   "  Networking cost-duplicate risk: 0"
+}
+if ($script:DnsDuplicateRiskCount -gt 0) {
+    Write-Err  "  Private DNS duplicate-zone risk: $($script:DnsDuplicateRiskCount) zone(s) — wrong RG, engine will create conflicting duplicates"
+} else {
+    Write-Ok   "  Private DNS duplicate-zone risk: 0"
+}
+
+Write-Host ''
+Write-Host '  Subscription-level governance:'
+if ($subscriptionGovernance.Count -eq 0) {
+    Write-Detail '    (not captured — re-run Export-BrownfieldState.ps1 to include subscription-level data)'
+}
+else {
+    if ($script:TotalSubLevelNonStdAssignments -gt 0) {
+        Write-Warn "    Non-standard direct assignments: $($script:TotalSubLevelNonStdAssignments) (review required)"
+    }
+    else {
+        Write-Ok "    Non-standard direct assignments: 0"
+    }
+    if ($script:TotalSubLevelExemptions -gt 0) {
+        if ($script:TotalDenyExemptions -gt 0) {
+            Write-Warn "    Policy exemptions: $($script:TotalSubLevelExemptions) total  ($($script:TotalDenyExemptions) exempt Deny-effect — review)"
+        }
+        else {
+            Write-Info "    Policy exemptions: $($script:TotalSubLevelExemptions)"
+        }
+    }
+    else {
+        Write-Ok "    Policy exemptions:               0"
+    }
+}
+
+Write-Host ''
+Write-Host '  Subscription-level governance:'
+if ($subscriptionGovernance.Count -eq 0) {
+    Write-Detail '    (not captured — re-run Export-BrownfieldState.ps1 to include subscription-level data)'
+}
+else {
+    if ($script:TotalSubLevelNonStdAssignments -gt 0) {
+        Write-Warn "    Non-standard direct assignments: $($script:TotalSubLevelNonStdAssignments) (review required)"
+    }
+    else {
+        Write-Ok "    Non-standard direct assignments: 0"
+    }
+    if ($script:TotalSubLevelExemptions -gt 0) {
+        if ($script:TotalDenyExemptions -gt 0) {
+            Write-Warn "    Policy exemptions: $($script:TotalSubLevelExemptions) total  ($($script:TotalDenyExemptions) exempt Deny-effect — review)"
+        }
+        else {
+            Write-Info "    Policy exemptions: $($script:TotalSubLevelExemptions)"
+        }
+    }
+    else {
+        Write-Ok "    Policy exemptions:               0"
+    }
+}
 
 # Traffic light — AMBA does NOT count as non-standard for risk assessment.
 # Only ASSIGNED Deny mismatches trigger RED; unassigned-only Deny mismatches are YELLOW.
 Write-Host ''
 $hasDenyAssigned = $script:MismatchCountByEffect['DenyAssigned'] -gt 0
 $hasReviewItems  = $totalNonStdDefs -gt 0 -or $totalNonStdSets -gt 0 -or $totalStdMismatchDefs -gt 0
-$hasMinorDrift   = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0
+$hasMinorDrift   = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0 -or $script:TotalSubLevelNonStdAssignments -gt 0 -or $script:TotalDenyExemptions -gt 0 -or $script:NetworkingRiskCount -gt 0 -or $script:DnsDuplicateRiskCount -gt 0
 
 if (-not $hasReviewItems -and -not $hasMinorDrift) {
     Write-Colored 'GREEN' 'Green' "Brownfield is a clean portal accelerator deployment. Low risk for engine adoption."
@@ -1291,6 +1880,9 @@ if ($OutputFile -ne '') {
             TotalCustomRoles                = $totalCustomRoles
             TotalNonAlzRgs                  = $totalNonAlzRgs
             TotalMissingInfra               = $totalMissingInfra
+            SubLevelNonStdAssignments       = $script:TotalSubLevelNonStdAssignments
+            SubLevelExemptions              = $script:TotalSubLevelExemptions
+            SubLevelDenyExemptions          = $script:TotalDenyExemptions
             MismatchByEffect                = [PSCustomObject]@{
                 DenyAssigned      = $script:MismatchCountByEffect['DenyAssigned']
                 DenyUnassigned    = $script:MismatchCountByEffect['DenyUnassigned']
