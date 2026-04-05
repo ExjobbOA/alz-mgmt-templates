@@ -1790,6 +1790,31 @@ else {
     }
 }
 
+Write-Host ''
+Write-Host '  Subscription-level governance:'
+if ($subscriptionGovernance.Count -eq 0) {
+    Write-Detail '    (not captured — re-run Export-BrownfieldState.ps1 to include subscription-level data)'
+}
+else {
+    if ($script:TotalSubLevelNonStdAssignments -gt 0) {
+        Write-Warn "    Non-standard direct assignments: $($script:TotalSubLevelNonStdAssignments) (review required)"
+    }
+    else {
+        Write-Ok "    Non-standard direct assignments: 0"
+    }
+    if ($script:TotalSubLevelExemptions -gt 0) {
+        if ($script:TotalDenyExemptions -gt 0) {
+            Write-Warn "    Policy exemptions: $($script:TotalSubLevelExemptions) total  ($($script:TotalDenyExemptions) exempt Deny-effect — review)"
+        }
+        else {
+            Write-Info "    Policy exemptions: $($script:TotalSubLevelExemptions)"
+        }
+    }
+    else {
+        Write-Ok "    Policy exemptions:               0"
+    }
+}
+
 # Traffic light — AMBA does NOT count as non-standard for risk assessment.
 # Only ASSIGNED Deny mismatches trigger RED; unassigned-only Deny mismatches are YELLOW.
 Write-Host ''
