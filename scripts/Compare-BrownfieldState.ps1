@@ -426,6 +426,11 @@ $script:NetworkingRiskCount = 0
 # DNS duplicate-zone risk counter — incremented in Section 5 when brownfield zones are in the wrong RG
 $script:DnsDuplicateRiskCount = 0
 
+# Resource lock risk counters — incremented in Section 5 during lock assessment
+$script:LockBlockingCount = 0
+$script:LockCautionCount  = 0
+$script:LockTotalCount    = 0
+
 # Build policy set name → ALZ custom member policy definition names from library.
 # Used below to expand initiative assignments to their individual member definitions.
 # Seed from the export's PolicySetDefinitions.PolicyDefinitions field (populated by the
@@ -1310,6 +1315,101 @@ foreach ($ss in @($subScope)) {
         }
     }
 
+    # --- Resource Lock Assessment ---
+    $allLocks = @()
+    if ($ss.Resources.PSObject.Properties['ResourceLocks']) {
+        $allLocks = @($ss.Resources.ResourceLocks)
+    }
+
+    if ($allLocks.Count -gt 0) {
+        Write-Host ''
+        Write-Host "  Resource Lock Assessment: ($($allLocks.Count) lock(s) found)"
+
+        # RG name patterns the engine deploys into or creates
+        $engineRgPatterns = @('alz-', 'ALZ-', 'rg-alz-', 'rg-amba-')
+        # Resource types the engine modifies (LAW, AA, hub VNet RG resources)
+        $engineResourceTypes = @(
+            'Microsoft.OperationalInsights/workspaces',
+            'Microsoft.Automation/automationAccounts',
+            'Microsoft.Network/virtualNetworks',
+            'Microsoft.Network/azureFirewalls',
+            'Microsoft.Network/bastionHosts',
+            'Microsoft.Network/virtualNetworkGateways',
+            'Microsoft.Network/privateDnsZones',
+            'Microsoft.Network/dnsResolvers'
+        )
+
+        $lockResults = @()
+
+        foreach ($lock in $allLocks) {
+            $level     = [string]$lock.Level
+            $scope     = [string]$lock.Scope
+            $rgName    = [string]$lock.ResourceGroup
+            $resType   = [string]$lock.ResourceType
+            $resName   = [string]$lock.ResourceName
+
+            # Determine if this lock targets something the engine will touch
+            $targetsEngineRg  = $scope -eq 'resourceGroup' -and
+                                ($engineRgPatterns | Where-Object { $rgName -like "$_*" })
+            $targetsEngineRes = $scope -eq 'resource' -and
+                                ($engineResourceTypes | Where-Object { $resType -like $_ })
+            $targetsSubscription = $scope -eq 'subscription'
+
+            $classification = if ($level -eq 'ReadOnly' -and ($targetsEngineRg -or $targetsEngineRes -or $targetsSubscription)) {
+                'BLOCKING'
+            } elseif ($level -eq 'CanNotDelete' -and ($targetsEngineRg -or $targetsEngineRes)) {
+                'CAUTION'
+            } else {
+                'SAFE'
+            }
+
+            switch ($classification) {
+                'BLOCKING' { $script:LockBlockingCount++ }
+                'CAUTION'  { $script:LockCautionCount++ }
+            }
+            $script:LockTotalCount++
+
+            $scopeDesc = switch ($scope) {
+                'subscription'  { "subscription" }
+                'resourceGroup' { "RG: $rgName" }
+                'resource'      { "resource: $resName ($resType) in $rgName" }
+                default         { $scope }
+            }
+
+            $lockResults += [PSCustomObject]@{
+                Name           = $lock.Name
+                Level          = $level
+                Scope          = $scope
+                Classification = $classification
+                ScopeDesc      = $scopeDesc
+                ResourceGroup  = $rgName
+                ResourceName   = $resName
+                ResourceType   = $resType
+            }
+
+            switch ($classification) {
+                'BLOCKING' {
+                    Write-Err  "  [BLOCKING] $level lock '$($lock.Name)' on $scopeDesc"
+                    Write-Detail "             Remove this lock before running the engine."
+                    Write-Detail "             Re-apply after migration if desired — the engine can manage locks via parGlobalResourceLock."
+                }
+                'CAUTION' {
+                    Write-Warn "  [CAUTION]  $level lock '$($lock.Name)' on $scopeDesc"
+                    Write-Detail "             CanNotDelete lock will not block deployments but may prevent stack cleanup operations."
+                    Write-Detail "             Consider removing before migration if using denySettingsMode on the stack."
+                }
+                'SAFE' {
+                    Write-Info "  [SAFE]     $level lock '$($lock.Name)' on $scopeDesc"
+                }
+            }
+        }
+
+        if ($script:LockBlockingCount -gt 0) {
+            Write-Host ''
+            Write-Warn "  Lock recommendation: configure parGlobalResourceLock in the engine to match desired post-migration lock state."
+        }
+    }
+
     $infraReport += [PSCustomObject]@{
         SubscriptionId     = $ss.SubscriptionId
         ResourceGroups     = $rgs
@@ -1317,6 +1417,7 @@ foreach ($ss in @($subScope)) {
         NonAlzRgs          = $nonAlzRgs
         MissingResources   = $missing
         NetworkingWarnings = @($networkingWarnings)
+        ResourceLocks      = $allLocks
     }
 }
 
@@ -1764,6 +1865,17 @@ if ($script:DnsDuplicateRiskCount -gt 0) {
 } else {
     Write-Ok   "  Private DNS duplicate-zone risk: 0"
 }
+if ($script:LockTotalCount -gt 0) {
+    if ($script:LockBlockingCount -gt 0) {
+        Write-Err  "  Resource locks: $($script:LockTotalCount) total  ($($script:LockBlockingCount) BLOCKING — must remove before deploying)"
+    } elseif ($script:LockCautionCount -gt 0) {
+        Write-Warn "  Resource locks: $($script:LockTotalCount) total  ($($script:LockCautionCount) CAUTION — review before stack operations)"
+    } else {
+        Write-Ok   "  Resource locks: $($script:LockTotalCount) total  (0 blocking)"
+    }
+} else {
+    Write-Ok   "  Resource locks: 0"
+}
 
 Write-Host ''
 Write-Host '  Subscription-level governance:'
@@ -1816,24 +1928,35 @@ else {
 }
 
 # Traffic light — AMBA does NOT count as non-standard for risk assessment.
-# Only ASSIGNED Deny mismatches trigger RED; unassigned-only Deny mismatches are YELLOW.
+# ASSIGNED Deny mismatches OR BLOCKING locks trigger RED; unassigned-only Deny mismatches are YELLOW.
 Write-Host ''
-$hasDenyAssigned = $script:MismatchCountByEffect['DenyAssigned'] -gt 0
-$hasReviewItems  = $totalNonStdDefs -gt 0 -or $totalNonStdSets -gt 0 -or $totalStdMismatchDefs -gt 0
-$hasMinorDrift   = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0 -or $script:TotalSubLevelNonStdAssignments -gt 0 -or $script:TotalDenyExemptions -gt 0 -or $script:NetworkingRiskCount -gt 0 -or $script:DnsDuplicateRiskCount -gt 0
+$hasDenyAssigned   = $script:MismatchCountByEffect['DenyAssigned'] -gt 0
+$hasBlockingLocks  = $script:LockBlockingCount -gt 0
+$hasReviewItems    = $totalNonStdDefs -gt 0 -or $totalNonStdSets -gt 0 -or $totalStdMismatchDefs -gt 0
+$hasMinorDrift     = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0 -or $script:TotalSubLevelNonStdAssignments -gt 0 -or $script:TotalDenyExemptions -gt 0 -or $script:NetworkingRiskCount -gt 0 -or $script:DnsDuplicateRiskCount -gt 0 -or $script:LockCautionCount -gt 0
 
-if (-not $hasReviewItems -and -not $hasMinorDrift) {
+if (-not $hasReviewItems -and -not $hasMinorDrift -and -not $hasBlockingLocks) {
     Write-Colored 'GREEN' 'Green' "Brownfield is a clean portal accelerator deployment. Low risk for engine adoption."
     if ($totalAmbaDefs -gt 0 -or $totalAmbaSets -gt 0) {
         Write-Amba "  Note: AMBA monitoring stack detected ($totalAmbaDefs defs, $totalAmbaSets sets) — informational only."
     }
 }
-elseif ($hasDenyAssigned) {
-    Write-Colored 'RED' 'Red' "Brownfield has assigned Deny-effect policy rule changes — resource compliance must be verified before deploying."
-    Write-Host '  Recommendation: Run with -Detailed to see which policies change and which resource types they target.'
-    Write-Host '    a) Verify existing resources of those types comply with the updated rules'
-    Write-Host '    b) Test in DoNotEnforce mode first if compliance status is uncertain'
-    Write-Host '    c) Consider deploying governance-only first, then re-enable enforcement after remediation'
+elseif ($hasDenyAssigned -or $hasBlockingLocks) {
+    Write-Colored 'RED' 'Red' "Brownfield has blockers that must be resolved before deploying the engine."
+    if ($hasDenyAssigned) {
+        Write-Host '  Policy: Assigned Deny-effect rule changes detected.'
+        Write-Host '    a) Verify existing resources comply with the updated rules'
+        Write-Host '    b) Test in DoNotEnforce mode first if compliance status is uncertain'
+        Write-Host '    c) Deploy governance-only first, then re-enable enforcement after remediation'
+    }
+    if ($hasBlockingLocks) {
+        Write-Host "  Locks: $($script:LockBlockingCount) BLOCKING ReadOnly lock(s) — engine deployments will fail until removed."
+        Write-Host '    a) Remove all BLOCKING locks listed in Section 5 before running the engine'
+        Write-Host '    b) Re-apply desired locks post-migration via parGlobalResourceLock in engine config'
+    }
+    if ($hasDenyAssigned) {
+        Write-Host '  Run with -Detailed to see which policies change and which resource types they target.'
+    }
 }
 elseif ($hasReviewItems) {
     Write-Colored 'YELLOW' 'Yellow' "Brownfield has customizations or version drift that need operator decisions."
@@ -1895,6 +2018,10 @@ if ($OutputFile -ne '') {
             }
             HasDenyAssignedMismatches       = ($script:MismatchCountByEffect['DenyAssigned'] -gt 0)
             HasDenyMismatches               = ($script:MismatchCountByEffect['Deny'] -gt 0)
+            TotalResourceLocks              = $script:LockTotalCount
+            BlockingResourceLocks           = $script:LockBlockingCount
+            CautionResourceLocks            = $script:LockCautionCount
+            HasBlockingLocks                = ($script:LockBlockingCount -gt 0)
         }
     }
     $fullReport | ConvertTo-Json -Depth 10 | Set-Content $OutputFile

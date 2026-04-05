@@ -622,6 +622,48 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
         Write-Info "    ResourceGroups: $($resources.ResourceGroups.Count)"
     }
 
+    # --- Resource locks ---
+    $locks = @()
+
+    # Subscription-level locks (no ResourceGroupName = scoped at subscription level)
+    $subLocks = @(Get-AzResourceLock -ErrorAction SilentlyContinue |
+        Where-Object { -not $_.ResourceGroupName })
+    foreach ($lock in $subLocks) {
+        $locks += @{
+            Name       = $lock.Name
+            Level      = $lock.Properties.level
+            Scope      = 'subscription'
+            Notes      = $lock.Properties.notes
+            ResourceId = $lock.LockId
+        }
+    }
+
+    # Per-resource-group locks (covers RG-level and resource-level locks)
+    foreach ($rg in $rgs) {
+        $rgLocks = @(Get-AzResourceLock -ResourceGroupName $rg.ResourceGroupName -ErrorAction SilentlyContinue)
+        foreach ($lock in $rgLocks) {
+            $targetScope = if ($lock.ResourceName -and $lock.ResourceType -ne 'Microsoft.Authorization/locks') {
+                'resource'
+            } elseif ($lock.ResourceGroupName) {
+                'resourceGroup'
+            } else { 'subscription' }
+
+            $locks += @{
+                Name          = $lock.Name
+                Level         = $lock.Properties.level
+                Scope         = $targetScope
+                ResourceGroup = $lock.ResourceGroupName
+                ResourceName  = $lock.ResourceName
+                ResourceType  = $lock.ResourceType
+                Notes         = $lock.Properties.notes
+                ResourceId    = $lock.LockId
+            }
+        }
+    }
+
+    $resources['ResourceLocks'] = $locks
+    Write-Info "    Resource locks: $($locks.Count)"
+
     # --- Log Analytics workspaces ---
     $laws = @(Get-AzResource -ResourceType 'Microsoft.OperationalInsights/workspaces' -ErrorAction SilentlyContinue)
     if ($laws) {
