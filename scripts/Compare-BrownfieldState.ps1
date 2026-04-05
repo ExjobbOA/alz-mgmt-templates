@@ -1693,7 +1693,7 @@ if ($privateDnsZones.Count -eq 0) {
     # Zone inventory by resource group
     $zonesByRg = [ordered]@{}
     foreach ($z in ($privateDnsZones | Sort-Object ResourceGroup, Name)) {
-        if (-not $zonesByRg.ContainsKey($z.ResourceGroup)) {
+        if (-not $zonesByRg.Contains($z.ResourceGroup)) {
             $zonesByRg[$z.ResourceGroup] = [System.Collections.Generic.List[object]]::new()
         }
         $zonesByRg[$z.ResourceGroup].Add($z)
