@@ -779,15 +779,156 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
     $dnsZones = @(Get-AzPrivateDnsZone -ErrorAction SilentlyContinue)
     if ($dnsZones) {
         foreach ($zone in $dnsZones) {
+            $links = @(Get-AzPrivateDnsVirtualNetworkLink `
+                -ResourceGroupName $zone.ResourceGroupName `
+                -ZoneName $zone.Name `
+                -ErrorAction SilentlyContinue)
+
+            $vnetLinks = @($links | ForEach-Object {
+                @{
+                    Name                = $_.Name
+                    VirtualNetworkId    = $_.VirtualNetworkId
+                    RegistrationEnabled = $_.RegistrationEnabled
+                    ProvisioningState   = $_.ProvisioningState
+                }
+            })
+
             $resources.KeyResources += @{
-                ResourceId    = $zone.ResourceId
-                Type          = 'privateDnsZone'
-                Name          = $zone.Name
-                ResourceGroup = $zone.ResourceGroupName
-                Tags          = $zone.Tags
+                ResourceId     = $zone.ResourceId
+                Type           = 'privateDnsZone'
+                Name           = $zone.Name
+                ResourceGroup  = $zone.ResourceGroupName
+                Tags           = $zone.Tags
+                VNetLinks      = $vnetLinks
+                RecordSetCount = $zone.NumberOfRecordSets
             }
         }
         Write-Info "    Private DNS zones: $($dnsZones.Count)"
+    }
+
+    # --- DDoS Protection Plans ---
+    $ddosPlans = @(Get-AzDdosProtectionPlan -ErrorAction SilentlyContinue)
+    if ($ddosPlans) {
+        foreach ($ddos in $ddosPlans) {
+            $resources.KeyResources += @{
+                ResourceId    = $ddos.Id
+                Type          = 'ddosProtectionPlan'
+                Name          = $ddos.Name
+                Location      = $ddos.Location
+                ResourceGroup = $ddos.ResourceGroupName
+                Tags          = $ddos.Tag
+            }
+        }
+        Write-Info "    DDoS Protection Plans: $($ddosPlans.Count)"
+    }
+
+    # --- Bastion Hosts ---
+    $bastionRes = @(Get-AzResource -ResourceType 'Microsoft.Network/bastionHosts' -ErrorAction SilentlyContinue)
+    if ($bastionRes) {
+        foreach ($b in $bastionRes) {
+            $bDetail = Get-AzBastion -ResourceGroupName $b.ResourceGroupName -Name $b.Name -ErrorAction SilentlyContinue
+            $resources.KeyResources += @{
+                ResourceId    = $b.ResourceId
+                Type          = 'bastionHost'
+                Name          = $b.Name
+                Location      = $b.Location
+                ResourceGroup = $b.ResourceGroupName
+                Sku           = if ($bDetail -and $bDetail.Sku) { $bDetail.Sku.Name } else { $null }
+                ScaleUnits    = if ($bDetail) { $bDetail.ScaleUnit } else { $null }
+                Tags          = $b.Tags
+            }
+        }
+        Write-Info "    Bastion Hosts: $($bastionRes.Count)"
+    }
+
+    # --- VPN and ExpressRoute Gateways ---
+    $gwRes = @(Get-AzResource -ResourceType 'Microsoft.Network/virtualNetworkGateways' -ErrorAction SilentlyContinue)
+    $vpnGwCount = 0; $erGwCount = 0
+    foreach ($gw in $gwRes) {
+        $gwDetail = Get-AzVirtualNetworkGateway -ResourceGroupName $gw.ResourceGroupName -Name $gw.Name -ErrorAction SilentlyContinue
+        if (-not $gwDetail) { continue }
+        $gwType = [string]$gwDetail.GatewayType
+        $resources.KeyResources += @{
+            ResourceId    = $gw.ResourceId
+            Type          = if ($gwType -eq 'ExpressRoute') { 'expressRouteGateway' } else { 'vpnGateway' }
+            Name          = $gw.Name
+            Location      = $gw.Location
+            ResourceGroup = $gw.ResourceGroupName
+            GatewayType   = $gwType
+            VpnType       = [string]$gwDetail.VpnType
+            Sku           = if ($gwDetail.Sku) { $gwDetail.Sku.Name } else { $null }
+            Tags          = $gw.Tags
+        }
+        if ($gwType -eq 'ExpressRoute') { $erGwCount++ } else { $vpnGwCount++ }
+    }
+    if ($vpnGwCount -gt 0) { Write-Info "    VPN Gateways: $vpnGwCount" }
+    if ($erGwCount -gt 0)  { Write-Info "    ExpressRoute Gateways: $erGwCount" }
+
+    # --- Firewall Policies ---
+    $fwPolicyRes = @(Get-AzResource -ResourceType 'Microsoft.Network/firewallPolicies' -ErrorAction SilentlyContinue)
+    if ($fwPolicyRes) {
+        foreach ($fp in $fwPolicyRes) {
+            $fpDetail = Get-AzFirewallPolicy -ResourceGroupName $fp.ResourceGroupName -Name $fp.Name -ErrorAction SilentlyContinue
+            $resources.KeyResources += @{
+                ResourceId      = $fp.ResourceId
+                Type            = 'firewallPolicy'
+                Name            = $fp.Name
+                Location        = $fp.Location
+                ResourceGroup   = $fp.ResourceGroupName
+                SkuTier         = if ($fpDetail -and $fpDetail.Sku) { $fpDetail.Sku.Tier } else { $null }
+                ThreatIntelMode = if ($fpDetail) { $fpDetail.ThreatIntelMode } else { $null }
+                Tags            = $fp.Tags
+            }
+        }
+        Write-Info "    Firewall Policies: $($fwPolicyRes.Count)"
+    }
+
+    # --- DNS Private Resolvers ---
+    $resolverRes = @(Get-AzResource -ResourceType 'Microsoft.Network/dnsResolvers' -ErrorAction SilentlyContinue)
+    if ($resolverRes) {
+        foreach ($r in $resolverRes) {
+            $resources.KeyResources += @{
+                ResourceId    = $r.ResourceId
+                Type          = 'dnsPrivateResolver'
+                Name          = $r.Name
+                Location      = $r.Location
+                ResourceGroup = $r.ResourceGroupName
+                Tags          = $r.Tags
+            }
+        }
+        Write-Info "    DNS Private Resolvers: $($resolverRes.Count)"
+    }
+
+    # --- Data Collection Rules ---
+    $dcrRes = @(Get-AzResource -ResourceType 'Microsoft.Insights/dataCollectionRules' -ErrorAction SilentlyContinue)
+    if ($dcrRes) {
+        foreach ($dcr in $dcrRes) {
+            $resources.KeyResources += @{
+                ResourceId    = $dcr.ResourceId
+                Type          = 'dataCollectionRule'
+                Name          = $dcr.Name
+                Location      = $dcr.Location
+                ResourceGroup = $dcr.ResourceGroupName
+                Tags          = $dcr.Tags
+            }
+        }
+        Write-Info "    Data Collection Rules: $($dcrRes.Count)"
+    }
+
+    # --- User Assigned Managed Identities ---
+    $uamiRes = @(Get-AzResource -ResourceType 'Microsoft.ManagedIdentity/userAssignedIdentities' -ErrorAction SilentlyContinue)
+    if ($uamiRes) {
+        foreach ($u in $uamiRes) {
+            $resources.KeyResources += @{
+                ResourceId    = $u.ResourceId
+                Type          = 'userAssignedIdentity'
+                Name          = $u.Name
+                Location      = $u.Location
+                ResourceGroup = $u.ResourceGroupName
+                Tags          = $u.Tags
+            }
+        }
+        Write-Info "    User Assigned Managed Identities: $($uamiRes.Count)"
     }
 
     $total = $resources.ResourceGroups.Count + $resources.KeyResources.Count
