@@ -431,6 +431,9 @@ $script:LockBlockingCount = 0
 $script:LockCautionCount  = 0
 $script:LockTotalCount    = 0
 
+# Cost risk worst-case duplicate monthly total — populated by Section 5b
+$script:CostRiskWorstCase = 0
+
 # Build policy set name → ALZ custom member policy definition names from library.
 # Used below to expand initiative assignments to their individual member definitions.
 # Seed from the export's PolicySetDefinitions.PolicyDefinitions field (populated by the
@@ -1426,6 +1429,104 @@ if ($subScope.Count -eq 0) {
 }
 
 #==============================================================================
+# Section 5b: Cost Risk Assessment
+#==============================================================================
+Write-Step 'Section 5b: Cost Risk Assessment'
+
+$costResourceDefs = @(
+    [PSCustomObject]@{ Type = 'ddosProtectionPlan';    DisplayName = 'DDoS Protection Plan';    MonthlyCost = 2944; EngineCreates = 'per-hub (unless ddosProtectionPlanResourceId override provided)' }
+    [PSCustomObject]@{ Type = 'azureFirewall';         DisplayName = 'Azure Firewall';           MonthlyCost = 912;  EngineCreates = 'per-hub (unless deployAzureFirewall=false)' }
+    [PSCustomObject]@{ Type = 'vpnGateway';            DisplayName = 'VPN Gateway';              MonthlyCost = 365;  EngineCreates = 'per-hub (if deployVpnGateway=true)' }
+    [PSCustomObject]@{ Type = 'expressRouteGateway';   DisplayName = 'ExpressRoute Gateway';     MonthlyCost = 292;  EngineCreates = 'per-hub (if deployExpressRouteGateway=true)' }
+    [PSCustomObject]@{ Type = 'bastionHost';           DisplayName = 'Bastion Host';             MonthlyCost = 270;  EngineCreates = 'per-hub (if deployBastion=true)' }
+)
+
+# Aggregate key resources across all infrastructure subscriptions
+$allKeyResources = @($infraReport | ForEach-Object { $_.KeyResources })
+
+$costOverrides = [System.Collections.Generic.List[string]]::new()
+$worstCaseTotal = 0
+
+foreach ($def in $costResourceDefs) {
+    $found = @($allKeyResources | Where-Object { $_.Type -eq $def.Type })
+
+    if ($found.Count -gt 0) {
+        $names = ($found | ForEach-Object { $_.Name }) -join ', '
+        Write-Warn "  [COST]  $($def.DisplayName): $($found.Count) found ($names)"
+        Write-Detail "          Engine default: $($def.EngineCreates)"
+        Write-Detail "          Estimated monthly cost if duplicated: ~`$$($def.MonthlyCost)/month"
+
+        $worstCaseTotal += $def.MonthlyCost * $found.Count
+
+        # Per-type action guidance and override extraction
+        switch ($def.Type) {
+            'ddosProtectionPlan' {
+                foreach ($r in $found) {
+                    Write-Detail "          Action: pass existing plan ID as ddosProtectionPlanResourceId to avoid duplicate"
+                    $costOverrides.Add("  ddosProtectionPlanResourceId: `"$($r.ResourceId)`"")
+                }
+            }
+            'azureFirewall' {
+                foreach ($r in $found) {
+                    $skuStr = if ($r.PSObject.Properties['Sku'] -and $r.Sku) {
+                        $skuObj = $r.Sku
+                        if ($skuObj -is [hashtable]) { " (SKU: $($skuObj.Tier))" }
+                        elseif ($skuObj.PSObject.Properties['Tier']) { " (SKU: $($skuObj.Tier))" }
+                        else { '' }
+                    } else { '' }
+                    Write-Detail "          $($r.Name)$skuStr — engine will replace (same name) or duplicate (different name)"
+                }
+            }
+            'vpnGateway' {
+                foreach ($r in $found) {
+                    Write-Detail "          Action: set deployVpnGateway=false in hubnetworking params or reuse existing"
+                }
+            }
+            'expressRouteGateway' {
+                foreach ($r in $found) {
+                    Write-Detail "          Action: set deployExpressRouteGateway=false in hubnetworking params or reuse existing"
+                }
+            }
+            'bastionHost' {
+                foreach ($r in $found) {
+                    Write-Detail "          Action: set deployBastion=false in hubnetworking params if not needed"
+                }
+            }
+        }
+    }
+    else {
+        Write-Ok   "  [OK]    $($def.DisplayName): 0 found — engine will create if configured"
+    }
+}
+
+# Log Analytics Workspace — variable cost, handled separately
+$lawResources = @($allKeyResources | Where-Object { $_.Type -eq 'logAnalyticsWorkspace' })
+if ($lawResources.Count -gt 0) {
+    $lawNames = ($lawResources | ForEach-Object { $_.Name }) -join ', '
+    Write-Info "  [INFO]  Log Analytics Workspace: $($lawResources.Count) found ($lawNames)"
+    Write-Detail "          Cost: variable (per-GB ingestion). If both old and new LAW ingest simultaneously, data costs double."
+    Write-Detail "          Action: point all sources at the engine-deployed LAW as soon as it is created."
+}
+
+$script:CostRiskWorstCase = $worstCaseTotal
+
+Write-Host ''
+if ($worstCaseTotal -gt 0) {
+    Write-Warn "  [WARN]  Worst-case monthly duplicate cost: `$$worstCaseTotal/month"
+    Write-Detail "          (Assumes engine creates new instances of every type listed above as COST)"
+} else {
+    Write-Ok   "  [OK]    No cost-incurring duplicate resources detected."
+}
+
+if ($costOverrides.Count -gt 0) {
+    Write-Host ''
+    Write-Host '  Suggested overrides to avoid duplicate costs (add to hubnetworking params or platform.json):'
+    foreach ($line in $costOverrides) {
+        Write-Detail $line
+    }
+}
+
+#==============================================================================
 # Section 6: Config Extraction
 #==============================================================================
 Write-Step 'Section 6: Config Extraction (draft platform.json values)'
@@ -1860,6 +1961,11 @@ if ($script:NetworkingRiskCount -gt 0) {
 } else {
     Write-Ok   "  Networking cost-duplicate risk: 0"
 }
+if ($script:CostRiskWorstCase -gt 0) {
+    Write-Warn "  Worst-case duplicate monthly cost: `$$($script:CostRiskWorstCase)/month — see Section 5b for details and suggested overrides"
+} else {
+    Write-Ok   "  Worst-case duplicate monthly cost: `$0"
+}
 if ($script:DnsDuplicateRiskCount -gt 0) {
     Write-Err  "  Private DNS duplicate-zone risk: $($script:DnsDuplicateRiskCount) zone(s) — wrong RG, engine will create conflicting duplicates"
 } else {
@@ -1933,7 +2039,7 @@ Write-Host ''
 $hasDenyAssigned   = $script:MismatchCountByEffect['DenyAssigned'] -gt 0
 $hasBlockingLocks  = $script:LockBlockingCount -gt 0
 $hasReviewItems    = $totalNonStdDefs -gt 0 -or $totalNonStdSets -gt 0 -or $totalStdMismatchDefs -gt 0
-$hasMinorDrift     = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0 -or $script:TotalSubLevelNonStdAssignments -gt 0 -or $script:TotalDenyExemptions -gt 0 -or $script:NetworkingRiskCount -gt 0 -or $script:DnsDuplicateRiskCount -gt 0 -or $script:LockCautionCount -gt 0
+$hasMinorDrift     = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0 -or $script:TotalSubLevelNonStdAssignments -gt 0 -or $script:TotalDenyExemptions -gt 0 -or $script:NetworkingRiskCount -gt 0 -or $script:DnsDuplicateRiskCount -gt 0 -or $script:LockCautionCount -gt 0 -or $script:CostRiskWorstCase -gt 0
 
 if (-not $hasReviewItems -and -not $hasMinorDrift -and -not $hasBlockingLocks) {
     Write-Colored 'GREEN' 'Green' "Brownfield is a clean portal accelerator deployment. Low risk for engine adoption."
