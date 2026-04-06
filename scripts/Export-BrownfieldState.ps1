@@ -1427,6 +1427,54 @@ if ($Script:SubscriptionPlacement.Count -gt 0) {
 }
 
 # ============================================================
+# Bootstrap / high-privilege identity scan
+# ============================================================
+function Get-HighPrivilegeIdentities ([string]$MgId) {
+    $response = Invoke-AzRestMethod `
+        -Path "/providers/Microsoft.Management/managementGroups/$MgId/providers/Microsoft.Authorization/roleAssignments?api-version=2022-04-01&`$filter=atScope()" `
+        -Method GET -ErrorAction SilentlyContinue
+
+    $highPriv = @()
+    if (-not ($response -and $response.StatusCode -eq 200)) { return $highPriv }
+
+    $body = $response.Content | ConvertFrom-Json -ErrorAction SilentlyContinue
+    if (-not $body -or -not $body.PSObject.Properties['value']) { return $highPriv }
+
+    $ownerRoleId       = '8e3af657-a8ff-443c-a75c-2fe8c4bcb635'
+    $contributorRoleId = 'b24988ac-6180-42a0-ab88-20f7382dd24c'
+
+    foreach ($ra in @($body.value)) {
+        $roleDefId = ($ra.properties.roleDefinitionId -split '/')[-1]
+        if ($roleDefId -eq $ownerRoleId -or $roleDefId -eq $contributorRoleId) {
+            $highPriv += @{
+                PrincipalId   = $ra.properties.principalId
+                PrincipalType = $ra.properties.principalType
+                RoleDefId     = $roleDefId
+                RoleName      = if ($roleDefId -eq $ownerRoleId) { 'Owner' } else { 'Contributor' }
+                Scope         = $ra.properties.scope
+            }
+        }
+    }
+    return $highPriv
+}
+
+Write-Step 'Scanning high-privilege identities at int-root MG scope'
+$highPrivilegeIdentities = @()
+if ($Script:RootManagementGroupId -ne '') {
+    $highPrivilegeIdentities = @(Get-HighPrivilegeIdentities -MgId $Script:RootManagementGroupId)
+    if ($highPrivilegeIdentities.Count -gt 0) {
+        Write-Info "Found $($highPrivilegeIdentities.Count) Owner/Contributor assignment(s) at $Script:RootManagementGroupId"
+        foreach ($hp in $highPrivilegeIdentities) {
+            Write-Info "  $($hp['RoleName']) — $($hp['PrincipalType']): $($hp['PrincipalId'])"
+        }
+    } else {
+        Write-Ok 'No Owner/Contributor assignments found at int-root MG scope'
+    }
+} else {
+    Write-Warn 'RootManagementGroupId not set — skipping high-privilege identity scan'
+}
+
+# ============================================================
 # Assemble and write output
 # ============================================================
 Write-Step 'Writing output'
@@ -1441,6 +1489,7 @@ $export = @{
     SubscriptionGovernance   = $subscriptionGovernanceScopes
     DefenderState            = $defenderStateList
     BlueprintAssignments     = $blueprintAssignments
+    HighPrivilegeIdentities  = $highPrivilegeIdentities
     Scopes                   = @($governanceScopes) + @($infrastructureScopes)
     Warnings                 = $Script:Warnings
 }
