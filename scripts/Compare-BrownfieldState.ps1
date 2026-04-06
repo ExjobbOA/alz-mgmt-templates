@@ -1452,6 +1452,119 @@ if ($blueprintAssignments.Count -eq 0) {
 }
 
 #==============================================================================
+# Section 4c: CI/CD Identity Assessment
+#==============================================================================
+Write-Step 'Section 4c: CI/CD Identity Assessment'
+
+$highPrivList = @()
+if ($export.PSObject.Properties['HighPrivilegeIdentities'] -and $null -ne $export.HighPrivilegeIdentities) {
+    $highPrivList = @($export.HighPrivilegeIdentities)
+}
+
+if ($highPrivList.Count -eq 0) {
+    Write-Info '  No high-privilege identity data captured'
+    Write-Detail '    Re-run Export-BrownfieldState.ps1 to include CI/CD identity data'
+} else {
+    $spnEntries  = @($highPrivList | Where-Object {
+        $pt = if ($_.PSObject.Properties['PrincipalType']) { $_.PrincipalType } else { $_['PrincipalType'] }
+        $pt -eq 'ServicePrincipal'
+    })
+    $userEntries = @($highPrivList | Where-Object {
+        $pt = if ($_.PSObject.Properties['PrincipalType']) { $_.PrincipalType } else { $_['PrincipalType'] }
+        $pt -eq 'User'
+    })
+    $groupEntries = @($highPrivList | Where-Object {
+        $pt = if ($_.PSObject.Properties['PrincipalType']) { $_.PrincipalType } else { $_['PrincipalType'] }
+        $pt -eq 'Group'
+    })
+
+    Write-Info "  High-privilege (Owner/Contributor) assignments at int-root MG: $($highPrivList.Count)"
+    Write-Host ''
+
+    foreach ($hp in $highPrivList) {
+        $rn = if ($hp.PSObject.Properties['RoleName'])      { $hp.RoleName }      else { $hp['RoleName'] }
+        $pt = if ($hp.PSObject.Properties['PrincipalType']) { $hp.PrincipalType } else { $hp['PrincipalType'] }
+        $pi = if ($hp.PSObject.Properties['PrincipalId'])   { $hp.PrincipalId }   else { $hp['PrincipalId'] }
+        $sc = if ($hp.PSObject.Properties['Scope'])         { $hp.Scope }         else { $hp['Scope'] }
+        switch ($pt) {
+            'ServicePrincipal' {
+                Write-Warn "  $rn — ServicePrincipal: $pi"
+                Write-Detail '    Likely CI/CD identity. Verify if this is the current deployment principal.'
+                Write-Detail '    Action: plan decommissioning after engine OIDC bootstrap is validated.'
+            }
+            'User' {
+                Write-Info "  $rn — User: $pi"
+                Write-Detail '    Human admin — not affected by bootstrap. Review for least-privilege.'
+            }
+            'Group' {
+                Write-Info "  $rn — Group: $pi"
+                Write-Detail '    Entra ID group — not affected by bootstrap. Review for least-privilege.'
+            }
+            default {
+                Write-Info "  $rn — ${pt}: $pi"
+            }
+        }
+        if ($sc) { Write-Detail "    Scope: $sc" }
+    }
+
+    # Guidance summary
+    Write-Host ''
+    if ($spnEntries.Count -gt 0) {
+        Write-Warn "  $($spnEntries.Count) service principal(s) with Owner/Contributor at int-root — review before decommissioning"
+    }
+    if ($userEntries.Count -gt 0 -or $groupEntries.Count -gt 0) {
+        Write-Info "  $($userEntries.Count + $groupEntries.Count) user/group assignment(s) — consider least-privilege review"
+    }
+}
+
+# Check for existing bootstrap artifacts in the infrastructure report
+# (infraReport is built in Section 5, so we scan the raw export here)
+$bootstrapUamiPattern = 'id-alz-mgmt-.*-(plan|apply)-\d+'
+$whatIfRoleName       = 'Landing Zone Reader'
+$whatIfAction         = 'deployments/whatIf/action'
+
+$existingBootstrapUamis = @()
+$existingWhatIfRole     = $false
+
+foreach ($ss in @($subScope)) {
+    foreach ($kr in @($ss.Resources.KeyResources)) {
+        if ($kr.Type -eq 'userAssignedIdentity') {
+            $n = if ($kr.PSObject.Properties['Name']) { $kr.Name } else { '' }
+            if ($n -imatch $bootstrapUamiPattern) {
+                $existingBootstrapUamis += $n
+            }
+        }
+    }
+}
+
+foreach ($scope in $mgScopes) {
+    foreach ($rd in @($scope.Resources.RoleDefinitions)) {
+        $rdName  = if ($rd.PSObject.Properties['RoleName'])    { $rd.RoleName }    else { '' }
+        $rdPerms = if ($rd.PSObject.Properties['Permissions']) { $rd.Permissions } else { @() }
+        if ($rdName -imatch [regex]::Escape($whatIfRoleName)) {
+            $existingWhatIfRole = $true
+        } elseif (@($rdPerms) | Where-Object { $_ -imatch [regex]::Escape($whatIfAction) }) {
+            $existingWhatIfRole = $true
+        }
+    }
+}
+
+Write-Host ''
+if ($existingBootstrapUamis.Count -gt 0 -or $existingWhatIfRole) {
+    Write-Warn '  Existing bootstrap artifacts detected (bootstrap may have been partially run):'
+    foreach ($u in $existingBootstrapUamis) {
+        Write-Detail "    UAMI: $u"
+    }
+    if ($existingWhatIfRole) {
+        Write-Detail "    Custom role: '$whatIfRoleName' (or action $whatIfAction) found"
+    }
+    Write-Detail '  Action: verify bootstrap state before re-running onboard.ps1 (run cleanup.ps1 first if needed)'
+} else {
+    Write-Ok '  No existing bootstrap artifacts detected'
+    Write-Detail '    Bootstrap will create new UAMIs + OIDC federation for GitHub Actions'
+}
+
+#==============================================================================
 # Section 5: Infrastructure Assessment
 #==============================================================================
 Write-Step 'Section 5: Infrastructure Assessment'
