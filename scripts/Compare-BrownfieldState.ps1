@@ -439,6 +439,13 @@ $script:RoleDefNameCollisionCount = 0
 $script:RoleDefDriftCount         = 0
 $script:RoleDefCheckResults       = [System.Collections.Generic.List[object]]::new()
 
+# Policy-driven identity audit counters — populated by Section 4 policy-driven identity audit
+$script:OrphanRiskCount  = 0
+$script:MissingRbacCount = 0
+
+# Blueprint assessment counter — populated by Section 4b
+$script:BlueprintCount = 0
+
 # Build policy set name → ALZ custom member policy definition names from library.
 # Used below to expand initiative assignments to their individual member definitions.
 # Seed from the export's PolicySetDefinitions.PolicyDefinitions field (populated by the
@@ -1210,6 +1217,237 @@ foreach ($erd in $engineRoleLibDefs) {
     })
 }
 
+#---------- Policy-Driven Identity Audit ----------
+# Identifies policy assignments that hold managed identities with cross-MG role assignments.
+# When the engine deploys, it creates NEW managed identities for its policy assignments. The old
+# identities' role assignments become orphaned (ORPHAN_RISK). Also flags cases where the
+# brownfield already lacks the expected cross-MG grants (MISSING_RBAC).
+
+# Engine cross-MG RBAC expectations, derived from the three -rbac.bicep modules.
+# Each entry: { AssignmentName; SourceScope; TargetScope; RoleDefGuids[] }
+$engineCrossMgRbacExpectations = @(
+    # platform/main-rbac.bicep (full mode): Enable-DDoS-VNET from connectivity → Network Contributor on platform
+    @{ AssignmentName = 'Enable-DDoS-VNET';         SourceScope = 'governance-platform-connectivity'; TargetScope = 'governance-platform';    RoleDefGuids = @('4d97b98b-1d4f-4787-a291-c67834d212e7') }
+    # platform-connectivity/main-rbac.bicep (full mode): Deploy-Private-DNS-Zones from corp → Network Contributor on connectivity
+    @{ AssignmentName = 'Deploy-Private-DNS-Zones';  SourceScope = 'governance-landingzones-corp';     TargetScope = 'governance-platform-connectivity'; RoleDefGuids = @('4d97b98b-1d4f-4787-a291-c67834d212e7') }
+    # landingzones/main-rbac.bicep: eight policy assignments from platform/connectivity → landingzones
+    @{ AssignmentName = 'Deploy-VM-ChangeTrack';     SourceScope = 'governance-platform';              TargetScope = 'governance-landingzones'; RoleDefGuids = @('9980e02c-c2be-4d73-94e8-173b1dc7cf3c','92aaf0da-9dab-42b6-94a3-d43ce8d16293','749f88d5-cbae-40b8-bcfc-e573ddc772fa','f1a07417-d97a-45cb-824c-7a7467783830','acdd72a7-3385-48ef-bd42-f606fba81ae7') }
+    @{ AssignmentName = 'Deploy-VM-Monitoring';      SourceScope = 'governance-platform';              TargetScope = 'governance-landingzones'; RoleDefGuids = @('9980e02c-c2be-4d73-94e8-173b1dc7cf3c','92aaf0da-9dab-42b6-94a3-d43ce8d16293','749f88d5-cbae-40b8-bcfc-e573ddc772fa','f1a07417-d97a-45cb-824c-7a7467783830','acdd72a7-3385-48ef-bd42-f606fba81ae7') }
+    @{ AssignmentName = 'Deploy-vmArc-ChangeTrack';  SourceScope = 'governance-platform';              TargetScope = 'governance-landingzones'; RoleDefGuids = @('92aaf0da-9dab-42b6-94a3-d43ce8d16293','749f88d5-cbae-40b8-bcfc-e573ddc772fa','acdd72a7-3385-48ef-bd42-f606fba81ae7') }
+    @{ AssignmentName = 'Deploy-VMSS-ChangeTrack';   SourceScope = 'governance-platform';              TargetScope = 'governance-landingzones'; RoleDefGuids = @('9980e02c-c2be-4d73-94e8-173b1dc7cf3c','92aaf0da-9dab-42b6-94a3-d43ce8d16293','749f88d5-cbae-40b8-bcfc-e573ddc772fa','f1a07417-d97a-45cb-824c-7a7467783830','acdd72a7-3385-48ef-bd42-f606fba81ae7') }
+    @{ AssignmentName = 'Deploy-vmHybr-Monitoring';  SourceScope = 'governance-platform';              TargetScope = 'governance-landingzones'; RoleDefGuids = @('92aaf0da-9dab-42b6-94a3-d43ce8d16293','749f88d5-cbae-40b8-bcfc-e573ddc772fa','acdd72a7-3385-48ef-bd42-f606fba81ae7','cd570a14-e51a-42ad-bac8-bafd67325302') }
+    @{ AssignmentName = 'Deploy-VMSS-Monitoring';    SourceScope = 'governance-platform';              TargetScope = 'governance-landingzones'; RoleDefGuids = @('9980e02c-c2be-4d73-94e8-173b1dc7cf3c','92aaf0da-9dab-42b6-94a3-d43ce8d16293','749f88d5-cbae-40b8-bcfc-e573ddc772fa','f1a07417-d97a-45cb-824c-7a7467783830','acdd72a7-3385-48ef-bd42-f606fba81ae7') }
+    @{ AssignmentName = 'Deploy-MDFC-DefSQL-AMA';    SourceScope = 'governance-platform';              TargetScope = 'governance-landingzones'; RoleDefGuids = @('9980e02c-c2be-4d73-94e8-173b1dc7cf3c','92aaf0da-9dab-42b6-94a3-d43ce8d16293','749f88d5-cbae-40b8-bcfc-e573ddc772fa','f1a07417-d97a-45cb-824c-7a7467783830','acdd72a7-3385-48ef-bd42-f606fba81ae7') }
+    @{ AssignmentName = 'Enable-DDoS-VNET';          SourceScope = 'governance-platform-connectivity'; TargetScope = 'governance-landingzones'; RoleDefGuids = @('4d97b98b-1d4f-4787-a291-c67834d212e7') }
+)
+
+$roleGuidToName = @{
+    '9980e02c-c2be-4d73-94e8-173b1dc7cf3c' = 'Virtual Machine Contributor'
+    '92aaf0da-9dab-42b6-94a3-d43ce8d16293' = 'Log Analytics Contributor'
+    '749f88d5-cbae-40b8-bcfc-e573ddc772fa' = 'Monitoring Contributor'
+    'f1a07417-d97a-45cb-824c-7a7467783830' = 'Managed Identity Operator'
+    'acdd72a7-3385-48ef-bd42-f606fba81ae7' = 'Reader'
+    'cd570a14-e51a-42ad-bac8-bafd67325302' = 'Azure Connected Machine Resource Administrator'
+    '4d97b98b-1d4f-4787-a291-c67834d212e7' = 'Network Contributor'
+}
+
+# Build index: principal ID → list of role assignments (with scope name) across all MG scopes
+$raByPrincipalId = @{}
+foreach ($s in $mgScopes) {
+    foreach ($ra in @($s.Resources.RoleAssignments)) {
+        $raPrincipalId = if ($ra.PSObject.Properties['PrincipalId']) { $ra.PrincipalId } else { $null }
+        if (-not $raPrincipalId) { continue }
+        if (-not $raByPrincipalId.ContainsKey($raPrincipalId)) {
+            $raByPrincipalId[$raPrincipalId] = [System.Collections.Generic.List[object]]::new()
+        }
+        [void]$raByPrincipalId[$raPrincipalId].Add([PSCustomObject]@{
+            ResourceId       = if ($ra.PSObject.Properties['ResourceId']) { $ra.ResourceId } else { $null }
+            RoleDefinitionId = if ($ra.PSObject.Properties['RoleDefinitionId']) { $ra.RoleDefinitionId } else { $null }
+            Scope            = if ($ra.PSObject.Properties['Scope']) { $ra.Scope } else { $null }
+            ScopeName        = $s.Name
+        })
+    }
+}
+
+# Build list of all policy assignments with managed identities, with backward compat for older exports
+$allPaWithIdentity = [System.Collections.Generic.List[object]]::new()
+foreach ($s in $mgScopes) {
+    foreach ($pa in @($s.Resources.PolicyAssignments)) {
+        $identPid = $null
+        # New exports: promoted ManagedIdentityPrincipalId field
+        if ($pa.PSObject.Properties['ManagedIdentityPrincipalId'] -and $null -ne $pa.ManagedIdentityPrincipalId) {
+            $identPid = $pa.ManagedIdentityPrincipalId
+        }
+        # Backward compat: derive from Identity.PrincipalId where Identity.Type == 'SystemAssigned'
+        elseif ($pa.PSObject.Properties['Identity'] -and $null -ne $pa.Identity) {
+            $identObj = $pa.Identity
+            if ($identObj.PSObject.Properties['Type'] -and $identObj.Type -eq 'SystemAssigned' -and
+                $identObj.PSObject.Properties['PrincipalId'] -and $null -ne $identObj.PrincipalId) {
+                $identPid = $identObj.PrincipalId
+            }
+        }
+        if (-not $identPid) { continue }
+
+        $rid            = if ($pa.PSObject.Properties['ResourceId']) { $pa.ResourceId } else { $null }
+        $assignmentName = if ($rid) { ($rid -split '/')[-1] } else { $null }
+        $paScope        = if ($pa.PSObject.Properties['Scope']) { $pa.Scope } else { $null }
+        if (-not $assignmentName) { continue }
+
+        [void]$allPaWithIdentity.Add([PSCustomObject]@{
+            AssignmentName  = $assignmentName
+            PrincipalId     = $identPid
+            ScopeName       = $s.Name
+            AssignmentScope = $paScope
+        })
+    }
+}
+
+Write-Host ''
+Write-Host '  ── Policy-Driven Identity Audit ──'
+
+if ($allPaWithIdentity.Count -eq 0) {
+    Write-Info '  No policy assignments with managed identities found — export may be missing identity data'
+    Write-Info '  (Re-run Export-BrownfieldState.ps1 to capture managed identity principal IDs)'
+} else {
+    # --- Part 1: ORPHAN_RISK — identities with existing cross-MG role assignments ---
+    # These will be orphaned when the engine creates new assignments with fresh managed identities.
+    foreach ($paEntry in $allPaWithIdentity) {
+        $crossMgRas = @()
+        if ($raByPrincipalId.ContainsKey($paEntry.PrincipalId)) {
+            $crossMgRas = @($raByPrincipalId[$paEntry.PrincipalId] |
+                Where-Object { $_.Scope -ine $paEntry.AssignmentScope })
+        }
+        if ($crossMgRas.Count -eq 0) { continue }
+
+        $script:OrphanRiskCount++
+        Write-Err "  [ORPHAN_RISK] $($paEntry.AssignmentName) @ $($paEntry.ScopeName)"
+        Write-Detail "    Identity principal ID: $($paEntry.PrincipalId)"
+        Write-Detail "    Engine migration will orphan $($crossMgRas.Count) cross-MG role assignment(s):"
+        foreach ($ra in $crossMgRas) {
+            $roleGuid    = if ($ra.RoleDefinitionId) { ($ra.RoleDefinitionId -split '/')[-1] } else { '(unknown)' }
+            $roleName    = if ($roleGuidToName.ContainsKey($roleGuid)) { $roleGuidToName[$roleGuid] } else { $roleGuid }
+            Write-Detail "      Target scope: $($ra.ScopeName) — $roleName"
+            if ($ra.ResourceId) { Write-Detail "        $($ra.ResourceId)" }
+        }
+    }
+
+    # --- Part 2: MISSING_RBAC — expected cross-MG grant not present in brownfield ---
+    foreach ($expectation in $engineCrossMgRbacExpectations) {
+        $paEntries = @($allPaWithIdentity | Where-Object {
+            $_.AssignmentName -eq $expectation.AssignmentName -and $_.ScopeName -eq $expectation.SourceScope
+        })
+        if ($paEntries.Count -eq 0) { continue }  # assignment absent from brownfield — not a MISSING_RBAC issue
+        $paEntry = $paEntries[0]
+
+        $targetScopeExists = @($mgScopes | Where-Object { $_.Name -eq $expectation.TargetScope }).Count -gt 0
+        if (-not $targetScopeExists) { continue }  # target MG not in this tenant (e.g. full-mode scope in simple-mode tenant)
+
+        $missingRoles = @()
+        foreach ($roleGuid in $expectation.RoleDefGuids) {
+            $hasRole = $false
+            if ($raByPrincipalId.ContainsKey($paEntry.PrincipalId)) {
+                $hasRole = @($raByPrincipalId[$paEntry.PrincipalId] | Where-Object {
+                    $_.ScopeName -eq $expectation.TargetScope -and
+                    $_.RoleDefinitionId -and ($_.RoleDefinitionId -split '/')[-1] -ieq $roleGuid
+                }).Count -gt 0
+            }
+            if (-not $hasRole) { $missingRoles += $roleGuid }
+        }
+
+        if ($missingRoles.Count -gt 0) {
+            $script:MissingRbacCount++
+            Write-Warn "  [MISSING_RBAC] $($expectation.AssignmentName) @ $($expectation.SourceScope) → $($expectation.TargetScope)"
+            Write-Detail "    Identity principal ID: $($paEntry.PrincipalId)"
+            Write-Detail "    Missing role(s) at target scope:"
+            foreach ($g in $missingRoles) {
+                $roleName = if ($roleGuidToName.ContainsKey($g)) { $roleGuidToName[$g] } else { $g }
+                Write-Detail "      $roleName  ($g)"
+            }
+        }
+    }
+
+    # --- Part 3: CLEAN scopes ---
+    $scopesWithIdentities = @($allPaWithIdentity | Select-Object -ExpandProperty ScopeName | Sort-Object -Unique)
+    foreach ($s in $mgScopes) {
+        if ($scopesWithIdentities -notcontains $s.Name) {
+            Write-Ok "  [CLEAN] $($s.Name) — no policy-driven identities"
+        }
+    }
+
+    if ($script:OrphanRiskCount -eq 0 -and $script:MissingRbacCount -eq 0) {
+        Write-Ok "  Cross-MG RBAC: all policy-driven identities are clean"
+    } else {
+        if ($script:OrphanRiskCount  -gt 0) { Write-Err  "  $($script:OrphanRiskCount) ORPHAN_RISK item(s) — old managed identity role assignments will be stranded after migration; clean up using the principal IDs listed above" }
+        if ($script:MissingRbacCount -gt 0) { Write-Warn "  $($script:MissingRbacCount) MISSING_RBAC item(s) — brownfield may already be missing required cross-MG grants" }
+    }
+}
+
+#==============================================================================
+# Section 4b: Blueprint Assessment
+#==============================================================================
+Write-Step 'Section 4b: Blueprint Assessment'
+
+# Known ALZ / CAF blueprint display name fragments (matched case-insensitively)
+$knownAlzBlueprintPatterns = @(
+    'caf-foundation', 'caf-migrate', 'caf foundation', 'caf migration',
+    'alz', 'azure landing zone', 'eslz', 'enterprise scale'
+)
+
+$blueprintAssignments = @()
+if ($export.PSObject.Properties['BlueprintAssignments'] -and $null -ne $export.BlueprintAssignments) {
+    $blueprintAssignments = @($export.BlueprintAssignments)
+}
+
+$script:BlueprintCount = $blueprintAssignments.Count
+
+if ($blueprintAssignments.Count -eq 0) {
+    Write-Ok '  No blueprint assignments found'
+} else {
+    Write-Err "  $($blueprintAssignments.Count) blueprint assignment(s) found — MUST be unassigned before engine deployment"
+    Write-Host ''
+
+    foreach ($ba in $blueprintAssignments) {
+        $name      = if ($ba.PSObject.Properties['Name'])              { $ba.Name }              else { $ba['Name'] }
+        $subId     = if ($ba.PSObject.Properties['SubscriptionId'])    { $ba.SubscriptionId }    else { $ba['SubscriptionId'] }
+        $bpId      = if ($ba.PSObject.Properties['BlueprintId'])       { $ba.BlueprintId }       else { $ba['BlueprintId'] }
+        $state     = if ($ba.PSObject.Properties['ProvisioningState']) { $ba.ProvisioningState } else { $ba['ProvisioningState'] }
+        $lockMode  = if ($ba.PSObject.Properties['LockMode'])          { $ba.LockMode }          else { $ba['LockMode'] }
+        if (-not $lockMode) { $lockMode = 'None' }
+
+        # Check if this looks like a known ALZ/CAF blueprint
+        $isAlzBlueprint = $false
+        $checkStr = "$name $bpId".ToLower()
+        foreach ($pattern in $knownAlzBlueprintPatterns) {
+            if ($checkStr -like "*$pattern*") { $isAlzBlueprint = $true; break }
+        }
+
+        $tag = if ($isAlzBlueprint) { '[ALZ_BLUEPRINT]' } else { '[BLUEPRINT]' }
+        Write-Err "  $tag  $name  (sub: $subId)"
+        Write-Detail "    Blueprint ID:       $bpId"
+        Write-Detail "    Provisioning state: $state"
+
+        if ($lockMode -eq 'AllResourcesReadOnly') {
+            Write-Err  "    Lock mode:          $lockMode — BLOCKING: engine cannot modify blueprint-managed resources"
+        } elseif ($lockMode -eq 'AllResourcesDoNotDelete') {
+            Write-Warn "    Lock mode:          $lockMode — engine can modify but not delete blueprint-managed resources"
+        } else {
+            Write-Info "    Lock mode:          $lockMode"
+        }
+
+        Write-Host ''
+        Write-Detail "    Action required:"
+        Write-Detail "      1. Unassign this blueprint before running the engine"
+        Write-Detail "         Blueprint-managed resources persist but become unmanaged after unassignment"
+        Write-Detail "      2. Review blueprint artifacts — identify which policy assignments and role"
+        Write-Detail "         assignments it created; the engine will need to own these after migration"
+        if ($isAlzBlueprint) {
+            Write-Detail "      3. This appears to be an ALZ/CAF blueprint — its policy assignments will"
+            Write-Detail "         likely conflict directly with the engine's governance deployment"
+        }
+        Write-Host ''
+    }
+}
+
 #==============================================================================
 # Section 5: Infrastructure Assessment
 #==============================================================================
@@ -1807,7 +2045,7 @@ if ($privateDnsZones.Count -eq 0) {
     Write-Detail "    (none found — engine will create the full Private Link zone set on deployment)"
 } else {
     # Zone inventory by resource group
-    $zonesByRg = [ordered]@{}
+    $zonesByRg = @{}
     foreach ($z in ($privateDnsZones | Sort-Object ResourceGroup, Name)) {
         if (-not $zonesByRg.Contains($z.ResourceGroup)) {
             $zonesByRg[$z.ResourceGroup] = [System.Collections.Generic.List[object]]::new()
@@ -2158,13 +2396,34 @@ else {
     }
 }
 
+Write-Host ''
+Write-Host '  Blueprint assignments:'
+if ($script:BlueprintCount -gt 0) {
+    Write-Err  "    $($script:BlueprintCount) blueprint assignment(s) — MUST be unassigned before engine deployment"
+} else {
+    Write-Ok   "    0 blueprint assignments"
+}
+
+Write-Host ''
+Write-Host '  Cross-MG RBAC (policy-driven identities):'
+if ($script:OrphanRiskCount -gt 0) {
+    Write-Err  "    ORPHAN_RISK: $($script:OrphanRiskCount) identity/identities will have stranded role assignments after migration"
+} else {
+    Write-Ok   "    ORPHAN_RISK: 0"
+}
+if ($script:MissingRbacCount -gt 0) {
+    Write-Warn "    MISSING_RBAC: $($script:MissingRbacCount) expected cross-MG grant(s) absent from brownfield"
+} else {
+    Write-Ok   "    MISSING_RBAC: 0"
+}
+
 # Traffic light — AMBA does NOT count as non-standard for risk assessment.
 # ASSIGNED Deny mismatches OR BLOCKING locks trigger RED; unassigned-only Deny mismatches are YELLOW.
 Write-Host ''
 $hasDenyAssigned   = $script:MismatchCountByEffect['DenyAssigned'] -gt 0
-$hasBlockingLocks  = $script:LockBlockingCount -gt 0
+$hasBlockingLocks  = $script:LockBlockingCount -gt 0 -or $script:BlueprintCount -gt 0
 $hasReviewItems    = $totalNonStdDefs -gt 0 -or $totalNonStdSets -gt 0 -or $totalStdMismatchDefs -gt 0 -or $script:RoleDefNameCollisionCount -gt 0
-$hasMinorDrift     = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0 -or $script:TotalSubLevelNonStdAssignments -gt 0 -or $script:TotalDenyExemptions -gt 0 -or $script:NetworkingRiskCount -gt 0 -or $script:DnsDuplicateRiskCount -gt 0 -or $script:LockCautionCount -gt 0 -or $script:CostRiskWorstCase -gt 0 -or $script:RoleDefDriftCount -gt 0
+$hasMinorDrift     = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0 -or $script:TotalSubLevelNonStdAssignments -gt 0 -or $script:TotalDenyExemptions -gt 0 -or $script:NetworkingRiskCount -gt 0 -or $script:DnsDuplicateRiskCount -gt 0 -or $script:LockCautionCount -gt 0 -or $script:CostRiskWorstCase -gt 0 -or $script:RoleDefDriftCount -gt 0 -or $script:OrphanRiskCount -gt 0 -or $script:MissingRbacCount -gt 0
 
 if (-not $hasReviewItems -and -not $hasMinorDrift -and -not $hasBlockingLocks) {
     Write-Colored 'GREEN' 'Green' "Brownfield is a clean portal accelerator deployment. Low risk for engine adoption."
@@ -2180,7 +2439,12 @@ elseif ($hasDenyAssigned -or $hasBlockingLocks) {
         Write-Host '    b) Test in DoNotEnforce mode first if compliance status is uncertain'
         Write-Host '    c) Deploy governance-only first, then re-enable enforcement after remediation'
     }
-    if ($hasBlockingLocks) {
+    if ($script:BlueprintCount -gt 0) {
+        Write-Host "  Blueprints: $($script:BlueprintCount) active blueprint assignment(s) — will conflict with engine governance."
+        Write-Host '    a) Unassign all blueprints listed in Section 4b before running the engine'
+        Write-Host '    b) Review blueprint artifacts to identify policy/role assignments the engine must own'
+    }
+    if ($script:LockBlockingCount -gt 0) {
         Write-Host "  Locks: $($script:LockBlockingCount) BLOCKING ReadOnly lock(s) — engine deployments will fail until removed."
         Write-Host '    a) Remove all BLOCKING locks listed in Section 5 before running the engine'
         Write-Host '    b) Re-apply desired locks post-migration via parGlobalResourceLock in engine config'

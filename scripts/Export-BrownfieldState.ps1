@@ -404,6 +404,27 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
     if ($sets.Count -gt 0) { Write-Info "    PolicySetDefinitions: $($resources.PolicySetDefinitions.Count)" }
 
     # --- Policy assignments ---
+    # Supplement Get-AzPolicyAssignment with a direct REST call to capture identity.principalId,
+    # which Az.Resources 7.x does not reliably surface on the returned PS objects.
+    $restIdentityMap = @{}
+    $restPaResponse = Invoke-AzRestMethod `
+        -Path "$scope/providers/Microsoft.Authorization/policyAssignments?`$filter=atScope()&api-version=2024-04-01" `
+        -Method GET -ErrorAction SilentlyContinue
+    if ($restPaResponse -and $restPaResponse.StatusCode -eq 200) {
+        $restPaData = $restPaResponse.Content | ConvertFrom-Json -ErrorAction SilentlyContinue
+        if ($restPaData -and $restPaData.PSObject.Properties['value']) {
+            foreach ($rpa in @($restPaData.value)) {
+                if ($rpa.PSObject.Properties['identity'] -and $rpa.identity -and
+                    $rpa.identity.PSObject.Properties['principalId'] -and $rpa.identity.principalId) {
+                    $restIdentityMap[$rpa.id.ToLower()] = @{
+                        Type        = if ($rpa.identity.PSObject.Properties['type']) { $rpa.identity.type } else { 'SystemAssigned' }
+                        PrincipalId = $rpa.identity.principalId
+                    }
+                }
+            }
+        }
+    }
+
     $assignments = @(Get-AzPolicyAssignment -Scope $scope -ErrorAction SilentlyContinue)
     foreach ($a in $assignments) {
         # Only include assignments scoped directly to this MG (not child scopes)
@@ -422,25 +443,33 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
         }
         catch { }
 
+        $rid = Get-PropSafe $a 'ResourceId', 'PolicyAssignmentId', 'Id'
+
+        # Build identity: prefer REST API map (authoritative), fall back to PS object
         $identity = $null
-        $aIdentity = Get-PropSafe $a 'Identity'
-        if ($aIdentity) {
-            $identity = @{
-                Type        = (Get-PropSafe $aIdentity 'Type')
-                PrincipalId = (Get-PropSafe $aIdentity 'PrincipalId')
+        $restIdEntry = if ($rid) { $restIdentityMap[$rid.ToLower()] } else { $null }
+        if ($restIdEntry) {
+            $identity = $restIdEntry
+        } else {
+            $aIdentity = Get-PropSafe $a 'Identity'
+            if ($aIdentity) {
+                $identity = @{
+                    Type        = (Get-PropSafe $aIdentity 'Type')
+                    PrincipalId = (Get-PropSafe $aIdentity 'PrincipalId')
+                }
             }
         }
 
-        $rid = Get-PropSafe $a 'ResourceId', 'PolicyAssignmentId', 'Id'
         $resources.PolicyAssignments += @{
-            ResourceId         = $rid
-            Type               = 'policyAssignment'
-            DisplayName        = (Get-PropSafe $a 'DisplayName')
-            PolicyDefinitionId = (Get-PropSafe $a 'PolicyDefinitionId')
-            Parameters         = $params
-            EnforcementMode    = (Get-PropSafe $a 'EnforcementMode')
-            Identity           = $identity
-            Scope              = $scope
+            ResourceId                 = $rid
+            Type                       = 'policyAssignment'
+            DisplayName                = (Get-PropSafe $a 'DisplayName')
+            PolicyDefinitionId         = (Get-PropSafe $a 'PolicyDefinitionId')
+            Parameters                 = $params
+            EnforcementMode            = (Get-PropSafe $a 'EnforcementMode')
+            Identity                   = $identity
+            ManagedIdentityPrincipalId = if ($identity -and $identity.Type -eq 'SystemAssigned') { $identity.PrincipalId } else { $null }
+            Scope                      = $scope
         }
     }
     if ($assignments.Count -gt 0) { Write-Info "    PolicyAssignments: $($resources.PolicyAssignments.Count)" }
@@ -1101,6 +1130,27 @@ if ($mgHierarchy) {
     try {
         $governanceScopes = Get-GovernanceScopesFromHierarchy -Root $mgHierarchy
         Write-Ok "Governance scopes collected: $($governanceScopes.Count)"
+
+        # Post-process: flag IsPolicyDriven on role assignments.
+        # Build a set of all managed identity principal IDs from policy assignments with SystemAssigned identity.
+        $allMiPrincipalIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($gs in $governanceScopes) {
+            foreach ($pa in @($gs.Resources.PolicyAssignments)) {
+                $mid = $pa['ManagedIdentityPrincipalId']
+                if ($mid) { [void]$allMiPrincipalIds.Add($mid) }
+            }
+        }
+        # Flag each role assignment as policy-driven if its principal ID belongs to a policy managed identity
+        foreach ($gs in $governanceScopes) {
+            foreach ($ra in @($gs.Resources.RoleAssignments)) {
+                $raPrincipalId = $ra['PrincipalId']
+                $ra['IsPolicyDriven'] = ($null -ne $raPrincipalId -and $allMiPrincipalIds.Contains($raPrincipalId))
+            }
+        }
+        $totalPolicyDrivenRas = ($governanceScopes |
+            ForEach-Object { @($_.Resources.RoleAssignments) | Where-Object { $_['IsPolicyDriven'] } } |
+            Measure-Object).Count
+        if ($totalPolicyDrivenRas -gt 0) { Write-Info "  Policy-driven role assignments identified: $totalPolicyDrivenRas" }
     }
     catch {
         $msg = "Governance discovery failed: $($_.Exception.Message)"
@@ -1232,6 +1282,65 @@ else {
 }
 
 # ============================================================
+# Blueprint assignments (per-subscription REST scan)
+# ============================================================
+function Get-BlueprintAssignments ([string]$SubscriptionId) {
+    $response = Invoke-AzRestMethod `
+        -Path "/subscriptions/$SubscriptionId/providers/Microsoft.Blueprint/blueprintAssignments?api-version=2018-11-01-preview" `
+        -Method GET -ErrorAction SilentlyContinue
+    if ($response -and $response.StatusCode -eq 200) {
+        $data = $response.Content | ConvertFrom-Json -ErrorAction SilentlyContinue
+        if ($data -and $data.PSObject.Properties['value']) {
+            return @($data.value | ForEach-Object {
+                $props = $_.properties
+                @{
+                    Name              = $_.name
+                    BlueprintId       = if ($props.PSObject.Properties['blueprintId'])  { $props.blueprintId }  else { $null }
+                    Scope             = "/subscriptions/$SubscriptionId"
+                    SubscriptionId    = $SubscriptionId
+                    ProvisioningState = if ($props.PSObject.Properties['provisioningState']) { $props.provisioningState } else { $null }
+                    LockMode          = if ($props.PSObject.Properties['locks'] -and $props.locks) { $props.locks.mode } else { 'None' }
+                    Parameters        = if ($props.PSObject.Properties['parameters'])   { $props.parameters }   else { $null }
+                    ResourceGroups    = if ($props.PSObject.Properties['resourceGroups']) { $props.resourceGroups } else { $null }
+                }
+            })
+        }
+    }
+    return @()
+}
+
+$blueprintAssignments = @()
+
+if ($Script:SubscriptionPlacement.Count -gt 0) {
+    Write-Step 'Scanning blueprint assignments'
+
+    $allSubsSeen2 = [System.Collections.Generic.HashSet[string]]::new()
+    foreach ($mgSubs in $Script:SubscriptionPlacement.Values) {
+        foreach ($sub in @($mgSubs)) {
+            $subId = if ($sub -is [hashtable] -and $sub.ContainsKey('Id')) { $sub['Id'] }
+                     elseif ($sub.PSObject.Properties['Id']) { $sub.Id }
+                     elseif ($sub -is [string]) { $sub }
+                     else { $null }
+            if (-not $subId -or -not $allSubsSeen2.Add($subId)) { continue }
+
+            $found = Get-BlueprintAssignments -SubscriptionId $subId
+            if ($found.Count -gt 0) {
+                $blueprintAssignments += $found
+                Write-Warn "  $subId — $($found.Count) blueprint assignment(s) found"
+            }
+        }
+    }
+
+    if ($blueprintAssignments.Count -eq 0) {
+        Write-Ok "No blueprint assignments found"
+    } else {
+        Write-Warn "$($blueprintAssignments.Count) total blueprint assignment(s) detected"
+    }
+} else {
+    Write-Info 'No subscription placement data — skipping blueprint assignment scan.'
+}
+
+# ============================================================
 # Assemble and write output
 # ============================================================
 Write-Step 'Writing output'
@@ -1244,6 +1353,7 @@ $export = @{
     ManagementGroupHierarchy = $mgHierarchy
     SubscriptionPlacement    = $Script:SubscriptionPlacement
     SubscriptionGovernance   = $subscriptionGovernanceScopes
+    BlueprintAssignments     = $blueprintAssignments
     Scopes                   = @($governanceScopes) + @($infrastructureScopes)
     Warnings                 = $Script:Warnings
 }
@@ -1256,6 +1366,7 @@ Write-Info "Total scopes exported:       $($export.Scopes.Count)"
 Write-Info "Governance scopes:           $($governanceScopes.Count)"
 Write-Info "Infrastructure scopes:       $($infrastructureScopes.Count)"
 Write-Info "Subscription governance:     $($subscriptionGovernanceScopes.Count) subscription(s)"
+Write-Info "Blueprint assignments:       $($blueprintAssignments.Count)"
 
 if ($Script:Warnings.Count -gt 0) {
     Write-Host ''
