@@ -404,6 +404,27 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
     if ($sets.Count -gt 0) { Write-Info "    PolicySetDefinitions: $($resources.PolicySetDefinitions.Count)" }
 
     # --- Policy assignments ---
+    # Supplement Get-AzPolicyAssignment with a direct REST call to capture identity.principalId,
+    # which Az.Resources 7.x does not reliably surface on the returned PS objects.
+    $restIdentityMap = @{}
+    $restPaResponse = Invoke-AzRestMethod `
+        -Path "$scope/providers/Microsoft.Authorization/policyAssignments?`$filter=atScope()&api-version=2024-04-01" `
+        -Method GET -ErrorAction SilentlyContinue
+    if ($restPaResponse -and $restPaResponse.StatusCode -eq 200) {
+        $restPaData = $restPaResponse.Content | ConvertFrom-Json -ErrorAction SilentlyContinue
+        if ($restPaData -and $restPaData.PSObject.Properties['value']) {
+            foreach ($rpa in @($restPaData.value)) {
+                if ($rpa.PSObject.Properties['identity'] -and $rpa.identity -and
+                    $rpa.identity.PSObject.Properties['principalId'] -and $rpa.identity.principalId) {
+                    $restIdentityMap[$rpa.id.ToLower()] = @{
+                        Type        = if ($rpa.identity.PSObject.Properties['type']) { $rpa.identity.type } else { 'SystemAssigned' }
+                        PrincipalId = $rpa.identity.principalId
+                    }
+                }
+            }
+        }
+    }
+
     $assignments = @(Get-AzPolicyAssignment -Scope $scope -ErrorAction SilentlyContinue)
     foreach ($a in $assignments) {
         # Only include assignments scoped directly to this MG (not child scopes)
@@ -422,25 +443,33 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
         }
         catch { }
 
+        $rid = Get-PropSafe $a 'ResourceId', 'PolicyAssignmentId', 'Id'
+
+        # Build identity: prefer REST API map (authoritative), fall back to PS object
         $identity = $null
-        $aIdentity = Get-PropSafe $a 'Identity'
-        if ($aIdentity) {
-            $identity = @{
-                Type        = (Get-PropSafe $aIdentity 'Type')
-                PrincipalId = (Get-PropSafe $aIdentity 'PrincipalId')
+        $restIdEntry = if ($rid) { $restIdentityMap[$rid.ToLower()] } else { $null }
+        if ($restIdEntry) {
+            $identity = $restIdEntry
+        } else {
+            $aIdentity = Get-PropSafe $a 'Identity'
+            if ($aIdentity) {
+                $identity = @{
+                    Type        = (Get-PropSafe $aIdentity 'Type')
+                    PrincipalId = (Get-PropSafe $aIdentity 'PrincipalId')
+                }
             }
         }
 
-        $rid = Get-PropSafe $a 'ResourceId', 'PolicyAssignmentId', 'Id'
         $resources.PolicyAssignments += @{
-            ResourceId         = $rid
-            Type               = 'policyAssignment'
-            DisplayName        = (Get-PropSafe $a 'DisplayName')
-            PolicyDefinitionId = (Get-PropSafe $a 'PolicyDefinitionId')
-            Parameters         = $params
-            EnforcementMode    = (Get-PropSafe $a 'EnforcementMode')
-            Identity           = $identity
-            Scope              = $scope
+            ResourceId                 = $rid
+            Type                       = 'policyAssignment'
+            DisplayName                = (Get-PropSafe $a 'DisplayName')
+            PolicyDefinitionId         = (Get-PropSafe $a 'PolicyDefinitionId')
+            Parameters                 = $params
+            EnforcementMode            = (Get-PropSafe $a 'EnforcementMode')
+            Identity                   = $identity
+            ManagedIdentityPrincipalId = if ($identity -and $identity.Type -eq 'SystemAssigned') { $identity.PrincipalId } else { $null }
+            Scope                      = $scope
         }
     }
     if ($assignments.Count -gt 0) { Write-Info "    PolicyAssignments: $($resources.PolicyAssignments.Count)" }
@@ -1101,6 +1130,27 @@ if ($mgHierarchy) {
     try {
         $governanceScopes = Get-GovernanceScopesFromHierarchy -Root $mgHierarchy
         Write-Ok "Governance scopes collected: $($governanceScopes.Count)"
+
+        # Post-process: flag IsPolicyDriven on role assignments.
+        # Build a set of all managed identity principal IDs from policy assignments with SystemAssigned identity.
+        $allMiPrincipalIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($gs in $governanceScopes) {
+            foreach ($pa in @($gs.Resources.PolicyAssignments)) {
+                $mid = $pa['ManagedIdentityPrincipalId']
+                if ($mid) { [void]$allMiPrincipalIds.Add($mid) }
+            }
+        }
+        # Flag each role assignment as policy-driven if its principal ID belongs to a policy managed identity
+        foreach ($gs in $governanceScopes) {
+            foreach ($ra in @($gs.Resources.RoleAssignments)) {
+                $raPrincipalId = $ra['PrincipalId']
+                $ra['IsPolicyDriven'] = ($null -ne $raPrincipalId -and $allMiPrincipalIds.Contains($raPrincipalId))
+            }
+        }
+        $totalPolicyDrivenRas = ($governanceScopes |
+            ForEach-Object { @($_.Resources.RoleAssignments) | Where-Object { $_['IsPolicyDriven'] } } |
+            Measure-Object).Count
+        if ($totalPolicyDrivenRas -gt 0) { Write-Info "  Policy-driven role assignments identified: $totalPolicyDrivenRas" }
     }
     catch {
         $msg = "Governance discovery failed: $($_.Exception.Message)"
