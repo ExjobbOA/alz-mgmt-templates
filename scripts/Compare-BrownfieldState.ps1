@@ -434,6 +434,11 @@ $script:LockTotalCount    = 0
 # Cost risk worst-case duplicate monthly total — populated by Section 5b
 $script:CostRiskWorstCase = 0
 
+# ALZ engine role definition check counters — populated by Section 4 role def subsection
+$script:RoleDefNameCollisionCount = 0
+$script:RoleDefDriftCount         = 0
+$script:RoleDefCheckResults       = [System.Collections.Generic.List[object]]::new()
+
 # Build policy set name → ALZ custom member policy definition names from library.
 # Used below to expand initiative assignments to their individual member definitions.
 # Seed from the export's PolicySetDefinitions.PolicyDefinitions field (populated by the
@@ -1101,17 +1106,14 @@ foreach ($scope in $mgScopes) {
         }
     }
 
-    # Role definitions
+    # Role definitions — per-role GUID/permission analysis is in the ALZ Engine Role Definition Check subsection below.
+    # Non-engine custom role defs are counted in Section 7 ($totalCustomRoles).
     if ($rds.Count -gt 0) {
-        foreach ($rd in $rds) {
-            $cls = Get-RoleDefClassification $rd.RoleName
-            $permCount = if ($rd.Permissions) { $rd.Permissions.Count } else { 0 }
-            if ($cls -eq 'ALZStandard') {
-                Write-Ok "  [ALZ role] $($rd.RoleName)  ($permCount permission(s))"
-            }
-            else {
-                Write-Warn "  [Custom role] $($rd.RoleName)  ($permCount permission(s))"
-            }
+        $customRdCount = @($rds | Where-Object { (Get-RoleDefClassification $_.RoleName) -eq 'Custom' }).Count
+        if ($customRdCount -gt 0) {
+            Write-Warn "  Role definitions: $($rds.Count) total  ($customRdCount non-ALZ custom)"
+        } else {
+            Write-Info "  Role definitions: $($rds.Count)"
         }
     }
 
@@ -1120,6 +1122,92 @@ foreach ($scope in $mgScopes) {
         $scopeEntry.RoleAssignments = $ras
         $scopeEntry.RoleDefinitions = $rds
     }
+}
+
+#---------- ALZ Engine Role Definition Check ----------
+# Load engine role defs with actions for comparison against brownfield state.
+# Permissions in the brownfield export = $role.Actions (string array); notActions are not captured.
+$engineRoleLibDefs = @(Get-ChildItem -Path $AlzLibraryPath -Filter '*.alz_role_definition.json' -Recurse |
+    ForEach-Object {
+        $j          = Get-Content $_.FullName -Raw | ConvertFrom-Json
+        $perms      = if ($j.properties.PSObject.Properties['permissions'] -and $j.properties.permissions.Count -gt 0) {
+            $j.properties.permissions[0]
+        } else { $null }
+        $libActions = @(if ($perms -and $perms.PSObject.Properties['actions']) { $perms.actions } else { @() } )
+        $libActions = @($libActions | Sort-Object)
+        [PSCustomObject]@{
+            Guid       = $j.name
+            RoleName   = $j.properties.roleName   # e.g. "Subscription-Owner (alz)"
+            RoleBase   = ($j.properties.roleName -replace '\s*\([^)]+\)\s*$', '')
+            LibActions = $libActions
+        }
+    })
+
+# Collect all brownfield role defs across all MG scopes (portal may deploy them at any level)
+$allBfRoleDefs = [System.Collections.Generic.List[object]]::new()
+foreach ($scope in $mgScopes) {
+    foreach ($rd in @($scope.Resources.RoleDefinitions)) {
+        [void]$allBfRoleDefs.Add($rd)
+    }
+}
+
+Write-Host ''
+Write-Host '  ── ALZ Engine Role Definition Check ──'
+
+foreach ($erd in $engineRoleLibDefs) {
+    # GUID match: export stores Name = full resource ID; extract trailing GUID segment
+    $guidMatch = @($allBfRoleDefs | Where-Object { ($_.Name -split '/')[-1] -ieq $erd.Guid })
+
+    # Name match: base name (strip trailing (xxx) suffix) under a different GUID
+    $nameMatch = @($allBfRoleDefs | Where-Object {
+        ($_.RoleName -replace '\s*\([^)]+\)\s*$', '') -ieq $erd.RoleBase -and
+        ($_.Name -split '/')[-1] -ine $erd.Guid
+    })
+
+    $status   = 'MISSING'
+    $bfGuid   = $null
+    $permDiff = @()
+
+    if ($guidMatch.Count -gt 0) {
+        $bf        = $guidMatch[0]
+        $bfGuid    = ($bf.Name -split '/')[-1]
+        # Export Permissions = $role.Actions (actions string array only)
+        $bfActions  = @($bf.Permissions | Sort-Object)
+        $libActions = $erd.LibActions
+        $libJoined  = ($libActions -join '|')
+        $bfJoined   = ($bfActions  -join '|')
+        if ($libJoined -ne $bfJoined) {
+            $status    = 'DRIFT'
+            $inLibOnly = @($libActions | Where-Object { $bfActions  -notcontains $_ })
+            $inBfOnly  = @($bfActions  | Where-Object { $libActions -notcontains $_ })
+            foreach ($a in $inLibOnly) { $permDiff += "      + $a  (engine adds)" }
+            foreach ($r in $inBfOnly)  { $permDiff += "      - $r  (brownfield only, engine removes)" }
+        } else {
+            $status = 'MATCH'
+        }
+    } elseif ($nameMatch.Count -gt 0) {
+        $status = 'NAME_COLLISION'
+        $bfGuid = ($nameMatch[0].Name -split '/')[-1]
+    }
+
+    switch ($status) {
+        'MATCH'          { Write-Ok   "  [MATCH]          $($erd.RoleName)  (GUID: $($erd.Guid))" }
+        'DRIFT'          { Write-Warn "  [DRIFT]          $($erd.RoleName)  (GUID: $($erd.Guid)) — engine will overwrite actions on deploy" }
+        'NAME_COLLISION' { Write-Err  "  [NAME_COLLISION] $($erd.RoleName)  (engine GUID: $($erd.Guid)) — brownfield has same display name under GUID: $bfGuid" }
+        'MISSING'        { Write-Ok   "  [MISSING]        $($erd.RoleName) — not in brownfield, engine will create" }
+    }
+    foreach ($line in $permDiff) { Write-Detail $line }
+
+    if ($status -eq 'DRIFT')          { $script:RoleDefDriftCount++ }
+    if ($status -eq 'NAME_COLLISION') { $script:RoleDefNameCollisionCount++ }
+
+    [void]$script:RoleDefCheckResults.Add([PSCustomObject]@{
+        LibraryGuid    = $erd.Guid
+        LibraryName    = $erd.RoleName
+        Status         = $status
+        BrownfieldGuid = $bfGuid
+        PermissionDiff = $permDiff
+    })
 }
 
 #==============================================================================
@@ -1600,16 +1688,19 @@ if ($mgSubscriptions.Count -gt 0) {
             $normalizedToActualMg[$norm.ToLower()] = $id
         }
     }
+    $fullModeSubsFound = 0
     foreach ($normName in @('management', 'connectivity', 'identity', 'security')) {
         $key = $platformMgMap[$normName]
         $actualId = if ($normalizedToActualMg.ContainsKey($normName)) { $normalizedToActualMg[$normName] } else { $normName }
         $subs = @(Get-SubsUnderMg $actualId)
         if ($subs.Count -eq 1) {
+            $fullModeSubsFound++
             $sub = $subs[0]
             $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '(unknown)' }
             $subName = if ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { " ($($sub.DisplayName))" } else { '' }
             Write-Ok "    $key`: $subId$subName"
         } elseif ($subs.Count -gt 1) {
+            $fullModeSubsFound++
             Write-Warn "    $key`: multiple subscriptions found under $actualId — check placement:"
             foreach ($sub in $subs) {
                 $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '?' }
@@ -1617,7 +1708,32 @@ if ($mgSubscriptions.Count -gt 0) {
                 Write-Detail "      $subId ($subName)"
             }
         } else {
-            Write-Detail "    $key`: (none found — check tenant root for unplaced subs or MG named '$actualId')"
+            Write-Detail "    $key`: (none found)"
+        }
+    }
+
+    # PLATFORM_MODE=simple: one subscription placed directly under the platform MG rather
+    # than under the four child MGs. Detect this and suggest SUBSCRIPTION_ID_PLATFORM.
+    if ($fullModeSubsFound -eq 0) {
+        $platformActualId = if ($normalizedToActualMg.ContainsKey('platform')) { $normalizedToActualMg['platform'] } else { 'platform' }
+        $platformDirectSubs = @(if ($mgSubscriptions.ContainsKey($platformActualId)) { $mgSubscriptions[$platformActualId] } else { @() })
+        if ($platformDirectSubs.Count -eq 1) {
+            $sub = $platformDirectSubs[0]
+            $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '(unknown)' }
+            $subName = if ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { " ($($sub.DisplayName))" } else { '' }
+            Write-Ok  "    SUBSCRIPTION_ID_PLATFORM (simple mode): $subId$subName"
+            Write-Detail "    Set PLATFORM_MODE=simple and SUBSCRIPTION_ID_PLATFORM in platform.json."
+            Write-Detail "    The four full-mode sub IDs should also be set to this value (schema requires all keys)."
+        } elseif ($platformDirectSubs.Count -gt 1) {
+            Write-Warn "    Multiple subscriptions found directly under platform MG ($platformActualId) — check placement:"
+            foreach ($sub in $platformDirectSubs) {
+                $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '?' }
+                $subName = if ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { $sub.DisplayName } else { '' }
+                Write-Detail "      $subId ($subName)"
+            }
+        } else {
+            Write-Warn "    No subscriptions found under management/connectivity/identity/security or platform MG."
+            Write-Detail "    Re-run Export-BrownfieldState.ps1 and ensure -PlatformSubscriptionIds covers the correct subscriptions."
         }
     }
 } else {
@@ -1693,7 +1809,7 @@ if ($privateDnsZones.Count -eq 0) {
     # Zone inventory by resource group
     $zonesByRg = [ordered]@{}
     foreach ($z in ($privateDnsZones | Sort-Object ResourceGroup, Name)) {
-        if (-not $zonesByRg.ContainsKey($z.ResourceGroup)) {
+        if (-not $zonesByRg.Contains($z.ResourceGroup)) {
             $zonesByRg[$z.ResourceGroup] = [System.Collections.Generic.List[object]]::new()
         }
         $zonesByRg[$z.ResourceGroup].Add($z)
@@ -1954,6 +2070,15 @@ if ($totalDeprSets -gt 0) { Write-Info "    Deprecated:               $totalDepr
 Write-Host ''
 Write-Host "  Assignments:                  Non-standard refs: $totalNonStdAssignments   AMBA refs: $totalAmbaAssignments"
 Write-Host "  Custom role definitions:      $totalCustomRoles"
+if ($script:RoleDefCheckResults.Count -gt 0) {
+    if ($script:RoleDefNameCollisionCount -gt 0) {
+        Write-Err  "  ALZ role def check:           $($script:RoleDefCheckResults.Count) roles — $($script:RoleDefNameCollisionCount) NAME_COLLISION, $($script:RoleDefDriftCount) DRIFT"
+    } elseif ($script:RoleDefDriftCount -gt 0) {
+        Write-Warn "  ALZ role def check:           $($script:RoleDefCheckResults.Count) roles — $($script:RoleDefDriftCount) DRIFT (engine will overwrite)"
+    } else {
+        Write-Ok   "  ALZ role def check:           $($script:RoleDefCheckResults.Count) roles — all MATCH or MISSING (safe to deploy)"
+    }
+}
 Write-Host "  Non-ALZ resource groups:      $totalNonAlzRgs"
 Write-Host "  Missing expected resources:   $totalMissingInfra"
 if ($script:NetworkingRiskCount -gt 0) {
@@ -2038,8 +2163,8 @@ else {
 Write-Host ''
 $hasDenyAssigned   = $script:MismatchCountByEffect['DenyAssigned'] -gt 0
 $hasBlockingLocks  = $script:LockBlockingCount -gt 0
-$hasReviewItems    = $totalNonStdDefs -gt 0 -or $totalNonStdSets -gt 0 -or $totalStdMismatchDefs -gt 0
-$hasMinorDrift     = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0 -or $script:TotalSubLevelNonStdAssignments -gt 0 -or $script:TotalDenyExemptions -gt 0 -or $script:NetworkingRiskCount -gt 0 -or $script:DnsDuplicateRiskCount -gt 0 -or $script:LockCautionCount -gt 0 -or $script:CostRiskWorstCase -gt 0
+$hasReviewItems    = $totalNonStdDefs -gt 0 -or $totalNonStdSets -gt 0 -or $totalStdMismatchDefs -gt 0 -or $script:RoleDefNameCollisionCount -gt 0
+$hasMinorDrift     = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0 -or $script:TotalSubLevelNonStdAssignments -gt 0 -or $script:TotalDenyExemptions -gt 0 -or $script:NetworkingRiskCount -gt 0 -or $script:DnsDuplicateRiskCount -gt 0 -or $script:LockCautionCount -gt 0 -or $script:CostRiskWorstCase -gt 0 -or $script:RoleDefDriftCount -gt 0
 
 if (-not $hasReviewItems -and -not $hasMinorDrift -and -not $hasBlockingLocks) {
     Write-Colored 'GREEN' 'Green' "Brownfield is a clean portal accelerator deployment. Low risk for engine adoption."
@@ -2128,6 +2253,11 @@ if ($OutputFile -ne '') {
             BlockingResourceLocks           = $script:LockBlockingCount
             CautionResourceLocks            = $script:LockCautionCount
             HasBlockingLocks                = ($script:LockBlockingCount -gt 0)
+            RoleDefCheck                    = [PSCustomObject]@{
+                Results            = @($script:RoleDefCheckResults)
+                NameCollisionCount = $script:RoleDefNameCollisionCount
+                DriftCount         = $script:RoleDefDriftCount
+            }
         }
     }
     $fullReport | ConvertTo-Json -Depth 10 | Set-Content $OutputFile
