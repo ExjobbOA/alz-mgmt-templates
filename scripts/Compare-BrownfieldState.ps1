@@ -1956,6 +1956,111 @@ if ($defenderStateList.Count -eq 0) {
 }
 
 #==============================================================================
+# Section 5d: Tag Schema Assessment
+#==============================================================================
+Write-Step 'Section 5d: Tag Schema Assessment'
+
+# Collect all tag keys from RGs and key resources across every subscription scope
+$tagKeyCounts  = @{}   # key -> count of resources that carry it
+$tagKeyValues  = @{}   # key -> HashSet of distinct values seen
+$taggedObjects = 0
+
+foreach ($ss in @($subScope)) {
+    # Resource groups
+    foreach ($rg in @($ss.Resources.ResourceGroups)) {
+        $rawTags = if ($rg.PSObject.Properties['Tags']) { $rg.Tags } else { $null }
+        if (-not $rawTags) { continue }
+        $taggedObjects++
+        foreach ($kv in $rawTags.PSObject.Properties) {
+            $k = $kv.Name
+            if (-not $tagKeyCounts.ContainsKey($k)) {
+                $tagKeyCounts[$k]  = 0
+                $tagKeyValues[$k]  = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            }
+            $tagKeyCounts[$k]++
+            if ($kv.Value) { [void]$tagKeyValues[$k].Add([string]$kv.Value) }
+        }
+    }
+    # Key resources
+    foreach ($kr in @($ss.Resources.KeyResources)) {
+        $rawTags = if ($kr.PSObject.Properties['Tags']) { $kr.Tags } else { $null }
+        if (-not $rawTags) { continue }
+        $taggedObjects++
+        foreach ($kv in $rawTags.PSObject.Properties) {
+            $k = $kv.Name
+            if (-not $tagKeyCounts.ContainsKey($k)) {
+                $tagKeyCounts[$k]  = 0
+                $tagKeyValues[$k]  = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            }
+            $tagKeyCounts[$k]++
+            if ($kv.Value) { [void]$tagKeyValues[$k].Add([string]$kv.Value) }
+        }
+    }
+}
+
+# Scan policy assignments for tag-enforcement policies
+$tagPolicies = [System.Collections.Generic.List[string]]::new()
+foreach ($scope in $mgScopes) {
+    foreach ($pa in @($scope.Resources.PolicyAssignments)) {
+        $paName = ($pa.ResourceId -split '/')[-1]
+        $defId  = if ($pa.PSObject.Properties['PolicyDefinitionId']) { $pa.PolicyDefinitionId } else { '' }
+        $defName = ($defId -split '/')[-1]
+        if ($paName -imatch 'tag' -or $defName -imatch 'tag') {
+            if (-not $tagPolicies.Contains($paName)) { [void]$tagPolicies.Add($paName) }
+        }
+    }
+}
+
+$totalSampleObjects = [System.Math]::Max($taggedObjects, 1)
+$mandatoryThreshold = 0.80
+
+if ($tagKeyCounts.Count -eq 0) {
+    Write-Info '  No tags found on scanned resources'
+} else {
+    # Separate mandatory candidates from optional
+    $mandatoryKeys = @($tagKeyCounts.GetEnumerator() | Where-Object {
+        ($_.Value / $totalSampleObjects) -ge $mandatoryThreshold
+    } | Sort-Object { -$_.Value })
+
+    $optionalKeys = @($tagKeyCounts.GetEnumerator() | Where-Object {
+        ($_.Value / $totalSampleObjects) -lt $mandatoryThreshold
+    } | Sort-Object { -$_.Value })
+
+    Write-Info "  Tag inventory: $($tagKeyCounts.Count) distinct key(s) across $taggedObjects scanned object(s)"
+    Write-Host ''
+    Write-Host '  Tag frequency (key → coverage):'
+    foreach ($entry in (@($mandatoryKeys) + @($optionalKeys))) {
+        $pct    = [int](($entry.Value / $totalSampleObjects) * 100)
+        $marker = if (($entry.Value / $totalSampleObjects) -ge $mandatoryThreshold) { '[LIKELY MANDATORY]' } else { '[optional]        ' }
+        $valCount = $tagKeyValues[$entry.Key].Count
+        $valHint  = if ($valCount -le 5) { " — values: $($tagKeyValues[$entry.Key] -join ', ')" } else { " — $valCount distinct values" }
+        Write-Detail "    $marker  $($entry.Key)  ($($entry.Value)/$taggedObjects = $pct%)$valHint"
+    }
+
+    if ($mandatoryKeys.Count -gt 0) {
+        Write-Host ''
+        Write-Ok   "  $($mandatoryKeys.Count) tag key(s) appear on ≥$([int]($mandatoryThreshold*100))% of objects (likely mandatory):"
+        foreach ($mk in $mandatoryKeys) {
+            Write-Detail "    $($mk.Key)"
+        }
+        Write-Detail '  Action: add these to parTags in platform.json (see Section 6 suggestion)'
+    } else {
+        Write-Info  '  No tag keys meet the ≥80% mandatory threshold — tagging is sparse or inconsistent'
+    }
+}
+
+if ($tagPolicies.Count -gt 0) {
+    Write-Host ''
+    Write-Warn "  Tag-enforcement policies detected ($($tagPolicies.Count)):"
+    foreach ($tp in $tagPolicies) {
+        Write-Detail "    $tp"
+    }
+    Write-Detail '  Action: verify these assignments are not assigned inside an ALZ initiative — engine may reassign them.'
+} else {
+    Write-Info '  No tag-enforcement policy assignments detected'
+}
+
+#==============================================================================
 # Section 6: Config Extraction
 #==============================================================================
 Write-Step 'Section 6: Config Extraction (draft platform.json values)'
@@ -2000,6 +2105,23 @@ if ($script:CollectedUamiIds.Count -gt 0) {
     Write-Host ''
     Write-Info "  UAMI IDs referenced in assignments:"
     foreach ($id in $script:CollectedUamiIds) { Write-Detail "    $id" }
+}
+
+# parTags suggestion (from Section 5d mandatory tag analysis)
+if ($tagKeyCounts.Count -gt 0) {
+    $mandatoryTagsForSec6 = @($tagKeyCounts.GetEnumerator() | Where-Object {
+        ($_.Value / [System.Math]::Max($taggedObjects, 1)) -ge $mandatoryThreshold
+    } | Sort-Object Name | ForEach-Object { $_.Key })
+    if ($mandatoryTagsForSec6.Count -gt 0) {
+        Write-Host ''
+        Write-Info "  Suggested parTags (based on tag frequency analysis — update values as needed):"
+        Write-Host '  parTags: {' -ForegroundColor Gray
+        foreach ($tk in $mandatoryTagsForSec6) {
+            $sampleVal = if ($tagKeyValues[$tk].Count -eq 1) { $tagKeyValues[$tk] | Select-Object -First 1 } else { '<update-value>' }
+            Write-Host "    `"$tk`": `"$sampleVal`"" -ForegroundColor Gray
+        }
+        Write-Host '  }' -ForegroundColor Gray
+    }
 }
 
 if ($script:DnsDuplicateRiskCount -gt 0) {
