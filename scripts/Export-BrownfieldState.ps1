@@ -1282,6 +1282,73 @@ else {
 }
 
 # ============================================================
+# ============================================================
+# Defender for Cloud state (per-subscription REST scan)
+# ============================================================
+function Get-DefenderState ([string]$SubscriptionId) {
+    # Defender plan pricing tiers
+    $plans = @()
+    $r = Invoke-AzRestMethod `
+        -Path "/subscriptions/$SubscriptionId/providers/Microsoft.Security/pricings?api-version=2024-01-01" `
+        -Method GET -ErrorAction SilentlyContinue
+    if ($r -and $r.StatusCode -eq 200) {
+        $data = $r.Content | ConvertFrom-Json -ErrorAction SilentlyContinue
+        if ($data -and $data.PSObject.Properties['value']) {
+            foreach ($p in @($data.value)) {
+                $plans += @{
+                    Name        = $p.name
+                    PricingTier = if ($p.properties.PSObject.Properties['pricingTier'])  { $p.properties.pricingTier }  else { $null }
+                    SubPlan     = if ($p.properties.PSObject.Properties['subPlan'])      { $p.properties.subPlan }      else { $null }
+                }
+            }
+        }
+    }
+
+    # Security contacts
+    $contacts = @()
+    $r2 = Invoke-AzRestMethod `
+        -Path "/subscriptions/$SubscriptionId/providers/Microsoft.Security/securityContacts?api-version=2020-01-01-preview" `
+        -Method GET -ErrorAction SilentlyContinue
+    if ($r2 -and $r2.StatusCode -eq 200) {
+        $data2 = $r2.Content | ConvertFrom-Json -ErrorAction SilentlyContinue
+        if ($data2 -and $data2.PSObject.Properties['value']) {
+            foreach ($c in @($data2.value)) {
+                $props = $c.properties
+                $contacts += @{
+                    Name          = $c.name
+                    Emails        = if ($props.PSObject.Properties['emails'])              { $props.emails }              else { $null }
+                    Phone         = if ($props.PSObject.Properties['phone'])               { $props.phone }               else { $null }
+                    Notifications = if ($props.PSObject.Properties['notificationsByRole']) { $props.notificationsByRole } else { $null }
+                }
+            }
+        }
+    }
+
+    # Auto-provisioning settings (MMA vs AMA indicator)
+    $autoProv = @()
+    $r3 = Invoke-AzRestMethod `
+        -Path "/subscriptions/$SubscriptionId/providers/Microsoft.Security/autoProvisioningSettings?api-version=2017-08-01-preview" `
+        -Method GET -ErrorAction SilentlyContinue
+    if ($r3 -and $r3.StatusCode -eq 200) {
+        $data3 = $r3.Content | ConvertFrom-Json -ErrorAction SilentlyContinue
+        if ($data3 -and $data3.PSObject.Properties['value']) {
+            foreach ($s in @($data3.value)) {
+                $autoProv += @{
+                    Name          = $s.name
+                    AutoProvision = if ($s.properties.PSObject.Properties['autoProvision']) { $s.properties.autoProvision } else { $null }
+                }
+            }
+        }
+    }
+
+    return @{
+        SubscriptionId   = $SubscriptionId
+        DefenderPlans    = $plans
+        SecurityContacts = $contacts
+        AutoProvisioning = $autoProv
+    }
+}
+
 # Blueprint assignments (per-subscription REST scan)
 # ============================================================
 function Get-BlueprintAssignments ([string]$SubscriptionId) {
@@ -1309,6 +1376,25 @@ function Get-BlueprintAssignments ([string]$SubscriptionId) {
     return @()
 }
 
+$defenderStateList = @()
+
+if ($Script:PlatformSubscriptionIds.Count -gt 0) {
+    Write-Step 'Scanning Defender for Cloud state'
+    foreach ($subId in $Script:PlatformSubscriptionIds) {
+        try {
+            $ctx = Set-AzContext -SubscriptionId $subId -ErrorAction SilentlyContinue
+            if (-not $ctx) { continue }
+            $ds = Get-DefenderState -SubscriptionId $subId
+            $defenderStateList += $ds
+            $enabledPlans = @($ds.DefenderPlans | Where-Object { $_['PricingTier'] -eq 'Standard' })
+            Write-Info "  $subId — $($enabledPlans.Count)/$($ds.DefenderPlans.Count) Defender plans enabled"
+        }
+        catch {
+            Write-Warn "  Defender state scan failed for $subId`: $($_.Exception.Message)"
+        }
+    }
+}
+
 $blueprintAssignments = @()
 
 if ($Script:SubscriptionPlacement.Count -gt 0) {
@@ -1323,7 +1409,7 @@ if ($Script:SubscriptionPlacement.Count -gt 0) {
                      else { $null }
             if (-not $subId -or -not $allSubsSeen2.Add($subId)) { continue }
 
-            $found = Get-BlueprintAssignments -SubscriptionId $subId
+            $found = @(Get-BlueprintAssignments -SubscriptionId $subId)
             if ($found.Count -gt 0) {
                 $blueprintAssignments += $found
                 Write-Warn "  $subId — $($found.Count) blueprint assignment(s) found"
@@ -1353,6 +1439,7 @@ $export = @{
     ManagementGroupHierarchy = $mgHierarchy
     SubscriptionPlacement    = $Script:SubscriptionPlacement
     SubscriptionGovernance   = $subscriptionGovernanceScopes
+    DefenderState            = $defenderStateList
     BlueprintAssignments     = $blueprintAssignments
     Scopes                   = @($governanceScopes) + @($infrastructureScopes)
     Warnings                 = $Script:Warnings
@@ -1366,6 +1453,7 @@ Write-Info "Total scopes exported:       $($export.Scopes.Count)"
 Write-Info "Governance scopes:           $($governanceScopes.Count)"
 Write-Info "Infrastructure scopes:       $($infrastructureScopes.Count)"
 Write-Info "Subscription governance:     $($subscriptionGovernanceScopes.Count) subscription(s)"
+Write-Info "Defender state subscriptions: $($defenderStateList.Count)"
 Write-Info "Blueprint assignments:       $($blueprintAssignments.Count)"
 
 if ($Script:Warnings.Count -gt 0) {
