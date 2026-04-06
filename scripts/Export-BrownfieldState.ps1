@@ -1282,6 +1282,65 @@ else {
 }
 
 # ============================================================
+# Blueprint assignments (per-subscription REST scan)
+# ============================================================
+function Get-BlueprintAssignments ([string]$SubscriptionId) {
+    $response = Invoke-AzRestMethod `
+        -Path "/subscriptions/$SubscriptionId/providers/Microsoft.Blueprint/blueprintAssignments?api-version=2018-11-01-preview" `
+        -Method GET -ErrorAction SilentlyContinue
+    if ($response -and $response.StatusCode -eq 200) {
+        $data = $response.Content | ConvertFrom-Json -ErrorAction SilentlyContinue
+        if ($data -and $data.PSObject.Properties['value']) {
+            return @($data.value | ForEach-Object {
+                $props = $_.properties
+                @{
+                    Name              = $_.name
+                    BlueprintId       = if ($props.PSObject.Properties['blueprintId'])  { $props.blueprintId }  else { $null }
+                    Scope             = "/subscriptions/$SubscriptionId"
+                    SubscriptionId    = $SubscriptionId
+                    ProvisioningState = if ($props.PSObject.Properties['provisioningState']) { $props.provisioningState } else { $null }
+                    LockMode          = if ($props.PSObject.Properties['locks'] -and $props.locks) { $props.locks.mode } else { 'None' }
+                    Parameters        = if ($props.PSObject.Properties['parameters'])   { $props.parameters }   else { $null }
+                    ResourceGroups    = if ($props.PSObject.Properties['resourceGroups']) { $props.resourceGroups } else { $null }
+                }
+            })
+        }
+    }
+    return @()
+}
+
+$blueprintAssignments = @()
+
+if ($Script:SubscriptionPlacement.Count -gt 0) {
+    Write-Step 'Scanning blueprint assignments'
+
+    $allSubsSeen2 = [System.Collections.Generic.HashSet[string]]::new()
+    foreach ($mgSubs in $Script:SubscriptionPlacement.Values) {
+        foreach ($sub in @($mgSubs)) {
+            $subId = if ($sub -is [hashtable] -and $sub.ContainsKey('Id')) { $sub['Id'] }
+                     elseif ($sub.PSObject.Properties['Id']) { $sub.Id }
+                     elseif ($sub -is [string]) { $sub }
+                     else { $null }
+            if (-not $subId -or -not $allSubsSeen2.Add($subId)) { continue }
+
+            $found = Get-BlueprintAssignments -SubscriptionId $subId
+            if ($found.Count -gt 0) {
+                $blueprintAssignments += $found
+                Write-Warn "  $subId — $($found.Count) blueprint assignment(s) found"
+            }
+        }
+    }
+
+    if ($blueprintAssignments.Count -eq 0) {
+        Write-Ok "No blueprint assignments found"
+    } else {
+        Write-Warn "$($blueprintAssignments.Count) total blueprint assignment(s) detected"
+    }
+} else {
+    Write-Info 'No subscription placement data — skipping blueprint assignment scan.'
+}
+
+# ============================================================
 # Assemble and write output
 # ============================================================
 Write-Step 'Writing output'
@@ -1294,6 +1353,7 @@ $export = @{
     ManagementGroupHierarchy = $mgHierarchy
     SubscriptionPlacement    = $Script:SubscriptionPlacement
     SubscriptionGovernance   = $subscriptionGovernanceScopes
+    BlueprintAssignments     = $blueprintAssignments
     Scopes                   = @($governanceScopes) + @($infrastructureScopes)
     Warnings                 = $Script:Warnings
 }
@@ -1306,6 +1366,7 @@ Write-Info "Total scopes exported:       $($export.Scopes.Count)"
 Write-Info "Governance scopes:           $($governanceScopes.Count)"
 Write-Info "Infrastructure scopes:       $($infrastructureScopes.Count)"
 Write-Info "Subscription governance:     $($subscriptionGovernanceScopes.Count) subscription(s)"
+Write-Info "Blueprint assignments:       $($blueprintAssignments.Count)"
 
 if ($Script:Warnings.Count -gt 0) {
     Write-Host ''

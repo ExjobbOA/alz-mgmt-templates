@@ -443,6 +443,9 @@ $script:RoleDefCheckResults       = [System.Collections.Generic.List[object]]::n
 $script:OrphanRiskCount  = 0
 $script:MissingRbacCount = 0
 
+# Blueprint assessment counter — populated by Section 4b
+$script:BlueprintCount = 0
+
 # Build policy set name → ALZ custom member policy definition names from library.
 # Used below to expand initiative assignments to their individual member definitions.
 # Seed from the export's PolicySetDefinitions.PolicyDefinitions field (populated by the
@@ -1376,6 +1379,72 @@ if ($allPaWithIdentity.Count -eq 0) {
     } else {
         if ($script:OrphanRiskCount  -gt 0) { Write-Err  "  $($script:OrphanRiskCount) ORPHAN_RISK item(s) — old managed identity role assignments will be stranded after migration; clean up using the principal IDs listed above" }
         if ($script:MissingRbacCount -gt 0) { Write-Warn "  $($script:MissingRbacCount) MISSING_RBAC item(s) — brownfield may already be missing required cross-MG grants" }
+    }
+}
+
+#==============================================================================
+# Section 4b: Blueprint Assessment
+#==============================================================================
+Write-Step 'Section 4b: Blueprint Assessment'
+
+# Known ALZ / CAF blueprint display name fragments (matched case-insensitively)
+$knownAlzBlueprintPatterns = @(
+    'caf-foundation', 'caf-migrate', 'caf foundation', 'caf migration',
+    'alz', 'azure landing zone', 'eslz', 'enterprise scale'
+)
+
+$blueprintAssignments = @()
+if ($export.PSObject.Properties['BlueprintAssignments'] -and $null -ne $export.BlueprintAssignments) {
+    $blueprintAssignments = @($export.BlueprintAssignments)
+}
+
+$script:BlueprintCount = $blueprintAssignments.Count
+
+if ($blueprintAssignments.Count -eq 0) {
+    Write-Ok '  No blueprint assignments found'
+} else {
+    Write-Err "  $($blueprintAssignments.Count) blueprint assignment(s) found — MUST be unassigned before engine deployment"
+    Write-Host ''
+
+    foreach ($ba in $blueprintAssignments) {
+        $name      = if ($ba.PSObject.Properties['Name'])              { $ba.Name }              else { $ba['Name'] }
+        $subId     = if ($ba.PSObject.Properties['SubscriptionId'])    { $ba.SubscriptionId }    else { $ba['SubscriptionId'] }
+        $bpId      = if ($ba.PSObject.Properties['BlueprintId'])       { $ba.BlueprintId }       else { $ba['BlueprintId'] }
+        $state     = if ($ba.PSObject.Properties['ProvisioningState']) { $ba.ProvisioningState } else { $ba['ProvisioningState'] }
+        $lockMode  = if ($ba.PSObject.Properties['LockMode'])          { $ba.LockMode }          else { $ba['LockMode'] }
+        if (-not $lockMode) { $lockMode = 'None' }
+
+        # Check if this looks like a known ALZ/CAF blueprint
+        $isAlzBlueprint = $false
+        $checkStr = "$name $bpId".ToLower()
+        foreach ($pattern in $knownAlzBlueprintPatterns) {
+            if ($checkStr -like "*$pattern*") { $isAlzBlueprint = $true; break }
+        }
+
+        $tag = if ($isAlzBlueprint) { '[ALZ_BLUEPRINT]' } else { '[BLUEPRINT]' }
+        Write-Err "  $tag  $name  (sub: $subId)"
+        Write-Detail "    Blueprint ID:       $bpId"
+        Write-Detail "    Provisioning state: $state"
+
+        if ($lockMode -eq 'AllResourcesReadOnly') {
+            Write-Err  "    Lock mode:          $lockMode — BLOCKING: engine cannot modify blueprint-managed resources"
+        } elseif ($lockMode -eq 'AllResourcesDoNotDelete') {
+            Write-Warn "    Lock mode:          $lockMode — engine can modify but not delete blueprint-managed resources"
+        } else {
+            Write-Info "    Lock mode:          $lockMode"
+        }
+
+        Write-Host ''
+        Write-Detail "    Action required:"
+        Write-Detail "      1. Unassign this blueprint before running the engine"
+        Write-Detail "         Blueprint-managed resources persist but become unmanaged after unassignment"
+        Write-Detail "      2. Review blueprint artifacts — identify which policy assignments and role"
+        Write-Detail "         assignments it created; the engine will need to own these after migration"
+        if ($isAlzBlueprint) {
+            Write-Detail "      3. This appears to be an ALZ/CAF blueprint — its policy assignments will"
+            Write-Detail "         likely conflict directly with the engine's governance deployment"
+        }
+        Write-Host ''
     }
 }
 
@@ -2328,6 +2397,14 @@ else {
 }
 
 Write-Host ''
+Write-Host '  Blueprint assignments:'
+if ($script:BlueprintCount -gt 0) {
+    Write-Err  "    $($script:BlueprintCount) blueprint assignment(s) — MUST be unassigned before engine deployment"
+} else {
+    Write-Ok   "    0 blueprint assignments"
+}
+
+Write-Host ''
 Write-Host '  Cross-MG RBAC (policy-driven identities):'
 if ($script:OrphanRiskCount -gt 0) {
     Write-Err  "    ORPHAN_RISK: $($script:OrphanRiskCount) identity/identities will have stranded role assignments after migration"
@@ -2344,7 +2421,7 @@ if ($script:MissingRbacCount -gt 0) {
 # ASSIGNED Deny mismatches OR BLOCKING locks trigger RED; unassigned-only Deny mismatches are YELLOW.
 Write-Host ''
 $hasDenyAssigned   = $script:MismatchCountByEffect['DenyAssigned'] -gt 0
-$hasBlockingLocks  = $script:LockBlockingCount -gt 0
+$hasBlockingLocks  = $script:LockBlockingCount -gt 0 -or $script:BlueprintCount -gt 0
 $hasReviewItems    = $totalNonStdDefs -gt 0 -or $totalNonStdSets -gt 0 -or $totalStdMismatchDefs -gt 0 -or $script:RoleDefNameCollisionCount -gt 0
 $hasMinorDrift     = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0 -or $script:TotalSubLevelNonStdAssignments -gt 0 -or $script:TotalDenyExemptions -gt 0 -or $script:NetworkingRiskCount -gt 0 -or $script:DnsDuplicateRiskCount -gt 0 -or $script:LockCautionCount -gt 0 -or $script:CostRiskWorstCase -gt 0 -or $script:RoleDefDriftCount -gt 0 -or $script:OrphanRiskCount -gt 0 -or $script:MissingRbacCount -gt 0
 
@@ -2362,7 +2439,12 @@ elseif ($hasDenyAssigned -or $hasBlockingLocks) {
         Write-Host '    b) Test in DoNotEnforce mode first if compliance status is uncertain'
         Write-Host '    c) Deploy governance-only first, then re-enable enforcement after remediation'
     }
-    if ($hasBlockingLocks) {
+    if ($script:BlueprintCount -gt 0) {
+        Write-Host "  Blueprints: $($script:BlueprintCount) active blueprint assignment(s) — will conflict with engine governance."
+        Write-Host '    a) Unassign all blueprints listed in Section 4b before running the engine'
+        Write-Host '    b) Review blueprint artifacts to identify policy/role assignments the engine must own'
+    }
+    if ($script:LockBlockingCount -gt 0) {
         Write-Host "  Locks: $($script:LockBlockingCount) BLOCKING ReadOnly lock(s) — engine deployments will fail until removed."
         Write-Host '    a) Remove all BLOCKING locks listed in Section 5 before running the engine'
         Write-Host '    b) Re-apply desired locks post-migration via parGlobalResourceLock in engine config'
