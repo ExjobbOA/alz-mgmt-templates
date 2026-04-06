@@ -1184,3 +1184,105 @@ Section 3b found:
 Section 7: `Non-standard direct assignments: 3`, `Policy exemptions: 0`.
 
 These MDFC assignments are built-in Azure Security Center assignments automatically created when Defender plans are enabled — not ALZ library entries, correct to flag as non-standard.
+
+---
+
+## Apr 06: Brownfield Tooling — Gap Closure Sprint (Gaps 1–7)
+
+### Background
+
+After the initial brownfield tooling was in place (Export, Compare, diff report, subscription-level governance), we did a structured gap analysis and defined 10 discrete gaps between the current tooling and full pre-migration coverage. Each gap was scoped as a self-contained Claude Code task with explicit acceptance criteria.
+
+This entry documents all 7 gaps completed in this sprint. Gaps 8–10 (Defender for Cloud, Tags, Bootstrap Identity) are deferred.
+
+---
+
+### Gap 3: Hub Networking Full State Assessment (PR #164 area)
+
+**Problem**: Export collected VNets, firewalls, PIPs, NSGs, route tables, and private DNS zones but Compare did almost nothing with the data — just listed RGs and LAW naming.
+
+**Export changes**: Added bastion hosts, VPN/ER gateways, firewall policies, DNS private resolvers, DCRs, UAMIs. Hub detection via subnet names (GatewaySubnet, AzureFirewallSubnet).
+
+**Compare changes**: New hub networking assessment subsection in Section 5. Cross-references brownfield hub topology against engine defaults — flags address space mismatches (10.0.0.0/22 brownfield vs 10.20.0.0/16 engine default), flags existing route tables (engine will overwrite next-hop to firewall IP), flags DCR coexistence (engine creates 3 more, existing ones untouched), flags UAMI coexistence. Peering inventory for spoke mapping.
+
+---
+
+### Gap 4: Private DNS Zones & VNet Links (PR #164 area)
+
+**Problem**: Export captured DNS zones but Compare didn't classify them or flag the critical DUPLICATE_RISK case (zone in wrong RG → engine creates a conflicting second zone).
+
+**Export changes**: Added VNet link collection per DNS zone via REST (`/virtualNetworkLinks`). Added `HubLinked` flag per zone.
+
+**Compare changes**: New Private DNS Zone Assessment block in Section 5. Classifies each zone as `DUPLICATE_RISK` (exists but in wrong RG — engine will create a conflicting duplicate), `MATCH` (exists in correct engine RG), `EXTRA` (not in engine defaults — engine won't touch), or `MISSING` (not yet deployed). Flags `HUB_LINKED` zones. Provides operator guidance: move zones to engine RG, or disable engine DNS deployment and manage via policy parameter overrides. Zone duplicate count feeds `$DnsDuplicateRiskCount` → Section 7 + traffic light.
+
+**Testing**: Oskar tenant had 2 DUPLICATE_RISK zones (`privatelink.blob.core.windows.net`, `privatelink.vaultcore.azure.net`) in `rg-alz-conn-swedencentral` instead of engine's `rg-alz-dns-swedencentral`. Correctly flagged.
+
+---
+
+### Gap 5: Resource Locks (PR #165)
+
+**Problem**: Engine deploys configurable `CanNotDelete` or `ReadOnly` locks. Brownfield may already have locks on RGs or resources that would block stack operations.
+
+**Export changes**: REST scan of all resource groups and key resources for `Microsoft.Authorization/locks`. Captures lock name, level (CanNotDelete / ReadOnly), scope.
+
+**Compare changes**: New Resource Lock Assessment block in Section 5. Classifies as `BLOCKING` (ReadOnly — prevents engine writes, deployment will fail) or `CAUTION` (CanNotDelete — blocks stack cleanup/delete operations but not deployments). `BLOCKING` count feeds `$LockBlockingCount` → RED traffic light. Summary in Section 7.
+
+---
+
+### Gap 6: Cost-Incurring Resource Inventory (PR #166/#167)
+
+**Problem**: Engine deploys DDoS plans (~$2944/month), Azure Firewall (~$1386/month), VPN/ER gateways, Bastion — if brownfield already has these and engine creates duplicates, customer pays double.
+
+**Export changes**: None needed — infrastructure scan already collected these resource types.
+
+**Compare changes**: New Section 5b: Cost Risk Assessment. For each cost-incurring resource type, checks if brownfield already has one. If yes, flags the monthly cost and explains the duplicate risk. Calculates worst-case duplicate monthly total. Summary in Section 7; contributes to `$hasMinorDrift`.
+
+---
+
+### Gap 1: Custom RBAC Role Definitions (PR #168)
+
+**Problem**: Engine deploys 5 custom role definitions (e.g. `Subscription-Owner (alz)`) with specific GUIDs and permission sets. Brownfield may have same-named roles under different GUIDs, or same-GUID roles with drifted permissions.
+
+**Export changes**: None needed — `Get-AzRoleDefinition -Custom` already collected role definitions.
+
+**Compare changes**: New ALZ Engine Role Definition Check subsection in Section 4. Loads engine role defs from `lib/alz/*.alz_role_definition.json`. For each engine role: GUID match → check permissions (MATCH or DRIFT), name match under different GUID → NAME_COLLISION, absent → MISSING (safe, engine will create). DRIFT and NAME_COLLISION counts feed Section 7 counters. NAME_COLLISION also contributes to `$hasReviewItems` (YELLOW).
+
+**Testing**: Oskar tenant had all 5 ALZ roles as exact MATCH — expected for engine-deployed tenant.
+
+---
+
+### Gap 2: RBAC Role Assignments & Policy-Driven Managed Identities (this PR)
+
+**Problem**: Engine creates ~20+ cross-MG role assignments for managed identities that back DINE/Modify policy assignments (three `-rbac.bicep` modules). When the engine deploys, it creates NEW managed identities — the old ones' cross-MG role assignments become orphaned. Export didn't capture identity principal IDs. `Get-AzPolicyAssignment` in Az.Resources 7.x does not surface `identity.principalId` on returned PS objects.
+
+**Export changes**:
+- REST supplement: `GET {mgScope}/providers/Microsoft.Authorization/policyAssignments?$filter=atScope()&api-version=2024-04-01` to reliably capture `identity.principalId` (Az.Resources PowerShell bug workaround). `api-version=2023-04-01` doesn't exist — returns 400; correct version is `2024-04-01`. Also required `$filter=atScope()` — MG-scope list without filter returns 400.
+- `ManagedIdentityPrincipalId` field on every policy assignment record.
+- Post-processing: stamps `IsPolicyDriven = true/false` on every role assignment by matching principal IDs against the managed identity set.
+
+**Compare changes**: New Policy-Driven Identity Audit subsection in Section 4. Hardcodes cross-MG RBAC expectations from the three `-rbac.bicep` modules (10 grants). Flags:
+- `ORPHAN_RISK` — identity has cross-MG role assignments that will be stranded; outputs exact principal IDs and role assignment resource IDs for cleanup
+- `MISSING_RBAC` — expected cross-MG grant absent from brownfield
+- `CLEAN` — no policy-driven identities at scope
+
+**Testing**: Oskar tenant showed 9 ORPHAN_RISK items (8 platform-MG assignments → landingzones grants, 1 corp `Deploy-Private-DNS-Zones` → platform grant). 0 MISSING_RBAC — tenant was engine-deployed so all grants present. 92 PAs with identity captured, 189 policy-driven RAs flagged.
+
+---
+
+### Gap 7: Legacy Blueprint Assignments (this PR)
+
+**Problem**: Blueprints (deprecated) were common in early ALZ deployments. Blueprint-assigned resources are locked and can't be modified by deployment stacks. Engine does not manage blueprints.
+
+**Export changes**: New `Get-BlueprintAssignments` function using Blueprint REST API (`/subscriptions/{id}/providers/Microsoft.Blueprint/blueprintAssignments?api-version=2018-11-01-preview`). Scans all subscriptions in `SubscriptionPlacement`. Captures name, blueprintId, provisioningState, lockMode, parameters, resourceGroups. Stored under top-level `BlueprintAssignments` key.
+
+**Compare changes**: New Section 4b: Blueprint Assessment. Detects known ALZ/CAF blueprint name patterns (`caf-foundation`, `caf-migrate`, `eslz`, `azure landing zone`, etc.) and tags as `ALZ_BLUEPRINT`. Flags `AllResourcesReadOnly` lock mode as BLOCKING, `AllResourcesDoNotDelete` as WARN. Per-assignment operator guidance. Blueprint count drives RED traffic light in Section 7 (alongside blocking locks).
+
+**Testing**: No test tenants had blueprint assignments — verified correct `[OK] No blueprint assignments found` output and backward compatibility for exports missing the `BlueprintAssignments` key.
+
+---
+
+### Gaps 8–10: Deferred
+
+- **Gap 8** (Defender for Cloud): Export MDfC plan state per subscription, compare against what engine policies will configure. Deferred — lower migration risk than gaps 1–7.
+- **Gap 9** (Tags): Capture existing tag schemas, flag conflicts with engine tag parameters. Deferred — informational only, no deployment blocker.
+- **Gap 10** (Bootstrap Identity): Verify UAMI, FIC, GitHub environment state matches what `onboard.ps1` creates. Deferred — only relevant at onboarding time, not mid-migration.
