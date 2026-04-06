@@ -446,6 +446,9 @@ $script:MissingRbacCount = 0
 # Blueprint assessment counter — populated by Section 4b
 $script:BlueprintCount = 0
 
+# Defender for Cloud assessment counters — populated by Section 5c
+$script:MmaProvisioningCount = 0
+
 # Build policy set name → ALZ custom member policy definition names from library.
 # Used below to expand initiative assignments to their individual member definitions.
 # Seed from the export's PolicySetDefinitions.PolicyDefinitions field (populated by the
@@ -1853,6 +1856,106 @@ if ($costOverrides.Count -gt 0) {
 }
 
 #==============================================================================
+# Section 5c: Defender for Cloud Assessment
+#==============================================================================
+Write-Step 'Section 5c: Defender for Cloud Assessment'
+
+# Defender plans the engine enables via Deploy-MDFC-Config-H224 (subset most commonly enabled by portal ALZ)
+$engineEnabledPlans = @(
+    'VirtualMachines', 'SqlServers', 'AppServices', 'StorageAccounts', 'Containers',
+    'KeyVaults', 'Dns', 'Arm', 'OpenSourceRelationalDatabases', 'SqlServerVirtualMachines',
+    'CosmosDbs', 'CloudPosture'
+)
+
+$defenderStateList = @()
+if ($export.PSObject.Properties['DefenderState'] -and $null -ne $export.DefenderState) {
+    $defenderStateList = @($export.DefenderState)
+}
+
+if ($defenderStateList.Count -eq 0) {
+    Write-Info '  No Defender state captured — re-run Export-BrownfieldState.ps1 to include Defender data'
+} else {
+    foreach ($ds in $defenderStateList) {
+        $subId = if ($ds.PSObject.Properties['SubscriptionId']) { $ds.SubscriptionId } else { $ds['SubscriptionId'] }
+        Write-Host ''
+        Write-Host "  ── Subscription: $subId ──"
+
+        # --- Defender plans ---
+        $plans = @(if ($ds.PSObject.Properties['DefenderPlans']) { $ds.DefenderPlans } else { $ds['DefenderPlans'] })
+        if ($plans.Count -gt 0) {
+            $enabledPlans  = @($plans | Where-Object {
+                $t = if ($_.PSObject.Properties['PricingTier']) { $_.PricingTier } else { $_['PricingTier'] }
+                $t -eq 'Standard'
+            })
+            $disabledPlans = @($plans | Where-Object {
+                $t = if ($_.PSObject.Properties['PricingTier']) { $_.PricingTier } else { $_['PricingTier'] }
+                $t -ne 'Standard'
+            })
+
+            Write-Info "  Defender plans: $($enabledPlans.Count) enabled (Standard), $($disabledPlans.Count) disabled (Free)"
+
+            # Plans the engine will enable that are currently disabled
+            $willEnable = @($disabledPlans | Where-Object {
+                $n = if ($_.PSObject.Properties['Name']) { $_.Name } else { $_['Name'] }
+                $engineEnabledPlans -contains $n
+            })
+            if ($willEnable.Count -gt 0) {
+                Write-Warn "  Engine will enable $($willEnable.Count) additional plan(s):"
+                foreach ($p in $willEnable) {
+                    $n = if ($p.PSObject.Properties['Name']) { $p.Name } else { $p['Name'] }
+                    Write-Detail "    $n (currently Free — engine policy will set Standard)"
+                }
+            } else {
+                Write-Ok '  All engine-required Defender plans already enabled'
+            }
+
+            # Plans enabled with sub-plans (P1/P2 — engine may change tier)
+            foreach ($p in $enabledPlans) {
+                $n  = if ($p.PSObject.Properties['Name'])    { $p.Name }    else { $p['Name'] }
+                $sp = if ($p.PSObject.Properties['SubPlan']) { $p.SubPlan } else { $p['SubPlan'] }
+                if ($sp) {
+                    Write-Info "  $n — sub-plan: $sp (verify engine policy matches desired tier)"
+                }
+            }
+        }
+
+        # --- Security contacts ---
+        $contacts = @(if ($ds.PSObject.Properties['SecurityContacts']) { $ds.SecurityContacts } else { $ds['SecurityContacts'] })
+        if ($contacts.Count -gt 0) {
+            foreach ($c in $contacts) {
+                $emails = if ($c.PSObject.Properties['Emails']) { $c.Emails } else { $c['Emails'] }
+                if ($emails) {
+                    Write-Info "  Security contact email(s): $emails"
+                    Write-Detail "    Engine policy (Deploy-MDFC-Config-H224) will overwrite this."
+                    Write-Detail "    Action: ensure emailSecurityContact in platform.json policy overrides matches desired value."
+                }
+            }
+        } else {
+            Write-Info '  No security contacts configured'
+        }
+
+        # --- Auto-provisioning (MMA detection) ---
+        $autoProv = @(if ($ds.PSObject.Properties['AutoProvisioning']) { $ds.AutoProvisioning } else { $ds['AutoProvisioning'] })
+        $mmaEntry = $autoProv | Where-Object {
+            $n = if ($_.PSObject.Properties['Name']) { $_.Name } else { $_['Name'] }
+            $n -eq 'mma-agent' -or $n -eq 'MicrosoftMonitoringAgent'
+        }
+        if ($mmaEntry) {
+            $mmaState = if ($mmaEntry.PSObject.Properties['AutoProvision']) { $mmaEntry.AutoProvision } else { $mmaEntry['AutoProvision'] }
+            if ($mmaState -eq 'On') {
+                $script:MmaProvisioningCount++
+                Write-Warn '  MMA auto-provisioning: ON — legacy Log Analytics agent will be deployed to new VMs'
+                Write-Detail '    Engine uses AMA-based monitoring (Deploy-MDFC-DefSQL-AMA, DCRs).'
+                Write-Detail '    Both MMA and AMA will run simultaneously post-migration.'
+                Write-Detail '    Action: plan MMA deprecation after AMA coverage is confirmed.'
+            } else {
+                Write-Ok "  MMA auto-provisioning: $mmaState"
+            }
+        }
+    }
+}
+
+#==============================================================================
 # Section 6: Config Extraction
 #==============================================================================
 Write-Step 'Section 6: Config Extraction (draft platform.json values)'
@@ -2397,6 +2500,14 @@ else {
 }
 
 Write-Host ''
+Write-Host '  Defender for Cloud:'
+if ($script:MmaProvisioningCount -gt 0) {
+    Write-Warn "    MMA auto-provisioning ON: $($script:MmaProvisioningCount) subscription(s) — plan AMA migration post-deployment"
+} else {
+    Write-Ok   "    MMA auto-provisioning: off (or not captured)"
+}
+
+Write-Host ''
 Write-Host '  Blueprint assignments:'
 if ($script:BlueprintCount -gt 0) {
     Write-Err  "    $($script:BlueprintCount) blueprint assignment(s) — MUST be unassigned before engine deployment"
@@ -2423,7 +2534,7 @@ Write-Host ''
 $hasDenyAssigned   = $script:MismatchCountByEffect['DenyAssigned'] -gt 0
 $hasBlockingLocks  = $script:LockBlockingCount -gt 0 -or $script:BlueprintCount -gt 0
 $hasReviewItems    = $totalNonStdDefs -gt 0 -or $totalNonStdSets -gt 0 -or $totalStdMismatchDefs -gt 0 -or $script:RoleDefNameCollisionCount -gt 0
-$hasMinorDrift     = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0 -or $script:TotalSubLevelNonStdAssignments -gt 0 -or $script:TotalDenyExemptions -gt 0 -or $script:NetworkingRiskCount -gt 0 -or $script:DnsDuplicateRiskCount -gt 0 -or $script:LockCautionCount -gt 0 -or $script:CostRiskWorstCase -gt 0 -or $script:RoleDefDriftCount -gt 0 -or $script:OrphanRiskCount -gt 0 -or $script:MissingRbacCount -gt 0
+$hasMinorDrift     = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0 -or $script:TotalSubLevelNonStdAssignments -gt 0 -or $script:TotalDenyExemptions -gt 0 -or $script:NetworkingRiskCount -gt 0 -or $script:DnsDuplicateRiskCount -gt 0 -or $script:LockCautionCount -gt 0 -or $script:CostRiskWorstCase -gt 0 -or $script:RoleDefDriftCount -gt 0 -or $script:OrphanRiskCount -gt 0 -or $script:MissingRbacCount -gt 0 -or $script:MmaProvisioningCount -gt 0
 
 if (-not $hasReviewItems -and -not $hasMinorDrift -and -not $hasBlockingLocks) {
     Write-Colored 'GREEN' 'Green' "Brownfield is a clean portal accelerator deployment. Low risk for engine adoption."
