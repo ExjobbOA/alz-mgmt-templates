@@ -1286,3 +1286,74 @@ This entry documents all 7 gaps completed in this sprint. Gaps 8–10 (Defender 
 - **Gap 8** (Defender for Cloud): Export MDfC plan state per subscription, compare against what engine policies will configure. Deferred — lower migration risk than gaps 1–7.
 - **Gap 9** (Tags): Capture existing tag schemas, flag conflicts with engine tag parameters. Deferred — informational only, no deployment blocker.
 - **Gap 10** (Bootstrap Identity): Verify UAMI, FIC, GitHub environment state matches what `onboard.ps1` creates. Deferred — only relevant at onboarding time, not mid-migration.
+
+---
+
+## Apr 07: Brownfield Tooling — Gaps 9–10, ARM Normalization Fix, Parallel Deployment Reframe
+
+### Gap 9: Tag Schema Assessment (PR #173)
+
+**Problem**: Brownfield tenants commonly enforce tagging via Azure Policy. The engine ships its own `parTags` parameter that gets applied to all engine-deployed resource groups. Without knowing which tag keys the existing environment enforces, operators can't correctly set `parTags` — they'd either miss required tags (causing non-compliance on engine-deployed RGs) or add redundant ones.
+
+**Export changes**: None needed — resource groups captured by the existing infrastructure scan already include tags.
+
+**Compare changes**: New Section 5d: Tag Schema Assessment. Scans tag keys across all tagged resource groups in the infrastructure scope. Keys appearing on ≥80% of tagged objects are classified as "mandatory." Cross-references against known ALZ tag enforcement policy assignment name patterns to distinguish policy-enforced keys from organically applied ones. Section 6 config extraction gains a `parTags` block with discovered mandatory keys and sample values.
+
+---
+
+### Gap 10: CI/CD Identity & Bootstrap State Assessment (PR #174)
+
+**Problem**: Before running the engine, operators need to know which high-privilege service principals have Owner/Contributor at the int-root MG scope, whether a prior `onboard.ps1` run has already created UAMIs, and whether a WhatIf custom role exists. Without this, they cannot plan identity decommissioning or detect double-bootstrap.
+
+**Export changes**: New `Get-HighPrivilegeIdentities` function — REST call to list Owner + Contributor role assignments at the int-root MG scope (`atScope()` filter). Stored under top-level `HighPrivilegeIdentities` key.
+
+**Compare changes**: New Section 4c: CI/CD Identity Assessment.
+- Lists all Owner/Contributor principals at int-root scope with type classification: `ServicePrincipal` (likely CI/CD pipeline identity — flag for decommissioning after engine OIDC is validated), `User`/`Group` (should be least-privileged post-migration).
+- Detects existing bootstrap UAMIs (`id-alz-mgmt-*-plan/apply-*` pattern) in the infrastructure scope — indicates a prior `onboard.ps1` run or an existing engine bootstrap that will be overwritten.
+- Detects existing WhatIf custom role (any role containing `deployments/whatIf/action`) in MG-scope role definitions.
+- Per-identity operator guidance: plan decommissioning after engine OIDC is validated, not before.
+
+**Also in this PR — ARM bracket normalization fix**: Changed single-pass `\[\[ → [` to `\[{2,} → [` in both the `Export` hashing and `Compare` hashing. The original single-pass left `[[[` in DINE policies with nested ARM templates (e.g. `Deploy-Custom-Route-Table`), producing spurious rule hash mismatches. The fix collapses any run of 2+ opening brackets to one in a single pass. Effect: Sylaviken's real mismatch count drops from 9 to 8 (one of the 9 was a normalization artifact).
+
+**Also in this PR — diff-deny-rules.py Tier 4 improvement**: Unassigned Deny mismatches (Tier 4) now render as unified diff cards instead of a compact table. Clickable TOC anchors added. Cards rendered at `opacity: 0.75` to visually deprioritize unassigned items while keeping them accessible.
+
+---
+
+### Parallel Deployment Reframe (feat/compare-parallel-deployment-reframe)
+
+After the gap closure sprint, we re-examined the fundamental framing of the Compare report. The original report was written assuming **in-place takeover**: the engine deploys into the existing MG hierarchy and takes over management of existing resources. Every risk item was framed as a "blocker before deploying the engine."
+
+The actual migration strategy is **parallel deployment**: the engine always deploys a fresh hierarchy alongside the existing one. Subscriptions are migrated one at a time after validation. The existing hierarchy is never the engine's deployment target — it continues running unchanged until decommissioned.
+
+This changes the risk model entirely. Almost nothing blocks the engine deployment itself. Risk materializes at **subscription move time**, not at engine deploy time.
+
+**Changes to `Compare-BrownfieldState.ps1`**:
+
+- **Mode banner**: Two `[INFO]` lines added after the header (Export/Library/Tenant lines) establish the parallel deployment framing before any section output.
+- **Section 4 ORPHAN_RISK**: `[ERROR]` → `[WARN]`. Text changed from "will be stranded after migration" to "will need cleanup during decommissioning." Managed identities in the old hierarchy remain functional until the old hierarchy is removed — this is a decommissioning task, not an engine deployment blocker.
+- **Section 5 locks**: BLOCKING downgraded from `Write-Err` to `Write-Warn`. All lock guidance changed from "remove before running the engine" to "old hierarchy — does not affect parallel engine deployment, review during decommissioning." ReadOnly locks on old-hierarchy RGs are irrelevant — the engine deploys its own RGs in the new hierarchy.
+- **Section 5 DNS DUPLICATE_RISK**: Options reordered. Option A is now "deploy engine to a different connectivity subscription" — if the engine uses a different subscription, there is no DNS zone name conflict at all. Original options (move zones, disable deployment) are now B and C.
+- **Section 5b cost risk**: Framing changed from "duplicate risk" to "transitional cost." The engine deploying a new DDoS plan or VPN gateway alongside an existing one is intentional in parallel mode — not an accident. `[COST]`/`[OK]` → `[INFO]`; "worst-case duplicate cost" → "estimated transitional cost during migration"; per-type override guidance and the `$costOverrides` variable removed (overriding to reuse existing resources is not the parallel model pattern).
+- **Section 6 config extraction**: Framing changed from "starting point for platform.json" to "reference values, not overrides." The engine deploys its own resources; these values inform configuration of the new hierarchy, not collision avoidance.
+- **Section 7 summary**: ORPHAN_RISK display downgraded to `Write-Warn`. Locks display changed from `Write-Err` to `Write-Warn`. Cost line changed from `Write-Warn` to `Write-Info` with "transitional" framing. Networking cost line reframed from "cost-duplicate risk" to "transitional cost." Duplicate subscription-level governance block removed.
+- **Traffic light**:
+  - RED triggers only on: DNS same-subscription conflicts (engine cannot deploy cleanly without resolving these) and active blueprint assignments (governance conflict at subscription move time). Deny-effect mismatches and resource locks removed from RED.
+  - YELLOW gains Deny-effect mismatches. New YELLOW message: "Engine deployment is safe. Review these items before moving subscriptions: a) verify subscription workloads comply with new hierarchy Deny policies, b) plan decommissioning of old hierarchy resources, c) clean up orphaned managed identities."
+  - `$hasMinorDrift` gains `$LockBlockingCount` so blocking locks still contribute to at least YELLOW.
+  - RED title is conditional: "DNS zone conflicts..." when DNS triggers it, fallback generic message when only blueprints trigger it.
+
+---
+
+### Platform Subscription Strategy in Parallel Deployment
+
+A conceptual clarity issue surfaced during the reframe work: when the engine deploys a new hierarchy and operators begin migrating subscriptions, **platform subscriptions are the highest-stakes moves**.
+
+Existing platform subscriptions — especially the connectivity subscription — contain resources that may not comply with the engine's Deny-effect policies. Moving such a subscription into the new ALZ hierarchy triggers policy evaluation. If the hub VNet has subnets without NSGs, or the DDoS policy is still in Modify mode with a stale plan ID, the evaluation will fail or silently modify resources.
+
+**Two paths forward, each with clear tradeoffs**:
+
+1. **Create fresh platform subscriptions**: Cleanest option. Engine deploys its hub VNet, LAW, and other platform resources into new subscriptions. Old platform subscriptions remain under the old hierarchy until decommissioning. No compliance risk at move time. Cost implication: two sets of platform resources run in parallel during the transition — intentional and framed explicitly as transitional cost in the updated Compare report.
+
+2. **Reuse existing platform subscriptions**: Move the existing connectivity/management/identity subscriptions into the new hierarchy. Requires a pre-migration compliance pass: every resource in the subscription must satisfy the new hierarchy's Deny policies before the subscription is moved. For connectivity this means verifying NSGs on all subnets, setting the DDoS policy effect to Audit (or pointing it at a real plan), and ensuring no disallowed public IPs exist on non-firewall resources. The Compare report surfaces which Deny-effect policies are changing — the planned `discover.ps1` (compliance pre-check against live subscription resources) is the instrument for the subscription-level compliance verification step.
+
+**Implication for tooling**: The Compare report's updated YELLOW guidance now explicitly lists "verify subscription workloads comply with new hierarchy Deny policies" as item (a) before moving any subscription. The report does not yet distinguish between platform subscriptions (higher risk — contain infrastructure the engine will also deploy) and landing zone subscriptions (lower risk — workload-only, no overlap with engine-managed infrastructure). Making this distinction visible is a planned improvement to `discover.ps1`.

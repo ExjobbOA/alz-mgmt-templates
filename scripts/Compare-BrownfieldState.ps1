@@ -240,6 +240,8 @@ Write-Info "Export:  $BrownfieldExport"
 Write-Info "Library: $AlzLibraryPath"
 Write-Info "Tenant:  $($export.TenantId)"
 Write-Info "Exported at: $($export.ExportTimestamp)"
+Write-Info "Strategy: Parallel deployment — engine deploys alongside existing hierarchy"
+Write-Info "Migration: Subscriptions moved individually after validation"
 
 #==============================================================================
 # Load ALZ library reference sets
@@ -1323,7 +1325,7 @@ if ($allPaWithIdentity.Count -eq 0) {
         if ($crossMgRas.Count -eq 0) { continue }
 
         $script:OrphanRiskCount++
-        Write-Err "  [ORPHAN_RISK] $($paEntry.AssignmentName) @ $($paEntry.ScopeName)"
+        Write-Warn "  [ORPHAN_RISK] $($paEntry.AssignmentName) @ $($paEntry.ScopeName)"
         Write-Detail "    Identity principal ID: $($paEntry.PrincipalId)"
         Write-Detail "    Engine migration will orphan $($crossMgRas.Count) cross-MG role assignment(s):"
         foreach ($ra in $crossMgRas) {
@@ -1380,7 +1382,10 @@ if ($allPaWithIdentity.Count -eq 0) {
     if ($script:OrphanRiskCount -eq 0 -and $script:MissingRbacCount -eq 0) {
         Write-Ok "  Cross-MG RBAC: all policy-driven identities are clean"
     } else {
-        if ($script:OrphanRiskCount  -gt 0) { Write-Err  "  $($script:OrphanRiskCount) ORPHAN_RISK item(s) — old managed identity role assignments will be stranded after migration; clean up using the principal IDs listed above" }
+        if ($script:OrphanRiskCount  -gt 0) {
+            Write-Warn "  $($script:OrphanRiskCount) ORPHAN_RISK item(s) — role assignments in old hierarchy will need cleanup during decommissioning"
+            Write-Detail "             These identities remain functional until the old MG hierarchy is removed."
+        }
         if ($script:MissingRbacCount -gt 0) { Write-Warn "  $($script:MissingRbacCount) MISSING_RBAC item(s) — brownfield may already be missing required cross-MG grants" }
     }
 }
@@ -1834,14 +1839,15 @@ foreach ($ss in @($subScope)) {
 
             switch ($classification) {
                 'BLOCKING' {
-                    Write-Err  "  [BLOCKING] $level lock '$($lock.Name)' on $scopeDesc"
-                    Write-Detail "             Remove this lock before running the engine."
-                    Write-Detail "             Re-apply after migration if desired — the engine can manage locks via parGlobalResourceLock."
+                    Write-Warn "  [BLOCKING] $level lock '$($lock.Name)' on $scopeDesc"
+                    Write-Detail "             Lock is on old hierarchy resources — does not affect parallel engine deployment."
+                    Write-Detail "             Review during decommissioning of old hierarchy."
                 }
                 'CAUTION' {
                     Write-Warn "  [CAUTION]  $level lock '$($lock.Name)' on $scopeDesc"
                     Write-Detail "             CanNotDelete lock will not block deployments but may prevent stack cleanup operations."
-                    Write-Detail "             Consider removing before migration if using denySettingsMode on the stack."
+                    Write-Detail "             Lock is on old hierarchy resources — does not affect parallel engine deployment."
+                    Write-Detail "             Review during decommissioning of old hierarchy."
                 }
                 'SAFE' {
                     Write-Info "  [SAFE]     $level lock '$($lock.Name)' on $scopeDesc"
@@ -1886,7 +1892,6 @@ $costResourceDefs = @(
 # Aggregate key resources across all infrastructure subscriptions
 $allKeyResources = @($infraReport | ForEach-Object { $_.KeyResources })
 
-$costOverrides = [System.Collections.Generic.List[string]]::new()
 $worstCaseTotal = 0
 
 foreach ($def in $costResourceDefs) {
@@ -1894,50 +1899,15 @@ foreach ($def in $costResourceDefs) {
 
     if ($found.Count -gt 0) {
         $names = ($found | ForEach-Object { $_.Name }) -join ', '
-        Write-Warn "  [COST]  $($def.DisplayName): $($found.Count) found ($names)"
-        Write-Detail "          Engine default: $($def.EngineCreates)"
-        Write-Detail "          Estimated monthly cost if duplicated: ~`$$($def.MonthlyCost)/month"
+        Write-Info "  [INFO]  $($def.DisplayName): $($found.Count) in brownfield ($names)"
+        Write-Detail "          Engine will deploy its own in the new hierarchy."
+        Write-Detail "          Estimated transitional cost during migration: ~`$$($def.MonthlyCost)/month"
+        Write-Detail "          After migration, decommission the old resource(s) to avoid continued cost."
 
         $worstCaseTotal += $def.MonthlyCost * $found.Count
-
-        # Per-type action guidance and override extraction
-        switch ($def.Type) {
-            'ddosProtectionPlan' {
-                foreach ($r in $found) {
-                    Write-Detail "          Action: pass existing plan ID as ddosProtectionPlanResourceId to avoid duplicate"
-                    $costOverrides.Add("  ddosProtectionPlanResourceId: `"$($r.ResourceId)`"")
-                }
-            }
-            'azureFirewall' {
-                foreach ($r in $found) {
-                    $skuStr = if ($r.PSObject.Properties['Sku'] -and $r.Sku) {
-                        $skuObj = $r.Sku
-                        if ($skuObj -is [hashtable]) { " (SKU: $($skuObj.Tier))" }
-                        elseif ($skuObj.PSObject.Properties['Tier']) { " (SKU: $($skuObj.Tier))" }
-                        else { '' }
-                    } else { '' }
-                    Write-Detail "          $($r.Name)$skuStr — engine will replace (same name) or duplicate (different name)"
-                }
-            }
-            'vpnGateway' {
-                foreach ($r in $found) {
-                    Write-Detail "          Action: set deployVpnGateway=false in hubnetworking params or reuse existing"
-                }
-            }
-            'expressRouteGateway' {
-                foreach ($r in $found) {
-                    Write-Detail "          Action: set deployExpressRouteGateway=false in hubnetworking params or reuse existing"
-                }
-            }
-            'bastionHost' {
-                foreach ($r in $found) {
-                    Write-Detail "          Action: set deployBastion=false in hubnetworking params if not needed"
-                }
-            }
-        }
     }
     else {
-        Write-Ok   "  [OK]    $($def.DisplayName): 0 found — engine will create if configured"
+        Write-Info "  [INFO]  $($def.DisplayName): 0 in brownfield — engine will create new (~`$$($def.MonthlyCost)/month) if configured"
     }
 }
 
@@ -1954,18 +1924,10 @@ $script:CostRiskWorstCase = $worstCaseTotal
 
 Write-Host ''
 if ($worstCaseTotal -gt 0) {
-    Write-Warn "  [WARN]  Worst-case monthly duplicate cost: `$$worstCaseTotal/month"
-    Write-Detail "          (Assumes engine creates new instances of every type listed above as COST)"
+    Write-Info "  [INFO]  Estimated transitional monthly cost (both old and new running): `$$worstCaseTotal/month"
+    Write-Detail "          Decommission old resources after migration to return to baseline cost."
 } else {
-    Write-Ok   "  [OK]    No cost-incurring duplicate resources detected."
-}
-
-if ($costOverrides.Count -gt 0) {
-    Write-Host ''
-    Write-Host '  Suggested overrides to avoid duplicate costs (add to hubnetworking params or platform.json):'
-    foreach ($line in $costOverrides) {
-        Write-Detail $line
-    }
+    Write-Ok   "  [OK]    No new cost-incurring resources in brownfield."
 }
 
 #==============================================================================
@@ -2179,8 +2141,9 @@ if ($tagPolicies.Count -gt 0) {
 Write-Step 'Section 6: Config Extraction (draft platform.json values)'
 
 Write-Host ''
-Write-Host '  The following values were found in policy assignment parameters'
-Write-Host '  and infrastructure resources. Use as a starting point for platform.json.'
+Write-Host '  The following values were discovered in the existing environment.'
+Write-Host '  Use to inform the new hierarchy''s platform.json configuration.'
+Write-Host '  The engine will deploy its own resources — these are reference values, not overrides.'
 Write-Host ''
 
 $subScopeObj = @($subScope) | Select-Object -First 1
@@ -2239,11 +2202,10 @@ if ($tagKeyCounts.Count -gt 0) {
 
 if ($script:DnsDuplicateRiskCount -gt 0) {
     Write-Host ''
-    Write-Warn "  Private DNS zone config (DUPLICATE_RISK detected):"
-    Write-Detail "    Engine DNS RG naming: rg-alz-dns-{location}  (parDnsResourceGroupNamePrefix)"
-    Write-Detail "    To avoid duplicates, either move brownfield zones to that RG pre-migration,"
-    Write-Detail "    or add to hubnetworking bicepparam:"
-    Write-Detail '      privateDnsSettings: { deployPrivateDnsZones: false }'
+    Write-Warn "  Private DNS zone config (DUPLICATE_RISK detected — see Section 5 for options):"
+    Write-Detail "    Option A: Deploy engine to a different connectivity subscription (no conflict)"
+    Write-Detail "    Option B: Move brownfield zones to engine DNS RG before engine deployment"
+    Write-Detail "    Option C: Set privateDnsSettings.deployPrivateDnsZones = false and reuse existing zones"
 }
 
 # Platform subscription mapping from SubscriptionPlacement (requires Export-BrownfieldState v2+)
@@ -2527,10 +2489,10 @@ if ($privateDnsZones.Count -eq 0) {
 
     if ($duplicateRiskCount -gt 0) {
         Write-Host ''
-        Write-Warn "    ! DUPLICATE_RISK — action required before engine deployment:"
-        Write-Detail "      Option A: Move brownfield zones to engine DNS RG (rg-alz-dns-{location})"
-        Write-Detail "      Option B: Set privateDnsSettings.deployPrivateDnsZones = false in hubnetworking config"
-        Write-Detail "                and manage zone-to-VNet links via Azure Policy parameter overrides."
+        Write-Warn "    ! DUPLICATE_RISK — action required if engine uses same connectivity subscription:"
+        Write-Detail "      Option A: Deploy engine to a different connectivity subscription (no conflict)"
+        Write-Detail "      Option B: Move brownfield zones to engine DNS RG before engine deployment"
+        Write-Detail "      Option C: Set privateDnsSettings.deployPrivateDnsZones = false and reuse existing zones"
         if ($dnsRgSet.Count -gt 0) {
             Write-Detail "      Brownfield DNS RG(s): $($dnsRgSet -join ', ')"
         }
@@ -2658,14 +2620,14 @@ if ($script:RoleDefCheckResults.Count -gt 0) {
 Write-Host "  Non-ALZ resource groups:      $totalNonAlzRgs"
 Write-Host "  Missing expected resources:   $totalMissingInfra"
 if ($script:NetworkingRiskCount -gt 0) {
-    Write-Warn "  Networking cost-duplicate risk: $($script:NetworkingRiskCount) item(s) — DDoS plan/VPN/ER gateway may be deployed twice"
+    Write-Info "  Networking transitional cost: $($script:NetworkingRiskCount) item(s) — DDoS plan/VPN/ER gateway will run in parallel during migration"
 } else {
     Write-Ok   "  Networking cost-duplicate risk: 0"
 }
 if ($script:CostRiskWorstCase -gt 0) {
-    Write-Warn "  Worst-case duplicate monthly cost: `$$($script:CostRiskWorstCase)/month — see Section 5b for details and suggested overrides"
+    Write-Info "  Estimated transitional monthly cost: `$$($script:CostRiskWorstCase)/month — see Section 5b for details"
 } else {
-    Write-Ok   "  Worst-case duplicate monthly cost: `$0"
+    Write-Ok   "  Estimated transitional monthly cost: `$0"
 }
 if ($script:DnsDuplicateRiskCount -gt 0) {
     Write-Err  "  Private DNS duplicate-zone risk: $($script:DnsDuplicateRiskCount) zone(s) — wrong RG, engine will create conflicting duplicates"
@@ -2674,7 +2636,7 @@ if ($script:DnsDuplicateRiskCount -gt 0) {
 }
 if ($script:LockTotalCount -gt 0) {
     if ($script:LockBlockingCount -gt 0) {
-        Write-Err  "  Resource locks: $($script:LockTotalCount) total  ($($script:LockBlockingCount) BLOCKING — must remove before deploying)"
+        Write-Warn "  Resource locks: $($script:LockTotalCount) total  ($($script:LockBlockingCount) BLOCKING — old hierarchy, review during decommissioning)"
     } elseif ($script:LockCautionCount -gt 0) {
         Write-Warn "  Resource locks: $($script:LockTotalCount) total  ($($script:LockCautionCount) CAUTION — review before stack operations)"
     } else {
@@ -2682,31 +2644,6 @@ if ($script:LockTotalCount -gt 0) {
     }
 } else {
     Write-Ok   "  Resource locks: 0"
-}
-
-Write-Host ''
-Write-Host '  Subscription-level governance:'
-if ($subscriptionGovernance.Count -eq 0) {
-    Write-Detail '    (not captured — re-run Export-BrownfieldState.ps1 to include subscription-level data)'
-}
-else {
-    if ($script:TotalSubLevelNonStdAssignments -gt 0) {
-        Write-Warn "    Non-standard direct assignments: $($script:TotalSubLevelNonStdAssignments) (review required)"
-    }
-    else {
-        Write-Ok "    Non-standard direct assignments: 0"
-    }
-    if ($script:TotalSubLevelExemptions -gt 0) {
-        if ($script:TotalDenyExemptions -gt 0) {
-            Write-Warn "    Policy exemptions: $($script:TotalSubLevelExemptions) total  ($($script:TotalDenyExemptions) exempt Deny-effect — review)"
-        }
-        else {
-            Write-Info "    Policy exemptions: $($script:TotalSubLevelExemptions)"
-        }
-    }
-    else {
-        Write-Ok "    Policy exemptions:               0"
-    }
 }
 
 Write-Host ''
@@ -2753,7 +2690,7 @@ if ($script:BlueprintCount -gt 0) {
 Write-Host ''
 Write-Host '  Cross-MG RBAC (policy-driven identities):'
 if ($script:OrphanRiskCount -gt 0) {
-    Write-Err  "    ORPHAN_RISK: $($script:OrphanRiskCount) identity/identities will have stranded role assignments after migration"
+    Write-Warn "    ORPHAN_RISK: $($script:OrphanRiskCount) identity/identities — will need cleanup during decommissioning of old hierarchy"
 } else {
     Write-Ok   "    ORPHAN_RISK: 0"
 }
@@ -2763,48 +2700,47 @@ if ($script:MissingRbacCount -gt 0) {
     Write-Ok   "    MISSING_RBAC: 0"
 }
 
-# Traffic light — AMBA does NOT count as non-standard for risk assessment.
-# ASSIGNED Deny mismatches OR BLOCKING locks trigger RED; unassigned-only Deny mismatches are YELLOW.
+# Traffic light — Parallel deployment model. AMBA does NOT count as non-standard for risk assessment.
+# DNS same-subscription conflicts and blueprints trigger RED.
+# Deny-effect mismatches are YELLOW — risk materializes at subscription move time, not engine deployment.
+# Locks in old hierarchy do not block parallel engine deployment.
 Write-Host ''
 $hasDenyAssigned   = $script:MismatchCountByEffect['DenyAssigned'] -gt 0
-$hasBlockingLocks  = $script:LockBlockingCount -gt 0 -or $script:BlueprintCount -gt 0
+$hasDnsConflict    = $script:DnsDuplicateRiskCount -gt 0
+$hasBlueprintBlock = $script:BlueprintCount -gt 0
 $hasReviewItems    = $totalNonStdDefs -gt 0 -or $totalNonStdSets -gt 0 -or $totalStdMismatchDefs -gt 0 -or $script:RoleDefNameCollisionCount -gt 0
-$hasMinorDrift     = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0 -or $script:TotalSubLevelNonStdAssignments -gt 0 -or $script:TotalDenyExemptions -gt 0 -or $script:NetworkingRiskCount -gt 0 -or $script:DnsDuplicateRiskCount -gt 0 -or $script:LockCautionCount -gt 0 -or $script:CostRiskWorstCase -gt 0 -or $script:RoleDefDriftCount -gt 0 -or $script:OrphanRiskCount -gt 0 -or $script:MissingRbacCount -gt 0 -or $script:MmaProvisioningCount -gt 0
+$hasMinorDrift     = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0 -or $script:TotalSubLevelNonStdAssignments -gt 0 -or $script:TotalDenyExemptions -gt 0 -or $script:NetworkingRiskCount -gt 0 -or $script:DnsDuplicateRiskCount -gt 0 -or $script:LockBlockingCount -gt 0 -or $script:LockCautionCount -gt 0 -or $script:CostRiskWorstCase -gt 0 -or $script:RoleDefDriftCount -gt 0 -or $script:OrphanRiskCount -gt 0 -or $script:MissingRbacCount -gt 0 -or $script:MmaProvisioningCount -gt 0
 
-if (-not $hasReviewItems -and -not $hasMinorDrift -and -not $hasBlockingLocks) {
+if (-not $hasReviewItems -and -not $hasMinorDrift -and -not $hasBlueprintBlock -and -not $hasDnsConflict) {
     Write-Colored 'GREEN' 'Green' "Brownfield is a clean portal accelerator deployment. Low risk for engine adoption."
     if ($totalAmbaDefs -gt 0 -or $totalAmbaSets -gt 0) {
         Write-Amba "  Note: AMBA monitoring stack detected ($totalAmbaDefs defs, $totalAmbaSets sets) — informational only."
     }
 }
-elseif ($hasDenyAssigned -or $hasBlockingLocks) {
-    Write-Colored 'RED' 'Red' "Brownfield has blockers that must be resolved before deploying the engine."
-    if ($hasDenyAssigned) {
-        Write-Host '  Policy: Assigned Deny-effect rule changes detected.'
-        Write-Host '    a) Verify existing resources comply with the updated rules'
-        Write-Host '    b) Test in DoNotEnforce mode first if compliance status is uncertain'
-        Write-Host '    c) Deploy governance-only first, then re-enable enforcement after remediation'
+elseif ($hasDnsConflict -or $hasBlueprintBlock) {
+    $redMsg = if ($hasDnsConflict) { "DNS zone conflicts in target subscription must be resolved before engine deployment." } else { "Brownfield has blockers that must be resolved before deploying the engine." }
+    Write-Colored 'RED' 'Red' $redMsg
+    if ($hasDnsConflict) {
+        Write-Host '  DNS: Private DNS zones in wrong RG — engine will create conflicting duplicates in same subscription.'
+        Write-Host '    a) Deploy engine to a different connectivity subscription (no conflict)'
+        Write-Host '    b) Move brownfield zones to engine DNS RG before engine deployment'
+        Write-Host '    c) Set privateDnsSettings.deployPrivateDnsZones = false and reuse existing zones'
     }
-    if ($script:BlueprintCount -gt 0) {
+    if ($hasBlueprintBlock) {
         Write-Host "  Blueprints: $($script:BlueprintCount) active blueprint assignment(s) — will conflict with engine governance."
         Write-Host '    a) Unassign all blueprints listed in Section 4b before running the engine'
         Write-Host '    b) Review blueprint artifacts to identify policy/role assignments the engine must own'
     }
-    if ($script:LockBlockingCount -gt 0) {
-        Write-Host "  Locks: $($script:LockBlockingCount) BLOCKING ReadOnly lock(s) — engine deployments will fail until removed."
-        Write-Host '    a) Remove all BLOCKING locks listed in Section 5 before running the engine'
-        Write-Host '    b) Re-apply desired locks post-migration via parGlobalResourceLock in engine config'
-    }
+}
+elseif ($hasDenyAssigned -or $hasReviewItems) {
+    Write-Colored 'YELLOW' 'Yellow' "Brownfield has items requiring attention during subscription migration."
+    Write-Host '  Engine deployment is safe. Review these items before moving subscriptions:'
+    Write-Host '    a) Verify subscription workloads comply with new hierarchy Deny policies'
+    Write-Host '    b) Plan decommissioning of old hierarchy resources after migration'
+    Write-Host '    c) Clean up orphaned managed identities from old policy assignments'
     if ($hasDenyAssigned) {
         Write-Host '  Run with -Detailed to see which policies change and which resource types they target.'
     }
-}
-elseif ($hasReviewItems) {
-    Write-Colored 'YELLOW' 'Yellow' "Brownfield has customizations or version drift that need operator decisions."
-    Write-Host '  Recommendation: Run with -Detailed to review items, then decide:'
-    Write-Host '    a) Add to engine config (platform.json / policy overrides)'
-    Write-Host '    b) Exclude from deployment stack scope'
-    Write-Host '    c) Accept removal/overwrite during stack takeover'
 }
 else {
     Write-Colored 'YELLOW' 'Yellow' "Brownfield has deprecated policies or minor drift — review before adoption."
