@@ -2434,7 +2434,7 @@ Write-Step 'Sektion 7: Risksammanfattning'
 
 $totalStdDefs = 0; $totalStdMismatchDefs = 0; $totalNonStdDefs = 0; $totalAmbaDefs = 0; $totalDeprDefs = 0
 $totalStdSets = 0; $totalNonStdSets = 0; $totalAmbaSets = 0; $totalDeprSets = 0
-$totalNonStdAssignments = 0; $totalAmbaAssignments = 0
+$totalStdAssignments = 0; $totalNonStdAssignments = 0; $totalAmbaAssignments = 0
 $totalMissingInfra = 0
 $totalNonAlzRgs = 0
 $totalCustomRoles = 0
@@ -2442,24 +2442,25 @@ $totalCustomRoles = 0
 foreach ($sr in $reportScopes) {
     foreach ($d in $sr.PolicyDefs) {
         switch ($d.Classification) {
-            'Standard' { $totalStdDefs++ }
+            'Standard'         { $totalStdDefs++ }
             'StandardMismatch' { $totalStdMismatchDefs++ }
-            'NonStandard' { $totalNonStdDefs++ }
-            'AMBA' { $totalAmbaDefs++ }
-            'Deprecated' { $totalDeprDefs++ }
+            'NonStandard'      { $totalNonStdDefs++ }
+            'AMBA'             { $totalAmbaDefs++ }
+            'Deprecated'       { $totalDeprDefs++ }
         }
     }
     foreach ($s in $sr.PolicySetDefs) {
         switch ($s.Classification) {
-            'Standard' { $totalStdSets++ }
+            'Standard'    { $totalStdSets++ }
             'NonStandard' { $totalNonStdSets++ }
-            'AMBA' { $totalAmbaSets++ }
-            'Deprecated' { $totalDeprSets++ }
+            'AMBA'        { $totalAmbaSets++ }
+            'Deprecated'  { $totalDeprSets++ }
         }
     }
     foreach ($a in $sr.PolicyAssignments) {
-        if ($a.ReferencesAmba) { $totalAmbaAssignments++ }
-        elseif (-not $a.ReferencesStandard) { $totalNonStdAssignments++ }
+        if ($a.ReferencesAmba)         { $totalAmbaAssignments++ }
+        elseif ($a.ReferencesStandard) { $totalStdAssignments++ }
+        else                           { $totalNonStdAssignments++ }
     }
     foreach ($rd in $sr.RoleDefinitions) {
         if ((Get-RoleDefClassification $rd.RoleName) -eq 'Custom') { $totalCustomRoles++ }
@@ -2470,180 +2471,177 @@ foreach ($ir in $infraReport) {
     $totalNonAlzRgs += $ir.NonAlzRgs.Count
 }
 
+# Räkna MATCH och SAKNAS från RoleDefCheckResults (DRIFT och NAME_COLLISION redan räknade)
+$rdMatchCount   = @($script:RoleDefCheckResults | Where-Object { $_.Status -eq 'MATCH'   }).Count
+$rdMissingCount = @($script:RoleDefCheckResults | Where-Object { $_.Status -eq 'MISSING' }).Count
+
+#──────────────────────────────────────────────────────────────────────────────
+# Block 1: Inom engine-scope (påverkas vid deploy)
+#──────────────────────────────────────────────────────────────────────────────
 Write-Host ''
-Write-Host "  Policydefinitioner:"
-if ($totalStdDefs -gt 0) { Write-Ok   "    Standard — exakt match:       $totalStdDefs" }
+if ($NoColor) { Write-Host '  ── Inom engine-scope (påverkas vid deploy) ──' }
+else          { Write-Host "  `e[1m── Inom engine-scope (påverkas vid deploy) ──`e[0m" }
+
+Write-Host ''
+Write-Host '  Policydefinitioner:'
+Write-Ok   "    Exakt match:       $totalStdDefs"
 if ($totalStdMismatchDefs -gt 0) {
-    $hasDenyAssigned = $script:MismatchCountByEffect['DenyAssigned'] -gt 0
-    if ($hasDenyAssigned) {
-        Write-Err  "    Standard — regelavvikelse:     $totalStdMismatchDefs (engine skriver över vid deployment)"
+    if ($script:MismatchCountByEffect['DenyAssigned'] -gt 0) {
+        Write-Err  "    Regelavvikelse:    $totalStdMismatchDefs (engine skriver över vid deploy)"
     } else {
-        Write-Warn "    Standard — regelavvikelse:     $totalStdMismatchDefs (engine skriver över vid deployment)"
+        Write-Warn "    Regelavvikelse:    $totalStdMismatchDefs (engine skriver över vid deploy)"
     }
     Write-Host ''
-    Write-Host '  Regelavvikelser per effekt:'
-    if ($script:MismatchCountByEffect['DenyAssigned']      -gt 0) { Write-Err  "    Deny (tilldelade):        $($script:MismatchCountByEffect['DenyAssigned']) (aktiv risk — verifiera resursefterlevnad innan deployment)" }
-    if ($script:MismatchCountByEffect['DenyUnassigned']    -gt 0) { Write-Warn "    Deny (otilldelade):       $($script:MismatchCountByEffect['DenyUnassigned']) (definition finns — ingen nuvarande påverkan)" }
-    if ($script:MismatchCountByEffect['DeployIfNotExists'] -gt 0) { Write-Warn "    DeployIfNotExists:        $($script:MismatchCountByEffect['DeployIfNotExists']) (kan trigga remedieringar)" }
-    if ($script:MismatchCountByEffect['Modify']            -gt 0) { Write-Warn "    Modify:                   $($script:MismatchCountByEffect['Modify']) (kan ändra resursegenskaper)" }
-    if ($script:MismatchCountByEffect['Append']            -gt 0) { Write-Info "    Append:                   $($script:MismatchCountByEffect['Append']) (kan lägga till egenskaper vid nästa uppdatering)" }
-    if ($script:MismatchCountByEffect['Audit']             -gt 0) { Write-Ok   "    Audit/AuditIfNotExists:   $($script:MismatchCountByEffect['Audit']) (informativ)" }
-    if ($script:MismatchCountByEffect['Other']             -gt 0) { Write-Warn "    Övriga/okända:            $($script:MismatchCountByEffect['Other'])" }
-} else { Write-Ok "    Regelavvikelser:              0" }
-if ($totalNonStdDefs -gt 0) { Write-Warn "    Icke-standard (granska):      $totalNonStdDefs" } else { Write-Ok "    Icke-standard:                0" }
-if ($totalAmbaDefs -gt 0) { Write-Amba "    AMBA (informativ):             $totalAmbaDefs" }
-if ($totalDeprDefs -gt 0) {
-    $deprAssigned   = @($script:AllDeprDefList | Where-Object {
-        $defAssignmentScopes.ContainsKey($_.Name) -and $defAssignmentScopes[$_.Name].Count -gt 0
-    })
-    $deprUnassigned = $totalDeprDefs - $deprAssigned.Count
-    if ($deprAssigned.Count -gt 0) {
-        Write-Warn "    Utfasade (tilldelade):        $($deprAssigned.Count) (engine ersätter med efterföljare — granska innan deployment)"
-        Write-Info "    Utfasade (otilldelade):       $deprUnassigned"
-        if ($Detailed) {
-            Write-Host ''
-            Write-Warn "  ── Utfasade definitioner fortfarande tilldelade ──"
-            foreach ($e in $deprAssigned) {
-                $assignScopes = @($defAssignmentScopes[$e.Name])
-                $scopeStr = ($assignScopes | ForEach-Object { "$($_.ScopeName) ($($_.ManagementGroupId))" }) -join ', '
-                Write-Warn   "  [UTFASAD TILLDELAD] $($e.Name)"
-                Write-Detail "    visningsnamn: $($e.DisplayName)"
-                Write-Detail "    tilldelad vid: $scopeStr"
-            }
-        }
-    } else {
-        Write-Info "    Utfasade:                     $totalDeprDefs"
-    }
+    Write-Host '    Per effekt:'
+    if ($script:MismatchCountByEffect['DenyAssigned']      -gt 0) { Write-Err  "      Deny (tilldelade):      $($script:MismatchCountByEffect['DenyAssigned']) — aktiv risk, verifiera resursefterlevnad" }
+    if ($script:MismatchCountByEffect['DenyUnassigned']    -gt 0) { Write-Warn "      Deny (otilldelade):     $($script:MismatchCountByEffect['DenyUnassigned']) — definition finns, ingen nuvarande påverkan" }
+    if ($script:MismatchCountByEffect['DeployIfNotExists'] -gt 0) { Write-Warn "      DeployIfNotExists:      $($script:MismatchCountByEffect['DeployIfNotExists']) — kan trigga remedieringar" }
+    if ($script:MismatchCountByEffect['Modify']            -gt 0) { Write-Warn "      Modify:                 $($script:MismatchCountByEffect['Modify']) — kan ändra resursegenskaper" }
+    if ($script:MismatchCountByEffect['Append']            -gt 0) { Write-Info "      Append:                 $($script:MismatchCountByEffect['Append']) — kan lägga till egenskaper vid nästa uppdatering" }
+    if ($script:MismatchCountByEffect['Audit']             -gt 0) { Write-Ok   "      Audit/AuditIfNotExists: $($script:MismatchCountByEffect['Audit']) — informativ" }
+    if ($script:MismatchCountByEffect['Other']             -gt 0) { Write-Warn "      Övriga/okända:          $($script:MismatchCountByEffect['Other'])" }
+} else {
+    Write-Ok "    Regelavvikelse:    0"
 }
 
 Write-Host ''
-Write-Host "  Policysetdefinitioner:"
-if ($totalStdSets -gt 0) { Write-Ok   "    Standard (säkert):            $totalStdSets" }
-if ($totalNonStdSets -gt 0) { Write-Warn "    Icke-standard (granska):      $totalNonStdSets" } else { Write-Ok "    Icke-standard:                0" }
-if ($totalAmbaSets -gt 0) { Write-Amba "    AMBA (informativ):             $totalAmbaSets" }
-if ($totalDeprSets -gt 0) { Write-Info "    Utfasade:                     $totalDeprSets" }
+Write-Host '  Policysetdefinitioner:'
+Write-Ok   "    Exakt match:       $totalStdSets"
+Write-Ok   "    Regelavvikelse:    0  (avvikelser i sets klassificeras ej separat)"
 
 Write-Host ''
-Write-Host "  Tilldelningar:                   Icke-std-refs: $totalNonStdAssignments   AMBA-refs: $totalAmbaAssignments"
-Write-Host "  Anpassade rolldefinitioner:      $totalCustomRoles"
+Write-Host '  Policy assignments:'
+Write-Ok   "    Engine-library-refs: $totalStdAssignments"
+Write-Info "    (Parametrar/enforcement mode jämförs ej automatiskt — granska manuellt vid Deny-avvikelser)"
+
+Write-Host ''
+Write-Host '  Rolldefinitioner (ALZ engine-roller):'
 if ($script:RoleDefCheckResults.Count -gt 0) {
+    Write-Ok   "    MATCH:          $rdMatchCount"
+    if ($script:RoleDefDriftCount -gt 0) {
+        Write-Warn "    DRIFT:          $($script:RoleDefDriftCount) — engine skriver över vid deploy"
+    } else {
+        Write-Ok   "    DRIFT:          0"
+    }
     if ($script:RoleDefNameCollisionCount -gt 0) {
-        Write-Warn "  ALZ rolldefinitionskontroll:     $($script:RoleDefCheckResults.Count) roller — $($script:RoleDefNameCollisionCount) NAME_COLLISION, $($script:RoleDefDriftCount) DRIFT"
-    } elseif ($script:RoleDefDriftCount -gt 0) {
-        Write-Warn "  ALZ rolldefinitionskontroll:     $($script:RoleDefCheckResults.Count) roller — $($script:RoleDefDriftCount) DRIFT (engine skriver över)"
+        Write-Warn "    NAME_COLLISION: $($script:RoleDefNameCollisionCount) — operationell förvirring, granska"
     } else {
-        Write-Ok   "  ALZ rolldefinitionskontroll:     $($script:RoleDefCheckResults.Count) roller — alla MATCH eller SAKNAS (säkert att deploya)"
+        Write-Ok   "    NAME_COLLISION: 0"
     }
-}
-Write-Host "  Icke-ALZ-resursgrupper:          $totalNonAlzRgs"
-Write-Host "  Saknade förväntade resurser:     $totalMissingInfra"
-if ($script:LockTotalCount -gt 0) {
-    if ($script:LockBlockingCount -gt 0) {
-        Write-Warn "  Resurslås: $($script:LockTotalCount) totalt  ($($script:LockBlockingCount) BLOCKERAR — blockerar engine-deployment direkt)"
-    } elseif ($script:LockCautionCount -gt 0) {
-        Write-Warn "  Resurslås: $($script:LockTotalCount) totalt  ($($script:LockCautionCount) VARNING — granska innan stack-operationer)"
-    } else {
-        Write-Ok   "  Resurslås: $($script:LockTotalCount) totalt  (0 blockerande)"
-    }
+    Write-Ok   "    SAKNAS:         $rdMissingCount — engine skapar, säkert"
 } else {
-    Write-Ok   "  Resurslås: 0"
-}
-
-Write-Host ''
-Write-Host '  Prenumerationsnivå-styrning:'
-if ($subscriptionGovernance.Count -eq 0) {
-    Write-Detail '    (ej insamlad — kör Export-BrownfieldState.ps1 igen för att inkludera prenumerationsdata)'
-}
-else {
-    if ($script:TotalSubLevelNonStdAssignments -gt 0) {
-        Write-Warn "    Icke-std direkttilldelningar: $($script:TotalSubLevelNonStdAssignments) (granskning krävs)"
-    }
-    else {
-        Write-Ok "    Icke-std direkttilldelningar: 0"
-    }
-    if ($script:TotalSubLevelExemptions -gt 0) {
-        if ($script:TotalDenyExemptions -gt 0) {
-            Write-Warn "    Policyundantag: $($script:TotalSubLevelExemptions) totalt  ($($script:TotalDenyExemptions) undantar Deny-effekt — granska)"
-        }
-        else {
-            Write-Info "    Policyundantag: $($script:TotalSubLevelExemptions)"
-        }
-    }
-    else {
-        Write-Ok "    Policyundantag:               0"
-    }
-}
-
-Write-Host ''
-Write-Host '  Defender for Cloud-status:'
-if ($script:MmaProvisioningCount -gt 0) {
-    Write-Warn "    MMA auto-provisionering PÅ: $($script:MmaProvisioningCount) prenumeration(er) — planera AMA-migration efter deployment"
-} else {
-    Write-Ok   "    MMA auto-provisionering: av (eller ej insamlad)"
+    Write-Info "    (rolldefinitionskontroll ej utförd)"
 }
 
 Write-Host ''
 Write-Host '  Blueprint-tilldelningar:'
 if ($script:BlueprintCount -gt 0) {
-    Write-Err  "    $($script:BlueprintCount) blueprint-tilldelning(ar) — MÅSTE tas bort innan engine-deployment"
+    Write-Err "    $($script:BlueprintCount) blueprint-tilldelning(ar) — MÅSTE tas bort innan engine-deployment"
 } else {
-    Write-Ok   "    0 blueprint-tilldelningar"
+    Write-Ok  "    0  (inga blockerare)"
+}
+
+Write-Host ''
+Write-Host '  Resurslås som blockerar engine-deployment:'
+if ($script:LockTotalCount -gt 0) {
+    if ($script:LockBlockingCount -gt 0) {
+        Write-Warn "    $($script:LockBlockingCount) BLOCKERAR  /  $($script:LockCautionCount) VARNING  /  $($script:LockTotalCount) totalt"
+    } elseif ($script:LockCautionCount -gt 0) {
+        Write-Warn "    0 BLOCKERAR  /  $($script:LockCautionCount) VARNING  /  $($script:LockTotalCount) totalt"
+    } else {
+        Write-Ok   "    0 blockerande  ($($script:LockTotalCount) informativa)"
+    }
+} else {
+    Write-Ok   "    0"
 }
 
 Write-Host ''
 Write-Host '  Cross-MG RBAC (policy-drivna identiteter):'
 if ($script:OrphanRiskCount -gt 0) {
-    Write-Warn "    ORPHAN_RISK: $($script:OrphanRiskCount) identitet(er) — cross-MG-rolltilldelningar föräldralösa när engine skapar nya"
+    Write-Warn "    ORPHAN_RISK:  $($script:OrphanRiskCount) — cross-MG-rolltilldelningar föräldralösa när engine skapar nya identiteter"
 } else {
-    Write-Ok   "    ORPHAN_RISK: 0"
+    Write-Ok   "    ORPHAN_RISK:  0"
 }
 if ($script:MissingRbacCount -gt 0) {
-    Write-Warn "    MISSING_RBAC: $($script:MissingRbacCount) förväntad(e) cross-MG-behörighet(er) saknas i brownfield"
+    Write-Warn "    MISSING_RBAC: $($script:MissingRbacCount) — förväntade cross-MG-behörigheter saknas i brownfield"
 } else {
     Write-Ok   "    MISSING_RBAC: 0"
 }
 
-# Trafikljus — In-place takeover-modell. AMBA räknas INTE som icke-standard.
-# Blueprint-blockerare och blockerande resurslås triggar RÖTT.
-# Deny-avvikelser, NAME_COLLISION och granskningsposter triggar GULT.
+#──────────────────────────────────────────────────────────────────────────────
+# Block 2: Utanför engine-scope (rörs ej av engine)
+#──────────────────────────────────────────────────────────────────────────────
+Write-Host ''
+if ($NoColor) { Write-Host '  ── Utanför engine-scope (rörs ej av engine) ──' }
+else          { Write-Host "  `e[1m── Utanför engine-scope (rörs ej av engine) ──`e[0m" }
+Write-Host '  Inventering — ingen av dessa påverkar engine-deployment.'
+Write-Host ''
+Write-Host "    Non-standard policydefinitioner:          $totalNonStdDefs"
+Write-Host "    Non-standard policysetdefinitioner:       $totalNonStdSets"
+Write-Host "    AMBA policydefinitioner:                  $totalAmbaDefs"
+Write-Host "    AMBA policysetdefinitioner:               $totalAmbaSets"
+Write-Host "    Utfasade policydefinitioner:              $totalDeprDefs"
+Write-Host "    Utfasade policysetdefinitioner:           $totalDeprSets"
+Write-Host "    Non-standard policy assignments:          $totalNonStdAssignments"
+Write-Host "    Anpassade rolldefinitioner (icke-ALZ):    $totalCustomRoles"
+Write-Host "    Icke-ALZ resursgrupper:                   $totalNonAlzRgs"
+Write-Host "    Non-std prenumerationsnivå-tilldelningar: $($script:TotalSubLevelNonStdAssignments)"
+
+#──────────────────────────────────────────────────────────────────────────────
+# Trafikljus — baseras BARA på Block 1
+# RED:    blockers (blueprints, blocking locks, Deny-assigned mismatches)
+# YELLOW: avvikelser som kräver granskning (DINE/Modify, DRIFT, NAME_COLLISION, ORPHAN_RISK)
+# GREEN:  inga avvikelser, inga blockers inom engine-scope
+#──────────────────────────────────────────────────────────────────────────────
 Write-Host ''
 $hasDenyAssigned   = $script:MismatchCountByEffect['DenyAssigned'] -gt 0
 $hasBlueprintBlock = $script:BlueprintCount -gt 0
 $hasBlockingLocks  = $script:LockBlockingCount -gt 0
+$hasDineMismatch   = $script:MismatchCountByEffect['DeployIfNotExists'] -gt 0 -or $script:MismatchCountByEffect['Modify'] -gt 0
 $hasNameCollision  = $script:RoleDefNameCollisionCount -gt 0
-$hasReviewItems    = $totalNonStdDefs -gt 0 -or $totalNonStdSets -gt 0 -or $totalStdMismatchDefs -gt 0
-$hasMinorDrift     = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0 -or $script:TotalSubLevelNonStdAssignments -gt 0 -or $script:TotalDenyExemptions -gt 0 -or $script:LockCautionCount -gt 0 -or $script:RoleDefDriftCount -gt 0 -or $script:OrphanRiskCount -gt 0 -or $script:MissingRbacCount -gt 0 -or $script:MmaProvisioningCount -gt 0
+$hasRoleDrift      = $script:RoleDefDriftCount -gt 0
+$hasOrphanRisk     = $script:OrphanRiskCount -gt 0
+$hasAnyMismatch    = $totalStdMismatchDefs -gt 0
+$hasYellowItems    = $hasDineMismatch -or $hasRoleDrift -or $hasNameCollision -or $hasOrphanRisk -or
+                     $script:MismatchCountByEffect['DenyUnassigned'] -gt 0 -or
+                     $script:MismatchCountByEffect['Append'] -gt 0 -or
+                     $script:LockCautionCount -gt 0 -or
+                     $script:MissingRbacCount -gt 0
 
-if (-not $hasReviewItems -and -not $hasMinorDrift -and -not $hasBlueprintBlock -and -not $hasBlockingLocks) {
+$isClean = -not $hasAnyMismatch -and -not $hasBlueprintBlock -and -not $hasBlockingLocks
+
+if ($isClean) {
     Write-Colored 'GREEN' 'Green' "Befintlig miljö är ren. Låg risk för in-place takeover."
     if ($totalAmbaDefs -gt 0 -or $totalAmbaSets -gt 0) {
-        Write-Amba "  OBS: AMBA-monitoringstack detekterad ($totalAmbaDefs definitioner, $totalAmbaSets sets) — informativ."
+        Write-Amba "  OBS: AMBA-monitoringstack detekterad ($totalAmbaDefs definitioner, $totalAmbaSets sets) — inventerad i Block 2."
     }
 }
-elseif ($hasBlueprintBlock -or $hasBlockingLocks) {
+elseif ($hasBlueprintBlock -or $hasBlockingLocks -or $hasDenyAssigned) {
     Write-Colored 'RED' 'Red' "Miljön har blockerare som måste åtgärdas innan engine-deployment."
     if ($hasBlueprintBlock) {
         Write-Host "  Blueprint: $($script:BlueprintCount) aktiv blueprint-tilldelning(ar) — blockerar engine-styrning."
-        Write-Host '    a) Ta bort alla blueprints i Sektion 4b innan engine startas'
-        Write-Host '    b) Granska blueprint-artefakter för att identifiera policy/rolltilldelningar som engine måste äga'
+        Write-Host '    → Ta bort alla blueprints (Sektion 4b) innan engine startas.'
+        Write-Host '    → Granska blueprint-artefakter för att identifiera policy/rolltilldelningar engine måste äga.'
     }
     if ($hasBlockingLocks) {
         Write-Host "  Resurslås: $($script:LockBlockingCount) blockerande lås — blockerar engine-deployment direkt."
-        Write-Host '    a) Ta bort eller exkludera resurser med blockerande lås innan deployment'
+        Write-Host '    → Ta bort eller exkludera resurser med blockerande lås innan deployment.'
+    }
+    if ($hasDenyAssigned) {
+        Write-Host "  Deny-avvikelser (tilldelade): $($script:MismatchCountByEffect['DenyAssigned']) — verifiera resursefterlevnad innan deployment."
+        Write-Host '    → Kör med -Detailed för att se vilka policies ändras och vilka resurstyper de påverkar.'
     }
 }
-elseif ($hasDenyAssigned -or $hasReviewItems -or $hasNameCollision) {
+elseif ($hasYellowItems) {
     Write-Colored 'YELLOW' 'Yellow' "Miljön har poster som kräver granskning innan eller under engine-deployment."
     Write-Host '  Engine-deployment är möjlig. Granska dessa poster:'
-    Write-Host '    a) Verifiera att befintliga resurser uppfyller nya Deny-policies'
-    Write-Host '    b) Kontrollera NAME_COLLISION för rolldefinitioner — skapar driftkonfusion'
-    Write-Host '    c) Rensa föräldralösa managed identity-rolltilldelningar efter engine-deployment'
-    if ($hasDenyAssigned) {
-        Write-Host '  Kör med -Detailed för att se vilka policies ändras och vilka resurstyper de påverkar.'
-    }
+    if ($hasDineMismatch)  { Write-Host '    → DINE/Modify-avvikelser: kan trigga remedieringar eller resursändringar vid deploy.' }
+    if ($hasRoleDrift)     { Write-Host '    → DRIFT i rolldefinitioner: engine skriver över — verifiera att inga anpassade behörigheter förloras.' }
+    if ($hasNameCollision) { Write-Host '    → NAME_COLLISION: skapar driftkonfusion — granska och ev. byt namn på befintlig roll.' }
+    if ($hasOrphanRisk)    { Write-Host '    → ORPHAN_RISK: rensa föräldralösa managed identity-rolltilldelningar efter engine-deployment.' }
 }
 else {
-    Write-Colored 'YELLOW' 'Yellow' "Miljön har utfasade policies eller lägre avvikelse — granska innan adoption."
+    Write-Colored 'YELLOW' 'Yellow' "Miljön har lägre avvikelse inom engine-scope — granska Block 1 innan adoption."
 }
 
 #==============================================================================
