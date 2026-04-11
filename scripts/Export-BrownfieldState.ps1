@@ -1,33 +1,32 @@
 #Requires -Version 7
 <#
 .SYNOPSIS
-    Exports portal-deployed Azure Landing Zone governance and infrastructure state as JSON.
+    Exporterar Azure Landing Zone-styrning och infrastrukturstate som JSON.
 
 .DESCRIPTION
-    Scans a portal-deployed Azure Landing Zone tenant and exports its governance and
-    infrastructure state as JSON. The output is structurally compatible with
-    Export-ALZStackState.ps1 so you can diff brownfield state against engine-deployed
-    state using Compare-ALZStackState.ps1.
+    Skannar en befintlig (portaldriftsatt) Azure Landing Zone-tenant och exporterar dess
+    styrnings- och infrastrukturstate som JSON. Resultatet används av Compare-BrownfieldState.ps1
+    för att analysera befintlig konfiguration inför in-place-takeover med engine.
 
-    Key difference from Export-ALZStackState.ps1: this script queries resources directly
-    because a portal-deployed ALZ has no Deployment Stacks.
+    Nyckelskillnad från Export-ALZStackState.ps1: detta script frågar resurser direkt
+    eftersom en portaldriftsatt ALZ saknar Deployment Stacks.
 
-    Read-only. No changes are made to the tenant.
+    Skrivskyddat. Inga ändringar görs i tenanten.
 
 .PARAMETER OutputFile
-    Path for the JSON export file.
+    Sökväg för JSON-exportfilen.
 
 .PARAMETER RootManagementGroupId
-    The intermediate root management group ID (e.g. 'alz').
-    Auto-detected from the tenant if omitted.
+    Det intermediära rot-MG:ts ID (t.ex. 'alz').
+    Auto-detekteras från tenanten om det utelämnas.
 
 .PARAMETER TenantId
-    Azure tenant ID. Auto-detected from az account show if omitted.
+    Azure tenant-ID. Auto-detekteras från az account show om det utelämnas.
 
 .PARAMETER PlatformSubscriptionIds
-    Subscription IDs to scan for infrastructure resources (logging, networking, etc.).
-    If omitted, the script attempts to locate subscriptions under the platform MGs
-    (management, connectivity, identity, security, or platform).
+    Prenumerations-ID:n att skanna efter infrastrukturresurser (logging, nätverk osv.).
+    Om det utelämnas försöker scriptet hitta prenumerationer under plattforms-MG:na
+    (management, connectivity, identity, security, eller platform).
 
 .EXAMPLE
     ./Export-BrownfieldState.ps1 -OutputFile "brownfield-state.json"
@@ -62,15 +61,15 @@ function Write-Ok    ($msg) { if ($NoColor) { Write-Host "[OK]    $msg" }       
 function Write-Warn  ($msg) { if ($NoColor) { Write-Host "[WARN]  $msg" }           else { Write-Host "`e[33m[WARN]`e[0m  $msg" } }
 function Write-Fail  ($msg) { if ($NoColor) { Write-Host "[SKIP]  $msg" }           else { Write-Host "`e[31m[SKIP]`e[0m  $msg" } }
 
-# Well-known ALZ intermediate root child MG names used for auto-detection
+# Välkända ALZ intermediära rot-MG:ts barnnamn för auto-detektering
 $AlzWellKnownChildMgs = @('platform', 'landingzones', 'sandbox', 'decommissioned')
 
-# Platform MG names used when discovering platform subscriptions
+# Plattforms-MG-namn för prenumerationsupptäckt
 $AlzPlatformMgs = @('management', 'connectivity', 'identity', 'security')
 $AlzPlatformFallbackMg = 'platform'
 
 # ============================================================
-# Helper: compute SHA256 hash (first 16 hex chars)
+# Hjälpfunktion: beräkna SHA256-hash (de 16 första hex-tecknen)
 # ============================================================
 function Get-SHA256Short ([string]$InputString) {
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($InputString)
@@ -79,10 +78,9 @@ function Get-SHA256Short ([string]$InputString) {
 }
 
 # ============================================================
-# Helper: recursively sort object properties alphabetically so
-# that ConvertTo-Json produces a canonical, ordering-independent
-# string. Arrays preserve element order; only property names
-# within objects are sorted. Apply before hashing policy rules.
+# Hjälpfunktion: sortera objektegenskaper alfabetiskt rekursivt
+# för deterministisk JSON-serialisering vid hashning av policyregler.
+# Arrayer behåller elementordning; bara egenskapsnamn inom objekt sorteras.
 # ============================================================
 function ConvertTo-SortedObject ($obj) {
     if ($null -eq $obj) { return $null }
@@ -103,9 +101,9 @@ function ConvertTo-SortedObject ($obj) {
 }
 
 # ============================================================
-# Helper: safely get a property value from a PSObject without
-# throwing in strict mode if the property doesn't exist.
-# Tries each name in order and returns the first non-null value.
+# Hjälpfunktion: hämta egenskapsvärde säkert från PSObject utan
+# att kasta fel i strict mode. Provar varje namn i ordning och
+# returnerar första icke-null-värde.
 # ============================================================
 function Get-PropSafe ($Obj, [string[]]$Names) {
     foreach ($n in $Names) {
@@ -116,92 +114,87 @@ function Get-PropSafe ($Obj, [string[]]$Names) {
 }
 
 # ============================================================
-# Helper: normalize an MG name for well-known name comparisons
-#   - strips ALZ- prefix (case-insensitive)
-#   - lowercases
-#   - normalises plural variants (sandboxes -> sandbox)
+# Hjälpfunktion: normalisera MG-namn för välkända namn-jämförelser
+#   - tar bort ALZ-prefix (skiftlägesokänsligt)
+#   - konverterar till gemener
+#   - normaliserar pluralvarianter (sandboxes -> sandbox)
 # ============================================================
 function Get-NormalizedMgName ([string]$Name) {
-    # Strip ALZ- prefix case-insensitively, then lowercase
     $n = $Name -replace '(?i)^alz-', ''
     $n = $n.ToLower()
-    # Normalise plural variants
     if ($n -eq 'sandboxes') { $n = 'sandbox' }
     return $n
 }
 
 # ============================================================
-# Step 1: Resolve TenantId
+# Steg 1: Lös upp TenantId
 # ============================================================
 function Resolve-TenantId {
-    Write-Step 'Resolving tenant identity'
+    Write-Step 'Löser upp tenant-identitet'
 
     if ($Script:TenantId -eq '') {
         $account = az account show 2>$null | ConvertFrom-Json -ErrorAction SilentlyContinue
         if ($account) {
             $Script:TenantId = $account.tenantId
-            Write-Info "Tenant ID auto-detected: $Script:TenantId"
+            Write-Info "Tenant-ID auto-detekterat: $Script:TenantId"
         }
     }
 
     if ($Script:TenantId -eq '') {
-        Write-Error 'Could not determine TenantId. Pass -TenantId explicitly or log in with az login.'
+        Write-Error 'Kunde inte fastställa TenantId. Ange -TenantId explicit eller logga in med az login.'
     }
 
     Write-Info "Tenant: $Script:TenantId"
 }
 
 # ============================================================
-# Step 2: Discover the ALZ intermediate root MG
+# Steg 2: Hitta ALZ intermediärt rot-MG
 # ============================================================
 function Resolve-RootManagementGroup {
-    Write-Step 'Resolving ALZ intermediate root management group'
+    Write-Step 'Löser upp ALZ intermediärt rot-MG'
 
     if ($Script:RootManagementGroupId -ne '') {
-        Write-Info "Using provided root MG: $Script:RootManagementGroupId"
+        Write-Info "Använder angivet rot-MG: $Script:RootManagementGroupId"
         return
     }
 
-    Write-Info 'Scanning tenant root for ALZ intermediate root...'
+    Write-Info 'Skannar tenant-root för ALZ intermediärt rot-MG...'
 
-    # Get all top-level MGs under the tenant root
     $tenantRootMgs = Get-AzManagementGroup -ErrorAction SilentlyContinue
     if (-not $tenantRootMgs) {
-        Write-Error 'Could not retrieve management groups. Ensure you have Reader access at the tenant root.'
+        Write-Error 'Kunde inte hämta management groups. Kontrollera att du har Reader-åtkomst på tenant-root.'
     }
 
     foreach ($mg in $tenantRootMgs) {
-        # Expand one level to check for the well-known ALZ child MGs
         $expanded = Get-AzManagementGroup -GroupId $mg.Name -Expand -ErrorAction SilentlyContinue
         if (-not $expanded) { continue }
 
-        $childNames        = @($expanded.Children | ForEach-Object { $_.Name })
+        $childNames         = @($expanded.Children | ForEach-Object { $_.Name })
         $normalizedChildren = $childNames | ForEach-Object { Get-NormalizedMgName $_ }
         $matchedMgs         = @($normalizedChildren | Where-Object { $AlzWellKnownChildMgs -contains $_ })
 
         if ($matchedMgs.Count -ge 2) {
             $Script:RootManagementGroupId = $mg.Name
-            Write-Info "ALZ intermediate root detected: $Script:RootManagementGroupId (children: $($childNames -join ', '))"
+            Write-Info "ALZ intermediärt rot-MG detekterat: $Script:RootManagementGroupId (barn: $($childNames -join ', '))"
             return
         }
     }
 
-    Write-Warn 'Could not auto-detect ALZ intermediate root. Pass -RootManagementGroupId explicitly.'
-    Write-Warn 'Continuing without a root MG — governance scopes will be empty.'
+    Write-Warn 'Kunde inte auto-detektera ALZ intermediärt rot-MG. Ange -RootManagementGroupId explicit.'
+    Write-Warn 'Fortsätter utan rot-MG — governance-scopes kommer att vara tomma.'
 }
 
 # ============================================================
-# Step 3: Build MG hierarchy recursively
+# Steg 3: Bygg MG-hierarki rekursivt
 # ============================================================
 function Get-MgHierarchy ([string]$GroupId) {
     $mg = Get-AzManagementGroup -GroupId $GroupId -Expand -Recurse -ErrorAction SilentlyContinue
     if (-not $mg) {
-        Write-Warn "  Could not expand MG '$GroupId' — skipping."
+        Write-Warn "  Kunde inte expandera MG '$GroupId' — hoppar över."
         return $null
     }
 
     function ConvertTo-Node ($mgObj) {
-        # Root object has Details.Parent.Id; child objects (PSAzureManagementGroupChildInfo) do not
         $parentId = ''
         if ($mgObj.PSObject.Properties['Details'] -and $mgObj.Details.Parent) {
             $parentId = $mgObj.Details.Parent.Id
@@ -216,7 +209,7 @@ function Get-MgHierarchy ([string]$GroupId) {
         }
         if ($mgObj.Children) {
             foreach ($child in $mgObj.Children) {
-                # Skip subscription children — their Type is '/subscriptions'
+                # Hoppa över prenumerationer — deras Type är '/subscriptions'
                 if ($child.Type -ieq '/subscriptions') { continue }
                 $node.Children += ConvertTo-Node $child
             }
@@ -228,7 +221,7 @@ function Get-MgHierarchy ([string]$GroupId) {
 }
 
 # ============================================================
-# Step 4: Collect all MG IDs from the hierarchy (flat list)
+# Steg 4: Samla alla MG-ID:n från hierarkin (platt lista)
 # ============================================================
 function Get-AllMgIds ([hashtable]$HierarchyNode) {
     $ids = @($HierarchyNode.Name)
@@ -239,22 +232,21 @@ function Get-AllMgIds ([hashtable]$HierarchyNode) {
 }
 
 # ============================================================
-# Step 5: Discover platform subscriptions
+# Steg 5: Hitta plattformsprenumerationer
 # ============================================================
 function Resolve-PlatformSubscriptions {
-    Write-Step 'Resolving platform subscriptions'
+    Write-Step 'Löser upp plattformsprenumerationer'
 
     if ($Script:PlatformSubscriptionIds.Count -gt 0) {
-        Write-Info "Using $($Script:PlatformSubscriptionIds.Count) provided platform subscription(s)."
+        Write-Info "Använder $($Script:PlatformSubscriptionIds.Count) angivna plattformsprenumeration(er)."
         return
     }
 
-    Write-Info 'Attempting to locate platform subscriptions from MG hierarchy...'
+    Write-Info 'Försöker hitta plattformsprenumerationer från MG-hierarkin...'
 
     $found = @()
 
-    # Build a map of normalized MG name -> actual MG ID from the hierarchy so that
-    # REST calls use the real MG ID even when it carries a prefix like ALZ-.
+    # Bygg normaliserat namn → faktiskt MG-ID för att hantera ALZ-prefix
     $normalizedToActual = @{}
     if ($Script:ActualMgIds) {
         foreach ($actualId in $Script:ActualMgIds) {
@@ -262,9 +254,7 @@ function Resolve-PlatformSubscriptions {
         }
     }
 
-    # Try dedicated platform MGs first
     foreach ($mgName in $AlzPlatformMgs) {
-        # Resolve the actual MG ID (may have ALZ- prefix in the tenant)
         $actualMgId = if ($normalizedToActual.ContainsKey($mgName)) {
             $normalizedToActual[$mgName]
         } else {
@@ -281,13 +271,13 @@ function Resolve-PlatformSubscriptions {
             foreach ($sub in $subs) {
                 if ($sub.name -notin $found) {
                     $found += $sub.name
-                    Write-Info "  Found subscription $($sub.name) under MG '$actualMgId'"
+                    Write-Info "  Hittade prenumeration $($sub.name) under MG '$actualMgId'"
                 }
             }
         }
     }
 
-    # Fall back to generic platform MG
+    # Fallback till generiskt platform-MG
     if ($found.Count -eq 0) {
         $actualFallbackId = if ($normalizedToActual.ContainsKey($AlzPlatformFallbackMg)) {
             $normalizedToActual[$AlzPlatformFallbackMg]
@@ -305,25 +295,25 @@ function Resolve-PlatformSubscriptions {
             foreach ($sub in $subs) {
                 if ($sub.name -notin $found) {
                     $found += $sub.name
-                    Write-Info "  Found subscription $($sub.name) under MG '$actualFallbackId' (fallback)"
+                    Write-Info "  Hittade prenumeration $($sub.name) under MG '$actualFallbackId' (fallback)"
                 }
             }
         }
     }
 
     if ($found.Count -eq 0) {
-        $Script:Warnings += 'Could not locate any platform subscriptions. Infrastructure discovery skipped. Pass -PlatformSubscriptionIds explicitly.'
-        Write-Warn 'No platform subscriptions found — infrastructure scopes will be skipped.'
+        $Script:Warnings += 'Kunde inte hitta några plattformsprenumerationer. Infrastruktur-discovery hoppas över. Ange -PlatformSubscriptionIds explicit.'
+        Write-Warn 'Inga plattformsprenumerationer hittades — infrastruktur-scopes hoppas över.'
     }
 
     $Script:PlatformSubscriptionIds = $found
 }
 
 # ============================================================
-# Step 6: Discover governance resources for a management group
+# Steg 6: Samla governance-resurser för ett management group
 # ============================================================
 function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
-    Write-Info "  Scanning governance scope: $ScopeName (MG: $MgId)"
+    Write-Info "  Skannar governance-scope: $ScopeName (MG: $MgId)"
 
     $scope     = "/providers/Microsoft.Management/managementGroups/$MgId"
     $resources = @{
@@ -334,18 +324,17 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
         RoleAssignments      = @()
     }
 
-    # --- Custom policy definitions ---
-    # Wrap in @() so single results are always arrays (avoids .Count issues in strict mode)
+    # --- Anpassade policydefinitioner ---
+    # Slå in i @() så att ett enda resultat alltid är array (undviker .Count-problem i strict mode)
     $defs = @(Get-AzPolicyDefinition -ManagementGroupName $MgId -Custom -ErrorAction SilentlyContinue)
     foreach ($def in $defs) {
-        # ResourceId may be called PolicyDefinitionId in newer Az.Resources versions
         $rid = Get-PropSafe $def 'ResourceId', 'PolicyDefinitionId', 'Id'
         if (-not $rid) { continue }
         if ($rid -inotmatch "managementGroups/$MgId/") { continue }
 
         try {
             $ruleJson = (ConvertTo-SortedObject (Get-PropSafe $def 'PolicyRule', 'Properties')) | ConvertTo-Json -Depth 20 -Compress
-            $ruleJson = $ruleJson -replace '\[{2,}', '['  # normalize ARM escaping: [[ or [[[ (nested DINE templates) → [
+            $ruleJson = $ruleJson -replace '\[{2,}', '['  # normalisera ARM-escaping: [[ eller [[[ (nästlade DINE-templates) → [
             $hash     = Get-SHA256Short $ruleJson
         }
         catch {
@@ -366,7 +355,7 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
     }
     if ($defs.Count -gt 0) { Write-Info "    PolicyDefinitions: $($resources.PolicyDefinitions.Count)" }
 
-    # --- Custom policy set definitions (initiatives) ---
+    # --- Anpassade policyuppsättningsdefinitioner (initiativ) ---
     $sets = @(Get-AzPolicySetDefinition -ManagementGroupName $MgId -Custom -ErrorAction SilentlyContinue)
     foreach ($set in $sets) {
         $rid = Get-PropSafe $set 'ResourceId', 'PolicySetDefinitionId', 'Id'
@@ -403,9 +392,9 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
     }
     if ($sets.Count -gt 0) { Write-Info "    PolicySetDefinitions: $($resources.PolicySetDefinitions.Count)" }
 
-    # --- Policy assignments ---
-    # Supplement Get-AzPolicyAssignment with a direct REST call to capture identity.principalId,
-    # which Az.Resources 7.x does not reliably surface on the returned PS objects.
+    # --- Policytilldelningar ---
+    # Komplettera Get-AzPolicyAssignment med direkt REST-anrop för att fånga identity.principalId,
+    # som Az.Resources 7.x inte alltid exponerar på returnerade PS-objekt.
     $restIdentityMap = @{}
     $restPaResponse = Invoke-AzRestMethod `
         -Path "$scope/providers/Microsoft.Authorization/policyAssignments?`$filter=atScope()&api-version=2024-04-01" `
@@ -427,7 +416,6 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
 
     $assignments = @(Get-AzPolicyAssignment -Scope $scope -ErrorAction SilentlyContinue)
     foreach ($a in $assignments) {
-        # Only include assignments scoped directly to this MG (not child scopes)
         $aScope = Get-PropSafe $a 'Scope'
         if (-not $aScope) {
             $props = Get-PropSafe $a 'Properties'
@@ -445,7 +433,7 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
 
         $rid = Get-PropSafe $a 'ResourceId', 'PolicyAssignmentId', 'Id'
 
-        # Build identity: prefer REST API map (authoritative), fall back to PS object
+        # Bygg identitet: föredra REST API-kartan (auktoritativ), faller tillbaka på PS-objekt
         $identity = $null
         $restIdEntry = if ($rid) { $restIdentityMap[$rid.ToLower()] } else { $null }
         if ($restIdEntry) {
@@ -474,7 +462,7 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
     }
     if ($assignments.Count -gt 0) { Write-Info "    PolicyAssignments: $($resources.PolicyAssignments.Count)" }
 
-    # --- Custom role definitions ---
+    # --- Anpassade rolldefinitioner ---
     $roles = Get-AzRoleDefinition -Custom -ErrorAction SilentlyContinue |
         Where-Object { $_.AssignableScopes -contains $scope }
     if ($roles) {
@@ -491,7 +479,7 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
         Write-Info "    RoleDefinitions: $($resources.RoleDefinitions.Count)"
     }
 
-    # --- Role assignments ---
+    # --- Rolltilldelningar ---
     $roleAssignments = Get-AzRoleAssignment -Scope $scope -ErrorAction SilentlyContinue |
         Where-Object { $_.Scope -ieq $scope }
     if ($roleAssignments) {
@@ -524,30 +512,28 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
 }
 
 # ============================================================
-# Step 7: Discover subscription-level policy assignments and
-#         policy exemptions for a single subscription.
-#         Called for EVERY subscription in SubscriptionPlacement,
-#         not just platform subs — landing zone subs are where
-#         Deny-effect policies most often affect workloads.
+# Steg 7: Samla prenumerationsnivå-policytilldelningar och
+#         policyundantag för en enskild prenumeration.
+#         Anropas för ALLA prenumerationer i SubscriptionPlacement,
+#         inte bara plattformsprenumerationer — landing zone-prenumerationer
+#         är där Deny-effect-policyer oftast påverkar workloads.
 # ============================================================
 function Get-SubscriptionGovernance ([string]$SubscriptionId, [string]$DisplayName) {
-    Write-Info "  Scanning subscription governance: $DisplayName ($SubscriptionId)"
+    Write-Info "  Skannar prenumerationsstyrning: $DisplayName ($SubscriptionId)"
 
     $scope = "/subscriptions/$SubscriptionId"
 
     $ctx = Set-AzContext -SubscriptionId $SubscriptionId -ErrorAction SilentlyContinue
     if (-not $ctx) {
-        $msg = "Could not set context for subscription $SubscriptionId — skipping subscription governance scan."
+        $msg = "Kunde inte sätta kontext för prenumeration $SubscriptionId — hoppar över prenumerationsstyrning."
         $Script:Warnings += $msg
         Write-Warn $msg
         return $null
     }
 
-    # --- Policy assignments scoped directly to this subscription ---
     $assignments = @(Get-AzPolicyAssignment -Scope $scope -ErrorAction SilentlyContinue)
     $subAssignments = @()
     foreach ($a in $assignments) {
-        # Only include assignments whose scope equals exactly this subscription (not child scopes)
         $aScope = Get-PropSafe $a 'Scope'
         if (-not $aScope) {
             $props = Get-PropSafe $a 'Properties'
@@ -586,7 +572,7 @@ function Get-SubscriptionGovernance ([string]$SubscriptionId, [string]$DisplayNa
     }
     if ($subAssignments.Count -gt 0) { Write-Info "    PolicyAssignments: $($subAssignments.Count)" }
 
-    # --- Policy exemptions (no clean Az cmdlet — use REST) ---
+    # --- Policyundantag (inget rent Az-cmdlet — använd REST) ---
     $subExemptions = @()
     $exemptionResponse = Invoke-AzRestMethod `
         -Path "$scope/providers/Microsoft.Authorization/policyExemptions?api-version=2022-07-01-preview" `
@@ -598,13 +584,13 @@ function Get-SubscriptionGovernance ([string]$SubscriptionId, [string]$DisplayNa
             foreach ($ex in @($exemptionData.value)) {
                 $props = if ($ex.PSObject.Properties['properties']) { $ex.properties } else { $ex }
                 $subExemptions += @{
-                    ResourceId                  = $ex.id
-                    Name                        = $ex.name
-                    DisplayName                 = (Get-PropSafe $props 'displayName', 'DisplayName')
-                    ExemptionCategory           = (Get-PropSafe $props 'exemptionCategory', 'ExemptionCategory')
-                    PolicyAssignmentId          = (Get-PropSafe $props 'policyAssignmentId', 'PolicyAssignmentId')
+                    ResourceId                   = $ex.id
+                    Name                         = $ex.name
+                    DisplayName                  = (Get-PropSafe $props 'displayName', 'DisplayName')
+                    ExemptionCategory            = (Get-PropSafe $props 'exemptionCategory', 'ExemptionCategory')
+                    PolicyAssignmentId           = (Get-PropSafe $props 'policyAssignmentId', 'PolicyAssignmentId')
                     PolicyDefinitionReferenceIds = @(if ($props.PSObject.Properties['policyDefinitionReferenceIds']) { $props.policyDefinitionReferenceIds } else { @() })
-                    Scope                       = $scope
+                    Scope                        = $scope
                 }
             }
         }
@@ -620,10 +606,10 @@ function Get-SubscriptionGovernance ([string]$SubscriptionId, [string]$DisplayNa
 }
 
 # ============================================================
-# Step 8: Discover infrastructure resources for a subscription
+# Steg 8: Samla infrastrukturresurser för en prenumeration
 # ============================================================
 function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
-    Write-Info "  Scanning infrastructure scope: $ScopeName (sub: $SubscriptionId)"
+    Write-Info "  Skannar infrastruktur-scope: $ScopeName (sub: $SubscriptionId)"
 
     $resources = @{
         ResourceGroups = @()
@@ -632,13 +618,13 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
 
     $ctx = Set-AzContext -SubscriptionId $SubscriptionId -ErrorAction SilentlyContinue
     if (-not $ctx) {
-        $msg = "Could not set context for subscription $SubscriptionId — skipping infrastructure scope."
+        $msg = "Kunde inte sätta kontext för prenumeration $SubscriptionId — hoppar över infrastruktur-scope."
         $Script:Warnings += $msg
         Write-Warn $msg
         return $null
     }
 
-    # --- Resource groups ---
+    # --- Resursgrupper ---
     $rgs = @(Get-AzResourceGroup -ErrorAction SilentlyContinue)
     if ($rgs) {
         foreach ($rg in $rgs) {
@@ -648,13 +634,13 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
                 Tags     = $rg.Tags
             }
         }
-        Write-Info "    ResourceGroups: $($resources.ResourceGroups.Count)"
+        Write-Info "    Resursgrupper: $($resources.ResourceGroups.Count)"
     }
 
-    # --- Resource locks ---
+    # --- Resurslås ---
     $locks = @()
 
-    # Subscription-level locks (no ResourceGroupName = scoped at subscription level)
+    # Prenumerationsnivå-lås (inget ResourceGroupName = scope på prenumerationsnivå)
     $subLocks = @(Get-AzResourceLock -ErrorAction SilentlyContinue |
         Where-Object { -not $_.ResourceGroupName })
     foreach ($lock in $subLocks) {
@@ -667,7 +653,7 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
         }
     }
 
-    # Per-resource-group locks (covers RG-level and resource-level locks)
+    # Per-resursgrupp-lås (täcker RG-nivå och resursnivå-lås)
     foreach ($rg in $rgs) {
         $rgLocks = @(Get-AzResourceLock -ResourceGroupName $rg.ResourceGroupName -ErrorAction SilentlyContinue)
         foreach ($lock in $rgLocks) {
@@ -691,9 +677,9 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
     }
 
     $resources['ResourceLocks'] = $locks
-    Write-Info "    Resource locks: $($locks.Count)"
+    Write-Info "    Resurslås: $($locks.Count)"
 
-    # --- Log Analytics workspaces ---
+    # --- Log Analytics-arbetsytor ---
     $laws = @(Get-AzResource -ResourceType 'Microsoft.OperationalInsights/workspaces' -ErrorAction SilentlyContinue)
     if ($laws) {
         foreach ($law in $laws) {
@@ -712,10 +698,10 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
                 Tags          = $law.Tags
             }
         }
-        Write-Info "    Log Analytics workspaces: $($laws.Count)"
+        Write-Info "    Log Analytics-arbetsytor: $($laws.Count)"
     }
 
-    # --- Automation accounts ---
+    # --- Automation-konton ---
     $aas = @(Get-AzResource -ResourceType 'Microsoft.Automation/automationAccounts' -ErrorAction SilentlyContinue)
     if ($aas) {
         foreach ($aa in $aas) {
@@ -728,10 +714,10 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
                 Tags          = $aa.Tags
             }
         }
-        Write-Info "    Automation accounts: $($aas.Count)"
+        Write-Info "    Automation-konton: $($aas.Count)"
     }
 
-    # --- Hub VNets (VNets with GatewaySubnet or AzureFirewallSubnet indicate a hub) ---
+    # --- Hubb-VNet:ar (VNet med GatewaySubnet eller AzureFirewallSubnet indikerar hubb) ---
     $vnets = @(Get-AzVirtualNetwork -ErrorAction SilentlyContinue)
     if ($vnets) {
         foreach ($vnet in $vnets) {
@@ -772,7 +758,7 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
                 Tags           = $vnet.Tag
             }
         }
-        Write-Info "    Virtual networks: $($vnets.Count)"
+        Write-Info "    Virtuella nätverk: $($vnets.Count)"
     }
 
     # --- Azure Firewalls ---
@@ -780,38 +766,38 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
     if ($firewalls) {
         foreach ($fw in $firewalls) {
             $resources.KeyResources += @{
-                ResourceId    = $fw.Id
-                Type          = 'azureFirewall'
-                Name          = $fw.Name
-                Location      = $fw.Location
-                ResourceGroup = $fw.ResourceGroupName
-                Sku           = $fw.Sku
+                ResourceId      = $fw.Id
+                Type            = 'azureFirewall'
+                Name            = $fw.Name
+                Location        = $fw.Location
+                ResourceGroup   = $fw.ResourceGroupName
+                Sku             = $fw.Sku
                 ThreatIntelMode = $fw.ThreatIntelMode
-                Tags          = $fw.Tag
+                Tags            = $fw.Tag
             }
         }
         Write-Info "    Azure Firewalls: $($firewalls.Count)"
     }
 
-    # --- Public IPs ---
+    # --- Publika IP-adresser ---
     $pips = @(Get-AzPublicIpAddress -ErrorAction SilentlyContinue)
     if ($pips) {
         foreach ($pip in $pips) {
             $resources.KeyResources += @{
-                ResourceId        = $pip.Id
-                Type              = 'publicIpAddress'
-                Name              = $pip.Name
-                Location          = $pip.Location
-                ResourceGroup     = $pip.ResourceGroupName
-                AllocationMethod  = $pip.PublicIpAllocationMethod
-                Sku               = $pip.Sku.Name
-                Tags              = $pip.Tag
+                ResourceId       = $pip.Id
+                Type             = 'publicIpAddress'
+                Name             = $pip.Name
+                Location         = $pip.Location
+                ResourceGroup    = $pip.ResourceGroupName
+                AllocationMethod = $pip.PublicIpAllocationMethod
+                Sku              = $pip.Sku.Name
+                Tags             = $pip.Tag
             }
         }
-        Write-Info "    Public IPs: $($pips.Count)"
+        Write-Info "    Publika IP-adresser: $($pips.Count)"
     }
 
-    # --- NSGs ---
+    # --- NSG:er ---
     $nsgs = @(Get-AzNetworkSecurityGroup -ErrorAction SilentlyContinue)
     if ($nsgs) {
         foreach ($nsg in $nsgs) {
@@ -825,28 +811,28 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
                 Tags          = $nsg.Tag
             }
         }
-        Write-Info "    NSGs: $($nsgs.Count)"
+        Write-Info "    NSG:er: $($nsgs.Count)"
     }
 
-    # --- Route tables ---
+    # --- Routningstabeller ---
     $rts = @(Get-AzRouteTable -ErrorAction SilentlyContinue)
     if ($rts) {
         foreach ($rt in $rts) {
             $resources.KeyResources += @{
-                ResourceId            = $rt.Id
-                Type                  = 'routeTable'
-                Name                  = $rt.Name
-                Location              = $rt.Location
-                ResourceGroup         = $rt.ResourceGroupName
-                RouteCount            = $rt.Routes.Count
+                ResourceId                 = $rt.Id
+                Type                       = 'routeTable'
+                Name                       = $rt.Name
+                Location                   = $rt.Location
+                ResourceGroup              = $rt.ResourceGroupName
+                RouteCount                 = $rt.Routes.Count
                 DisableBgpRoutePropagation = $rt.DisableBgpRoutePropagation
-                Tags                  = $rt.Tag
+                Tags                       = $rt.Tag
             }
         }
-        Write-Info "    Route tables: $($rts.Count)"
+        Write-Info "    Routningstabeller: $($rts.Count)"
     }
 
-    # --- Private DNS zones ---
+    # --- Privata DNS-zoner ---
     $dnsZones = @(Get-AzPrivateDnsZone -ErrorAction SilentlyContinue)
     if ($dnsZones) {
         foreach ($zone in $dnsZones) {
@@ -874,10 +860,10 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
                 RecordSetCount = $zone.NumberOfRecordSets
             }
         }
-        Write-Info "    Private DNS zones: $($dnsZones.Count)"
+        Write-Info "    Privata DNS-zoner: $($dnsZones.Count)"
     }
 
-    # --- DDoS Protection Plans ---
+    # --- DDoS-skyddsplaner ---
     $ddosPlans = @(Get-AzDdosProtectionPlan -ErrorAction SilentlyContinue)
     if ($ddosPlans) {
         foreach ($ddos in $ddosPlans) {
@@ -890,7 +876,7 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
                 Tags          = $ddos.Tag
             }
         }
-        Write-Info "    DDoS Protection Plans: $($ddosPlans.Count)"
+        Write-Info "    DDoS-skyddsplaner: $($ddosPlans.Count)"
     }
 
     # --- Bastion Hosts ---
@@ -912,7 +898,7 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
         Write-Info "    Bastion Hosts: $($bastionRes.Count)"
     }
 
-    # --- VPN and ExpressRoute Gateways ---
+    # --- VPN- och ExpressRoute-gateways ---
     $gwRes = @(Get-AzResource -ResourceType 'Microsoft.Network/virtualNetworkGateways' -ErrorAction SilentlyContinue)
     $vpnGwCount = 0; $erGwCount = 0
     foreach ($gw in $gwRes) {
@@ -932,10 +918,10 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
         }
         if ($gwType -eq 'ExpressRoute') { $erGwCount++ } else { $vpnGwCount++ }
     }
-    if ($vpnGwCount -gt 0) { Write-Info "    VPN Gateways: $vpnGwCount" }
-    if ($erGwCount -gt 0)  { Write-Info "    ExpressRoute Gateways: $erGwCount" }
+    if ($vpnGwCount -gt 0) { Write-Info "    VPN-gateways: $vpnGwCount" }
+    if ($erGwCount -gt 0)  { Write-Info "    ExpressRoute-gateways: $erGwCount" }
 
-    # --- Firewall Policies ---
+    # --- Brandväggspolicyer ---
     $fwPolicyRes = @(Get-AzResource -ResourceType 'Microsoft.Network/firewallPolicies' -ErrorAction SilentlyContinue)
     if ($fwPolicyRes) {
         foreach ($fp in $fwPolicyRes) {
@@ -951,7 +937,7 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
                 Tags            = $fp.Tags
             }
         }
-        Write-Info "    Firewall Policies: $($fwPolicyRes.Count)"
+        Write-Info "    Brandväggspolicyer: $($fwPolicyRes.Count)"
     }
 
     # --- DNS Private Resolvers ---
@@ -970,7 +956,7 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
         Write-Info "    DNS Private Resolvers: $($resolverRes.Count)"
     }
 
-    # --- Data Collection Rules ---
+    # --- Datainsamlingsregler ---
     $dcrRes = @(Get-AzResource -ResourceType 'Microsoft.Insights/dataCollectionRules' -ErrorAction SilentlyContinue)
     if ($dcrRes) {
         foreach ($dcr in $dcrRes) {
@@ -983,10 +969,10 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
                 Tags          = $dcr.Tags
             }
         }
-        Write-Info "    Data Collection Rules: $($dcrRes.Count)"
+        Write-Info "    Datainsamlingsregler: $($dcrRes.Count)"
     }
 
-    # --- User Assigned Managed Identities ---
+    # --- Användartilldelade managed identities ---
     $uamiRes = @(Get-AzResource -ResourceType 'Microsoft.ManagedIdentity/userAssignedIdentities' -ErrorAction SilentlyContinue)
     if ($uamiRes) {
         foreach ($u in $uamiRes) {
@@ -999,7 +985,7 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
                 Tags          = $u.Tags
             }
         }
-        Write-Info "    User Assigned Managed Identities: $($uamiRes.Count)"
+        Write-Info "    Användartilldelade managed identities: $($uamiRes.Count)"
     }
 
     $total = $resources.ResourceGroups.Count + $resources.KeyResources.Count
@@ -1014,33 +1000,30 @@ function Get-InfrastructureScope ([string]$SubscriptionId, [string]$ScopeName) {
 }
 
 # ============================================================
-# Step 8: Map MG hierarchy to named governance scopes
+# Steg 8: Mappa MG-hierarkin till namngivna governance-scopes
 #
-# Mirrors the scope names used in Export-ALZStackState.ps1 so
-# Compare-ALZStackState.ps1 can match them by Name.
+# Speglar scope-namnen i Export-ALZStackState.ps1 så att
+# Compare-ALZStackState.ps1 kan matcha dem efter namn.
 # ============================================================
 function Get-GovernanceScopesFromHierarchy ([hashtable]$Root) {
     $scopes = @()
 
-    # Determine all MG IDs in the tree
     $allMgIds = Get-AllMgIds -HierarchyNode $Root
 
-    # int-root scope = the root itself
     $intRootScope = Get-GovernanceScope -MgId $Root.Name -ScopeName 'governance-int-root'
     if ($intRootScope) { $scopes += $intRootScope }
 
-    # Named child MG scopes
     $namedScopes = @{
-        'platform'              = 'governance-platform'
-        'connectivity'          = 'governance-platform-connectivity'
-        'identity'              = 'governance-platform-identity'
-        'management'            = 'governance-platform-management'
-        'security'              = 'governance-platform-security'
-        'landingzones'          = 'governance-landingzones'
-        'corp'                  = 'governance-landingzones-corp'
-        'online'                = 'governance-landingzones-online'
-        'sandbox'               = 'governance-sandbox'
-        'decommissioned'        = 'governance-decommissioned'
+        'platform'       = 'governance-platform'
+        'connectivity'   = 'governance-platform-connectivity'
+        'identity'       = 'governance-platform-identity'
+        'management'     = 'governance-platform-management'
+        'security'       = 'governance-platform-security'
+        'landingzones'   = 'governance-landingzones'
+        'corp'           = 'governance-landingzones-corp'
+        'online'         = 'governance-landingzones-online'
+        'sandbox'        = 'governance-sandbox'
+        'decommissioned' = 'governance-decommissioned'
     }
 
     foreach ($mgId in ($allMgIds | Where-Object { $_ -ne $Root.Name })) {
@@ -1060,43 +1043,40 @@ function Get-GovernanceScopesFromHierarchy ([hashtable]$Root) {
 }
 
 # ============================================================
-# Main
+# Huvudprogram
 # ============================================================
 
 Write-Host ''
 if ($NoColor) { Write-Host 'Export-BrownfieldState' } else { Write-Host "`e[1mExport-BrownfieldState`e[0m" }
-Write-Host '(read-only — no changes will be made)'
+Write-Host '(skrivskyddat — inga ändringar görs i tenanten)'
 Write-Host ''
 
-# Script-level state
 $Script:TenantId                 = $TenantId
 $Script:RootManagementGroupId    = $RootManagementGroupId
 $Script:PlatformSubscriptionIds  = $PlatformSubscriptionIds
 $Script:Warnings                 = @()
-$Script:ActualMgIds              = @()   # populated after hierarchy build; used for normalized MG lookups
-$Script:SubscriptionPlacement    = @{}  # MG ID -> array of { Id, DisplayName } for subscriptions directly under it
+$Script:ActualMgIds              = @()
+$Script:SubscriptionPlacement    = @{}
 
 Resolve-TenantId
 Resolve-RootManagementGroup
 
 # ============================================================
-# Build MG hierarchy
+# Bygg MG-hierarki
 # ============================================================
 $mgHierarchy = $null
 
 if ($Script:RootManagementGroupId -ne '') {
-    Write-Step 'Building management group hierarchy'
+    Write-Step 'Bygger management group-hierarki'
     $mgHierarchy = Get-MgHierarchy -GroupId $Script:RootManagementGroupId
 
     if ($mgHierarchy) {
         $allIds = Get-AllMgIds -HierarchyNode $mgHierarchy
         $Script:ActualMgIds = $allIds
-        Write-Ok "MG hierarchy built — $($allIds.Count) management group(s)"
+        Write-Ok "MG-hierarki byggd — $($allIds.Count) management group(s)"
 
-        # Collect direct subscription membership for each MG.
-        # Used by Compare-BrownfieldState.ps1 to resolve which subscriptions are in scope
-        # for assigned Deny-effect policies.
-        Write-Step 'Collecting subscription placement'
+        # Samla prenumerationsplacering per MG för blast-radius-analys i Compare
+        Write-Step 'Samlar prenumerationsplacering'
         foreach ($mgId in $allIds) {
             $response = Invoke-AzRestMethod `
                 -Path "/providers/Microsoft.Management/managementGroups/$mgId/subscriptions?api-version=2020-05-01" `
@@ -1111,28 +1091,27 @@ if ($Script:RootManagementGroupId -ne '') {
             }
         }
         $placedCount = ($Script:SubscriptionPlacement.Values | ForEach-Object { @($_).Count } | Measure-Object -Sum).Sum
-        Write-Ok "Subscription placement collected — $placedCount subscription(s) across $($Script:SubscriptionPlacement.Count) MG(s)"
+        Write-Ok "Prenumerationsplacering insamlad — $placedCount prenumeration(er) i $($Script:SubscriptionPlacement.Count) MG(s)"
     }
     else {
-        $msg = "Could not expand MG hierarchy from root '$Script:RootManagementGroupId'."
+        $msg = "Kunde inte expandera MG-hierarkin från rot '$Script:RootManagementGroupId'."
         $Script:Warnings += $msg
         Write-Warn $msg
     }
 }
 
 # ============================================================
-# Governance scopes
+# Governance-scopes
 # ============================================================
 $governanceScopes = @()
 
 if ($mgHierarchy) {
-    Write-Step 'Discovering governance resources'
+    Write-Step 'Söker efter governance-resurser'
     try {
         $governanceScopes = Get-GovernanceScopesFromHierarchy -Root $mgHierarchy
-        Write-Ok "Governance scopes collected: $($governanceScopes.Count)"
+        Write-Ok "Governance-scopes insamlade: $($governanceScopes.Count)"
 
-        # Post-process: flag IsPolicyDriven on role assignments.
-        # Build a set of all managed identity principal IDs from policy assignments with SystemAssigned identity.
+        # Markera policydriven rolltilldelningar för att hjälpa Compare identifiera orphan-risk
         $allMiPrincipalIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         foreach ($gs in $governanceScopes) {
             foreach ($pa in @($gs.Resources.PolicyAssignments)) {
@@ -1140,7 +1119,6 @@ if ($mgHierarchy) {
                 if ($mid) { [void]$allMiPrincipalIds.Add($mid) }
             }
         }
-        # Flag each role assignment as policy-driven if its principal ID belongs to a policy managed identity
         foreach ($gs in $governanceScopes) {
             foreach ($ra in @($gs.Resources.RoleAssignments)) {
                 $raPrincipalId = $ra['PrincipalId']
@@ -1150,29 +1128,28 @@ if ($mgHierarchy) {
         $totalPolicyDrivenRas = ($governanceScopes |
             ForEach-Object { @($_.Resources.RoleAssignments) | Where-Object { $_['IsPolicyDriven'] } } |
             Measure-Object).Count
-        if ($totalPolicyDrivenRas -gt 0) { Write-Info "  Policy-driven role assignments identified: $totalPolicyDrivenRas" }
+        if ($totalPolicyDrivenRas -gt 0) { Write-Info "  Policydrivna rolltilldelningar identifierade: $totalPolicyDrivenRas" }
     }
     catch {
-        $msg = "Governance discovery failed: $($_.Exception.Message)"
+        $msg = "Governance-discovery misslyckades: $($_.Exception.Message)"
         $Script:Warnings += $msg
         Write-Warn $msg
     }
 }
 else {
-    Write-Warn 'Skipping governance discovery — no MG hierarchy available.'
+    Write-Warn 'Hoppar över governance-discovery — ingen MG-hierarki tillgänglig.'
 }
 
 # ============================================================
-# Resolve platform subscriptions, then scan infrastructure
+# Lös plattformsprenumerationer, skanna sedan infrastruktur
 # ============================================================
 Resolve-PlatformSubscriptions
 
 $infrastructureScopes = @()
 
 if ($Script:PlatformSubscriptionIds.Count -gt 0) {
-    Write-Step 'Discovering infrastructure resources'
+    Write-Step 'Söker efter infrastrukturresurser'
 
-    # Build normalized->actual map for scope-name resolution
     $normalizedToActualInfra = @{}
     if ($Script:ActualMgIds) {
         foreach ($actualId in $Script:ActualMgIds) {
@@ -1181,7 +1158,6 @@ if ($Script:PlatformSubscriptionIds.Count -gt 0) {
     }
 
     foreach ($subId in $Script:PlatformSubscriptionIds) {
-        # Derive a friendly scope name from MG placement where possible
         $scopeName = "core-subscription-$subId"
         foreach ($mgName in $AlzPlatformMgs) {
             $actualMgId = if ($normalizedToActualInfra.ContainsKey($mgName)) {
@@ -1199,25 +1175,24 @@ if ($Script:PlatformSubscriptionIds.Count -gt 0) {
                 $match = ($response.Content | ConvertFrom-Json).value |
                     Where-Object { $_.name -eq $subId }
                 if ($match) {
-                    # Use normalized name for the scope label
                     $scopeName = "core-$mgName"
                     break
                 }
             }
         }
 
-        # Special-case the logging scope name to match Export-ALZStackState naming
+        # Byt namn på management-scope för att matcha Export-ALZStackState-namngivning
         if ($scopeName -eq 'core-management') { $scopeName = 'core-logging' }
 
         try {
             $infraScope = Get-InfrastructureScope -SubscriptionId $subId -ScopeName $scopeName
             if ($infraScope) {
                 $infrastructureScopes += $infraScope
-                Write-Ok "  $scopeName — $($infraScope.ResourceCount) resource(s)"
+                Write-Ok "  $scopeName — $($infraScope.ResourceCount) resurs(er)"
             }
         }
         catch {
-            $msg = "Infrastructure discovery failed for subscription $subId`: $($_.Exception.Message)"
+            $msg = "Infrastruktur-discovery misslyckades för prenumeration $subId`: $($_.Exception.Message)"
             $Script:Warnings += $msg
             Write-Fail $msg
         }
@@ -1225,24 +1200,20 @@ if ($Script:PlatformSubscriptionIds.Count -gt 0) {
 }
 
 # ============================================================
-# Subscription-level governance (assignments + exemptions)
-# Scans ALL subscriptions in SubscriptionPlacement — not just
-# platform subs — because landing zone subs are where Deny-effect
-# policies most commonly affect workloads.
+# Prenumerationsstyrning (tilldelningar + undantag)
+# Skannar ALLA prenumerationer i SubscriptionPlacement — inte bara
+# plattformsprenumerationer — eftersom landing zone-prenumerationer
+# är där Deny-effect-policyer oftast påverkar workloads.
 # ============================================================
 $subscriptionGovernanceScopes = @()
 
 if ($Script:SubscriptionPlacement.Count -gt 0) {
-    Write-Step 'Scanning subscription-level governance'
+    Write-Step 'Skannar prenumerationsnivå-styrning'
 
-    # Build a de-duplicated flat list of all subscriptions across all MGs
     $allSubsSeen = [System.Collections.Generic.HashSet[string]]::new()
     $allSubsList = [System.Collections.Generic.List[object]]::new()
     foreach ($mgSubs in $Script:SubscriptionPlacement.Values) {
         foreach ($sub in @($mgSubs)) {
-            # SubscriptionPlacement entries are hashtables written directly by this script.
-            # Use hashtable key access (ContainsKey) rather than .PSObject.Properties which
-            # only works on PSCustomObjects, not hashtables.
             $subId = if ($sub -is [hashtable] -and $sub.ContainsKey('Id')) { $sub['Id'] }
                      elseif ($sub.PSObject.Properties['Id']) { $sub.Id }
                      elseif ($sub -is [string]) { $sub }
@@ -1256,7 +1227,7 @@ if ($Script:SubscriptionPlacement.Count -gt 0) {
         }
     }
 
-    Write-Info "  $($allSubsList.Count) subscription(s) to scan"
+    Write-Info "  $($allSubsList.Count) prenumeration(er) att skanna"
 
     foreach ($sub in $allSubsList) {
         try {
@@ -1266,7 +1237,7 @@ if ($Script:SubscriptionPlacement.Count -gt 0) {
             }
         }
         catch {
-            $msg = "Subscription governance scan failed for $($sub.Id): $($_.Exception.Message)"
+            $msg = "Prenumerationsstyrningsskanning misslyckades för $($sub.Id): $($_.Exception.Message)"
             $Script:Warnings += $msg
             Write-Warn $msg
         }
@@ -1274,19 +1245,17 @@ if ($Script:SubscriptionPlacement.Count -gt 0) {
 
     $totalSubAssignments = ($subscriptionGovernanceScopes | ForEach-Object { $_.PolicyAssignments.Count } | Measure-Object -Sum).Sum
     $totalSubExemptions  = ($subscriptionGovernanceScopes | ForEach-Object { $_.PolicyExemptions.Count }  | Measure-Object -Sum).Sum
-    Write-Ok "Subscription governance collected — $totalSubAssignments assignment(s), $totalSubExemptions exemption(s) across $($subscriptionGovernanceScopes.Count) subscription(s)"
+    Write-Ok "Prenumerationsstyrning insamlad — $totalSubAssignments tilldelning(ar), $totalSubExemptions undantag i $($subscriptionGovernanceScopes.Count) prenumeration(er)"
 }
 else {
-    Write-Info 'No subscription placement data — skipping subscription-level governance scan.'
-    Write-Info '  (Re-run after MG hierarchy is built and subscriptions are placed under it)'
+    Write-Info 'Inga prenumerationsplaceringsdata — hoppar över prenumerationsnivå-styrningsskanning.'
+    Write-Info '  (Kör om efter att MG-hierarkin är byggd och prenumerationer är placerade under den)'
 }
 
 # ============================================================
-# ============================================================
-# Defender for Cloud state (per-subscription REST scan)
+# Defender for Cloud-state (per-prenumeration REST-skanning)
 # ============================================================
 function Get-DefenderState ([string]$SubscriptionId) {
-    # Defender plan pricing tiers
     $plans = @()
     $r = Invoke-AzRestMethod `
         -Path "/subscriptions/$SubscriptionId/providers/Microsoft.Security/pricings?api-version=2024-01-01" `
@@ -1304,7 +1273,6 @@ function Get-DefenderState ([string]$SubscriptionId) {
         }
     }
 
-    # Security contacts
     $contacts = @()
     $r2 = Invoke-AzRestMethod `
         -Path "/subscriptions/$SubscriptionId/providers/Microsoft.Security/securityContacts?api-version=2020-01-01-preview" `
@@ -1324,7 +1292,6 @@ function Get-DefenderState ([string]$SubscriptionId) {
         }
     }
 
-    # Auto-provisioning settings (MMA vs AMA indicator)
     $autoProv = @()
     $r3 = Invoke-AzRestMethod `
         -Path "/subscriptions/$SubscriptionId/providers/Microsoft.Security/autoProvisioningSettings?api-version=2017-08-01-preview" `
@@ -1349,7 +1316,8 @@ function Get-DefenderState ([string]$SubscriptionId) {
     }
 }
 
-# Blueprint assignments (per-subscription REST scan)
+# ============================================================
+# Blueprint-tilldelningar (per-prenumeration REST-skanning)
 # ============================================================
 function Get-BlueprintAssignments ([string]$SubscriptionId) {
     $response = Invoke-AzRestMethod `
@@ -1362,13 +1330,13 @@ function Get-BlueprintAssignments ([string]$SubscriptionId) {
                 $props = $_.properties
                 @{
                     Name              = $_.name
-                    BlueprintId       = if ($props.PSObject.Properties['blueprintId'])  { $props.blueprintId }  else { $null }
+                    BlueprintId       = if ($props.PSObject.Properties['blueprintId'])       { $props.blueprintId }       else { $null }
                     Scope             = "/subscriptions/$SubscriptionId"
                     SubscriptionId    = $SubscriptionId
-                    ProvisioningState = if ($props.PSObject.Properties['provisioningState']) { $props.provisioningState } else { $null }
+                    ProvisioningState = if ($props.PSObject.Properties['provisioningState'])  { $props.provisioningState } else { $null }
                     LockMode          = if ($props.PSObject.Properties['locks'] -and $props.locks) { $props.locks.mode } else { 'None' }
-                    Parameters        = if ($props.PSObject.Properties['parameters'])   { $props.parameters }   else { $null }
-                    ResourceGroups    = if ($props.PSObject.Properties['resourceGroups']) { $props.resourceGroups } else { $null }
+                    Parameters        = if ($props.PSObject.Properties['parameters'])         { $props.parameters }        else { $null }
+                    ResourceGroups    = if ($props.PSObject.Properties['resourceGroups'])     { $props.resourceGroups }    else { $null }
                 }
             })
         }
@@ -1379,7 +1347,7 @@ function Get-BlueprintAssignments ([string]$SubscriptionId) {
 $defenderStateList = @()
 
 if ($Script:PlatformSubscriptionIds.Count -gt 0) {
-    Write-Step 'Scanning Defender for Cloud state'
+    Write-Step 'Skannar Defender for Cloud-state'
     foreach ($subId in $Script:PlatformSubscriptionIds) {
         try {
             $ctx = Set-AzContext -SubscriptionId $subId -ErrorAction SilentlyContinue
@@ -1387,10 +1355,10 @@ if ($Script:PlatformSubscriptionIds.Count -gt 0) {
             $ds = Get-DefenderState -SubscriptionId $subId
             $defenderStateList += $ds
             $enabledPlans = @($ds.DefenderPlans | Where-Object { $_['PricingTier'] -eq 'Standard' })
-            Write-Info "  $subId — $($enabledPlans.Count)/$($ds.DefenderPlans.Count) Defender plans enabled"
+            Write-Info "  $subId — $($enabledPlans.Count)/$($ds.DefenderPlans.Count) Defender-planer aktiverade"
         }
         catch {
-            Write-Warn "  Defender state scan failed for $subId`: $($_.Exception.Message)"
+            Write-Warn "  Defender-state-skanning misslyckades för $subId`: $($_.Exception.Message)"
         }
     }
 }
@@ -1398,7 +1366,7 @@ if ($Script:PlatformSubscriptionIds.Count -gt 0) {
 $blueprintAssignments = @()
 
 if ($Script:SubscriptionPlacement.Count -gt 0) {
-    Write-Step 'Scanning blueprint assignments'
+    Write-Step 'Skannar blueprint-tilldelningar'
 
     $allSubsSeen2 = [System.Collections.Generic.HashSet[string]]::new()
     foreach ($mgSubs in $Script:SubscriptionPlacement.Values) {
@@ -1412,22 +1380,22 @@ if ($Script:SubscriptionPlacement.Count -gt 0) {
             $found = @(Get-BlueprintAssignments -SubscriptionId $subId)
             if ($found.Count -gt 0) {
                 $blueprintAssignments += $found
-                Write-Warn "  $subId — $($found.Count) blueprint assignment(s) found"
+                Write-Warn "  $subId — $($found.Count) blueprint-tilldelning(ar) hittade"
             }
         }
     }
 
     if ($blueprintAssignments.Count -eq 0) {
-        Write-Ok "No blueprint assignments found"
+        Write-Ok 'Inga blueprint-tilldelningar hittades'
     } else {
-        Write-Warn "$($blueprintAssignments.Count) total blueprint assignment(s) detected"
+        Write-Warn "$($blueprintAssignments.Count) blueprint-tilldelning(ar) totalt detekterade"
     }
 } else {
-    Write-Info 'No subscription placement data — skipping blueprint assignment scan.'
+    Write-Info 'Inga prenumerationsplaceringsdata — hoppar över blueprint-tilldelningsskanning.'
 }
 
 # ============================================================
-# Bootstrap / high-privilege identity scan
+# Höga behörigheter — identitetsskanning vid int-root MG
 # ============================================================
 function Get-HighPrivilegeIdentities ([string]$MgId) {
     $response = Invoke-AzRestMethod `
@@ -1458,32 +1426,32 @@ function Get-HighPrivilegeIdentities ([string]$MgId) {
     return $highPriv
 }
 
-Write-Step 'Scanning high-privilege identities at int-root MG scope'
+Write-Step 'Skannar höga behörigheter vid int-root MG-scope'
 $highPrivilegeIdentities = @()
 if ($Script:RootManagementGroupId -ne '') {
     $highPrivilegeIdentities = @(Get-HighPrivilegeIdentities -MgId $Script:RootManagementGroupId)
     if ($highPrivilegeIdentities.Count -gt 0) {
-        Write-Info "Found $($highPrivilegeIdentities.Count) Owner/Contributor assignment(s) at $Script:RootManagementGroupId"
+        Write-Info "Hittade $($highPrivilegeIdentities.Count) Owner/Contributor-tilldelning(ar) vid $Script:RootManagementGroupId"
         foreach ($hp in $highPrivilegeIdentities) {
             Write-Info "  $($hp['RoleName']) — $($hp['PrincipalType']): $($hp['PrincipalId'])"
         }
     } else {
-        Write-Ok 'No Owner/Contributor assignments found at int-root MG scope'
+        Write-Ok 'Inga Owner/Contributor-tilldelningar hittades vid int-root MG-scope'
     }
 } else {
-    Write-Warn 'RootManagementGroupId not set — skipping high-privilege identity scan'
+    Write-Warn 'RootManagementGroupId ej satt — hoppar över skanning av höga behörigheter'
 }
 
 # ============================================================
-# Assemble and write output
+# Assemblera och skriv utdata
 # ============================================================
-Write-Step 'Writing output'
+Write-Step 'Skriver utdata'
 
 $export = @{
     ExportTimestamp          = (Get-Date -Format 'o')
     TenantId                 = $Script:TenantId
     RootManagementGroupId    = $Script:RootManagementGroupId
-    DiscoveryMode            = 'brownfield'
+    DiscoveryMode            = 'in-place-takeover'
     ManagementGroupHierarchy = $mgHierarchy
     SubscriptionPlacement    = $Script:SubscriptionPlacement
     SubscriptionGovernance   = $subscriptionGovernanceScopes
@@ -1497,17 +1465,17 @@ $export = @{
 $export | ConvertTo-Json -Depth 30 | Out-File -FilePath $OutputFile -Encoding utf8
 
 Write-Host ''
-Write-Ok "Export complete: $OutputFile"
-Write-Info "Total scopes exported:       $($export.Scopes.Count)"
-Write-Info "Governance scopes:           $($governanceScopes.Count)"
-Write-Info "Infrastructure scopes:       $($infrastructureScopes.Count)"
-Write-Info "Subscription governance:     $($subscriptionGovernanceScopes.Count) subscription(s)"
-Write-Info "Defender state subscriptions: $($defenderStateList.Count)"
-Write-Info "Blueprint assignments:       $($blueprintAssignments.Count)"
+Write-Ok "Export klar: $OutputFile"
+Write-Info "Totalt exporterade scopes:          $($export.Scopes.Count)"
+Write-Info "Governance-scopes:                  $($governanceScopes.Count)"
+Write-Info "Infrastruktur-scopes:               $($infrastructureScopes.Count)"
+Write-Info "Prenumerationsstyrning:             $($subscriptionGovernanceScopes.Count) prenumeration(er)"
+Write-Info "Defender-state-prenumerationer:     $($defenderStateList.Count)"
+Write-Info "Blueprint-tilldelningar:            $($blueprintAssignments.Count)"
 
 if ($Script:Warnings.Count -gt 0) {
     Write-Host ''
-    Write-Warn "$($Script:Warnings.Count) warning(s):"
+    Write-Warn "$($Script:Warnings.Count) varning(ar):"
     foreach ($w in $Script:Warnings) {
         Write-Warn "  $w"
     }
