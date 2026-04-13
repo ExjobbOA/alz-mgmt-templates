@@ -1417,3 +1417,13 @@ Inventory of resources that exist in the tenant but are never touched by the eng
 Block 2 items (non-standard, AMBA, deprecated, custom roles) no longer influence the traffic light colour.
 
 **`$totalStdAssignments`** added to the aggregation loop — previously only non-standard and AMBA assignment counts were tracked; now standard (engine-library-referencing) assignment count is also available for Block 1 display.
+
+---
+
+## Apr 13: Engine Tag v1.0.0 — Config Repo Pinning & DDoS Fix (platform-connectivity)
+
+Engine repo (`alz-mgmt-templates`) tagged at `v1.0.0` to mark the end of iteration 1. Two changes in Oskar's config repo (`alz-mgmt`):
+
+**Workflow pinning:** `ci.yaml` and `cd.yaml` updated to reference `@v1.0.0` instead of `@main`, and `platform_ref` in `cd.yaml` set to `v1.0.0`. This pins the config repo to the stable iteration 1 engine — template upgrades require an explicit bump in both files.
+
+**DDoS effect override (`platform-connectivity/main.bicepparam`):** The `Enable-DDoS-VNET` override block was missing the `effect` parameter. Only `ddosPlan` was set, leaving the policy's default `Modify` effect active with the placeholder DDoS plan ID. Added `effect: { value: 'Audit' }` to match the overrides already present in `platform/main.bicepparam` and `landingzones/main.bicepparam`. Without this, a full-mode connectivity deployment would fail with `LinkedAuthorizationFailed` — the same root cause documented in the Mar 10 entry.
