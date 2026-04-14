@@ -1420,6 +1420,43 @@ Block 2 items (non-standard, AMBA, deprecated, custom roles) no longer influence
 
 ---
 
+## Apr 15: OIDC Subject Simplification & Explicit MG Names
+
+### OIDC: Remove job_workflow_ref from FIC subjects (fix/oidc-env-only-subject)
+
+**Problem:** Federated identity credentials (FICs) matched on exact subject strings that included `job_workflow_ref` — the full workflow path and git ref from the engine repo. When a config repo references the engine via a semver tag (`@v1.0.0`) instead of `@refs/heads/main`, the subject no longer matches and Azure login fails with `AADSTS700213`. Tag-pinning is central to the MSP upgrade model, so creating a new FIC per tag doesn't scale.
+
+**Solution:** Switch to environment-only subjects: `repo:ORG/REPO:environment:ENV`. GitHub environment protection rules already provide the security gate — the workflow ref is not needed in the subject.
+
+**Changes (engine repo, `fix/oidc-env-only-subject`):**
+- `bootstrap/plumbing/modules/uami-oidc.bicep`: Remove `job_workflow_ref` vars, simplify to `subjectPlan` / `subjectApply`. Merge `ficCiPlan` + `ficCdPlan` into a single FIC (`github-plan`) since CI and CD now share the same subject. Rename `ficCdApply` → `github-apply`. Result: 2 FICs instead of 3. Remove `templatesRepo` and `workflowRefBranch` params.
+- `bootstrap/plumbing/modules/identity-oidc.bicep`: Stop passing the two removed params to uami module.
+- `bootstrap/plumbing/main.bicep`: Keep `templatesRepo` and `workflowRefBranch` as no-op params (backward compat with existing `plumbing.bicepparam` files), suppress lint warnings with `#disable-next-line`.
+- `bootstrap/plumbing/main.json`: Recompiled. Verified: `github-plan`/`github-apply` present, `ci-plan`/`cd-plan`/`cd-apply`/`job_workflow_ref` absent.
+- `scripts/onboard.ps1`: `Set-OidcSubjectClaim` now sends `{"use_default":true}` — resets to GitHub default format.
+- `bootstrap/subjects/subject-contract.md`: Updated format docs, removed locked-paths/locked-branch sections, added migration steps for existing tenants.
+
+**Migration on Oskar's tenant:** `onboard.ps1` re-run successfully. New FICs (`github-plan`, `github-apply`) confirmed via `az identity federated-credential list`. Old FICs (`ci-plan`, `cd-plan`, `cd-apply`) deleted manually via Azure Portal.
+
+### Explicit MG names in platform.json (feat/explicit-mg-names)
+
+**Problem:** All child-MG `.bicepparam` files had hardcoded names (`'platform'`, `'landingzones'`, etc.). `MANAGEMENT_GROUP_ID_PREFIX` and `MANAGEMENT_GROUP_ID_POSTFIX` existed in `platform.json` but were never consumed. No way to deploy in-place against a brownfield MG hierarchy with non-standard names (e.g. Sylaviken's `ALZ-sandboxes` vs engine default `sandbox`).
+
+**Solution:** Ten explicit `MG_NAME_*` keys in `platform.json`, one per management group. Each `.bicepparam` reads its name from the corresponding env var via `readEnvironmentVariable()` with a greenfield default. Brownfield tenants override individual keys; unmodified tenants are unaffected.
+
+**Changes (config repo `alz-mgmt-oskar`, `feat/explicit-mg-names`):**
+- `config/platform.json`: Add `MG_NAME_PLATFORM`, `MG_NAME_LANDINGZONES`, `MG_NAME_CORP`, `MG_NAME_ONLINE`, `MG_NAME_CONNECTIVITY`, `MG_NAME_IDENTITY`, `MG_NAME_MANAGEMENT`, `MG_NAME_SECURITY`, `MG_NAME_SANDBOX`, `MG_NAME_DECOMMISSIONED`. Remove `MANAGEMENT_GROUP_ID_PREFIX` and `MANAGEMENT_GROUP_ID_POSTFIX` (never consumed).
+- Tier 1 (parent = int-root): `platform`, `landingzones`, `sandbox`, `decommissioned` — `managementGroupName` reads from env var.
+- Tier 2 (parent = platform): `platform-connectivity`, `platform-identity`, `platform-management`, `platform-security` — both `managementGroupName` and `managementGroupParentId` read from env vars.
+- Tier 3 (parent = landingzones): `landingzones-corp`, `landingzones-online` — same pattern.
+- `bicep-variables` action loads `platform.json` generically (all keys via `foreach` loop) — no engine-repo changes needed.
+
+**Verified:** `az bicep build-params` on all 10 files with platform.json env vars loaded — no errors (only pre-existing `BCP091` for missing `using` target and unrelated issues in `plumbing.bicepparam` / `defaults.bicepparam`). What-If in CI confirmed `= NoChange` on MG resources — greenfield defaults resolve correctly.
+
+**Note on What-If noise:** What-If shows ~106 Modify items on every run regardless of how many times you deploy. These are two structural ARM behaviors: (1) `properties.definitionVersion: "1.*.*"` set by Azure but absent from the AVM template, and (2) `principalId` stored as a resolved GUID in Azure but expressed as an ARM reference in the template. Both are false positives. This is why the Iteration 1 idempotency proof was switched from What-If to the stack-diff method (`Export-ALZStackState.ps1` + `Compare-ALZStackState.ps1`).
+
+---
+
 ## Apr 13: Engine Tag v1.0.0 — Config Repo Pinning & DDoS Fix (platform-connectivity)
 
 Engine repo (`alz-mgmt-templates`) tagged at `v1.0.0` to mark the end of iteration 1. Two changes in Oskar's config repo (`alz-mgmt`):
