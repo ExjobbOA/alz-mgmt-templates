@@ -1,40 +1,40 @@
 #Requires -Version 7
 <#
 .SYNOPSIS
-    Compares a brownfield ALZ export against the engine's ALZ policy library
-    and produces a human-readable adoption readiness report.
+    Jämför ett in-place takeover-export mot engine:ns ALZ-principbibliotek
+    och producerar en läsbar adoptionsberedskapsrapport.
 
 .DESCRIPTION
-    Reads a JSON file produced by Export-BrownfieldState.ps1 and compares its
-    policy definitions, policy set definitions, and role definitions against the
-    engine's ALZ library to classify each as Standard, Non-standard, or Deprecated.
+    Läser en JSON-fil producerad av Export-BrownfieldState.ps1 och jämför dess
+    policydefinitioner, policysetdefinitioner och rolldefinitioner mot engine:ns
+    ALZ-bibliotek för att klassificera varje post som Standard, Icke-standard eller Utfasad.
 
-    Also inventories policy assignments, RBAC, infrastructure, and extracts
-    configuration values the operator needs for platform.json.
+    Inventerar även policytilldelningar, RBAC, infrastruktur och extraherar
+    konfigurationsvärden som operatören behöver som override-parametrar i tenant-konfigurationsrepot.
 
-    Read-only. No changes are made to Azure or to any files (unless -OutputFile is used).
+    Skrivskyddat. Inga ändringar görs i Azure eller i några filer (såvida inte -OutputFile används).
 
 .PARAMETER BrownfieldExport
-    Path to the brownfield JSON export produced by Export-BrownfieldState.ps1.
+    Sökväg till JSON-exporten producerad av Export-BrownfieldState.ps1.
 
 .PARAMETER AlzLibraryPath
-    Path to the engine's ALZ library directory (contains *.alz_policy_definition.json etc).
-    Auto-detected relative to this script's location if omitted.
+    Sökväg till engine:ns ALZ-bibliotekskatalog (innehåller *.alz_policy_definition.json m.fl.).
+    Detekteras automatiskt relativt till skriptets placering om den utelämnas.
 
 .PARAMETER OutputFile
-    Optional path to write the full report as JSON.
+    Valfri sökväg att skriva hela rapporten som JSON.
 
 .PARAMETER Detailed
-    Show individual resource listings (non-standard/deprecated items), not just counts.
-    Deny-effect mismatches are split into ASSIGNED (active risk) and UNASSIGNED (no current risk) blocks.
+    Visa individuella resursposter (icke-standard/utfasade objekt), inte bara antal.
+    Deny-effekt-avvikelser delas upp i ASSIGNED (aktiv risk) och UNASSIGNED (ingen nuvarande risk).
 
 .PARAMETER IncludeAmba
-    When combined with -Detailed, also expands individual AMBA and deprecated policy listings.
-    Without this switch, -Detailed shows AMBA and deprecated items as counts only.
+    Kombinerat med -Detailed: expandera även individuella AMBA- och utfasade policyposter.
+    Utan denna switch visar -Detailed AMBA och utfasade poster enbart som antal.
 
 .PARAMETER DiffReport
-    Optional path to write an HTML side-by-side diff report for Deny-effect policy rule mismatches.
-    Requires Python 3 and scripts/diff-deny-rules.py. Opens in any browser.
+    Valfri sökväg att skriva en HTML-rapport med side-by-side-diff för Deny-effekt-avvikelser.
+    Kräver Python 3 och scripts/diff-deny-rules.py. Öppnas i valfri webbläsare.
 
 .EXAMPLE
     ./scripts/Compare-BrownfieldState.ps1 -BrownfieldExport ./state-snapshots/state-sylaviken-brownfield.json
@@ -204,8 +204,8 @@ function Get-EffectCategory ([string]$Effect) {
 # Load and validate inputs
 #==============================================================================
 Write-Host ''
-if ($NoColor) { Write-Host 'ALZ Brownfield Comparison Report' } else { Write-Host "`e[1mALZ Brownfield Comparison Report`e[0m" }
-Write-Host '(read-only — no changes will be made)'
+if ($NoColor) { Write-Host 'ALZ In-Place Takeover — Jämförelserapport' } else { Write-Host "`e[1mALZ In-Place Takeover — Jämförelserapport`e[0m" }
+Write-Host '(skrivskyddat — inga ändringar görs)'
 Write-Host ''
 
 if (-not (Test-Path $BrownfieldExport)) {
@@ -237,11 +237,10 @@ if (-not (Test-Path $AlzLibraryPath)) {
 }
 
 Write-Info "Export:  $BrownfieldExport"
-Write-Info "Library: $AlzLibraryPath"
+Write-Info "Bibliotek: $AlzLibraryPath"
 Write-Info "Tenant:  $($export.TenantId)"
-Write-Info "Exported at: $($export.ExportTimestamp)"
-Write-Info "Strategy: Parallel deployment — engine deploys alongside existing hierarchy"
-Write-Info "Migration: Subscriptions moved individually after validation"
+Write-Info "Exporterat: $($export.ExportTimestamp)"
+Write-Info "Strategi: In-place takeover — engine tar över befintlig MG-hierarki"
 
 #==============================================================================
 # Load ALZ library reference sets
@@ -290,7 +289,7 @@ Get-ChildItem -Path $AlzLibraryPath -Filter '*.alz_policy_assignment.json' -Recu
     [void]$libAssignmentNames.Add($j.name)
 }
 
-Write-Info "Library loaded: $($libPolicyDefs.Count) policy defs, $($libPolicySetDefs.Count) policy set defs, $($libRoleDefs.Count) role defs, $($libAssignmentNames.Count) policy assignments"
+Write-Info "Bibliotek laddat: $($libPolicyDefs.Count) policydefinitioner, $($libPolicySetDefs.Count) policysetdefinitioner, $($libRoleDefs.Count) rolldefinitioner, $($libAssignmentNames.Count) policytilldelningar"
 
 #==============================================================================
 # Helper: AMBA metadata detection
@@ -417,24 +416,15 @@ $script:AllStdMismatchDefList = [System.Collections.Generic.List[object]]::new()
 # All Deprecated entries across all scopes — consumed by Section 7 assigned-deprecated check
 $script:AllDeprDefList = [System.Collections.Generic.List[object]]::new()
 
-# Subscription-level governance counters — populated by Section 3b
+# Prenumerationsnivå-räknare — uppdateras av Sektion 3b
 $script:TotalSubLevelNonStdAssignments = 0
 $script:TotalSubLevelExemptions        = 0
 $script:TotalDenyExemptions            = 0
 
-# Networking risk counter — incremented in Section 5 for cost-duplicate scenarios
-$script:NetworkingRiskCount = 0
-
-# DNS duplicate-zone risk counter — incremented in Section 5 when brownfield zones are in the wrong RG
-$script:DnsDuplicateRiskCount = 0
-
-# Resource lock risk counters — incremented in Section 5 during lock assessment
+# Resurslås-räknare — uppdateras under Sektion 5
 $script:LockBlockingCount = 0
 $script:LockCautionCount  = 0
 $script:LockTotalCount    = 0
-
-# Cost risk worst-case duplicate monthly total — populated by Section 5b
-$script:CostRiskWorstCase = 0
 
 # ALZ engine role definition check counters — populated by Section 4 role def subsection
 $script:RoleDefNameCollisionCount = 0
@@ -448,7 +438,7 @@ $script:MissingRbacCount = 0
 # Blueprint assessment counter — populated by Section 4b
 $script:BlueprintCount = 0
 
-# Defender for Cloud assessment counters — populated by Section 5c
+# Defender for Cloud-räknare — uppdateras av Sektion 5b
 $script:MmaProvisioningCount = 0
 
 # Build policy set name → ALZ custom member policy definition names from library.
@@ -603,9 +593,9 @@ function Get-SubsUnderMg ([string]$MgId) {
 }
 
 #==============================================================================
-# Section 1: Structural Overview
+# Sektion 1: Strukturöversikt
 #==============================================================================
-Write-Step 'Section 1: Structural Overview'
+Write-Step 'Sektion 1: Strukturöversikt'
 
 function Write-MgTree ([object]$Node, [int]$Depth = 0) {
     $indent = '  ' * $Depth
@@ -619,14 +609,14 @@ function Write-MgTree ([object]$Node, [int]$Depth = 0) {
 }
 
 Write-Host ''
-Write-Host '  Management Group Hierarchy:'
+Write-Host '  Management Group-hierarki:'
 Write-MgTree $export.ManagementGroupHierarchy
 
-# Find subscription scope
+# Hitta prenumerationsscope
 $subScope = $export.Scopes | Where-Object { $_.Scope -eq 'subscription' }
 if ($subScope) {
     Write-Host ''
-    Write-Host '  Platform Subscription(s):'
+    Write-Host '  Plattformsprenumeration(er):'
     foreach ($ss in @($subScope)) {
         Write-Info "  $($ss.SubscriptionId) ($($ss.Name))"
     }
@@ -638,19 +628,19 @@ if ($export.Warnings -and $export.Warnings.Count -gt 0) {
 }
 else {
     Write-Host ''
-    Write-Ok 'No export warnings'
+    Write-Ok 'Inga exportvarningar'
 }
 
 #==============================================================================
-# Section 2: Policy Library Comparison
+# Sektion 2: Jämförelse mot principbibliotek
 #==============================================================================
-Write-Step 'Section 2: Policy Library Comparison'
+Write-Step 'Sektion 2: Jämförelse mot principbibliotek'
 
 $mgScopes = @($export.Scopes | Where-Object { $_.Scope -eq 'managementGroup' })
 
 foreach ($scope in $mgScopes) {
     Write-Host ''
-    Write-Host "  ── Scope: $($scope.Name) (MG: $($scope.ManagementGroupId)) ──"
+    Write-Host "  ── Scope: $($scope.Name) (MG: $($scope.ManagementGroupId)) ──"  # scope-namn är tekniska identifierare, behålls på engelska
 
     $scopeReport = [PSCustomObject]@{
         ScopeName         = $scope.Name
@@ -707,14 +697,14 @@ foreach ($scope in $mgScopes) {
 
     $totalDefs = $stdDefs + $stdMismatchDefs + $nonStdDefs + $ambaDefs + $deprDefs
     if ($totalDefs -eq 0) {
-        Write-Detail "Policy Definitions: (none)"
+        Write-Detail "Policydefinitioner: (inga)"
     }
     else {
-        if ($stdDefs -gt 0) { Write-Ok   "Policy Definitions:     $stdDefs standard (exact)" }
-        if ($stdMismatchDefs -gt 0) { Write-Warn "Policy Definitions:     $stdMismatchDefs standard (rule mismatch — engine will overwrite)" }
-        if ($nonStdDefs -gt 0) { Write-Warn "Policy Definitions:     $nonStdDefs non-standard (review required)" }
-        if ($ambaDefs -gt 0) { Write-Amba "Policy Definitions:     $ambaDefs AMBA (Azure Monitor Baseline Alerts)" }
-        if ($deprDefs -gt 0) { Write-Info "Policy Definitions:     $deprDefs deprecated" }
+        if ($stdDefs -gt 0) { Write-Ok   "Policydefinitioner:     $stdDefs standard (exakt match)" }
+        if ($stdMismatchDefs -gt 0) { Write-Warn "Policydefinitioner:     $stdMismatchDefs standard (regelavvikelse — engine skriver över)" }
+        if ($nonStdDefs -gt 0) { Write-Warn "Policydefinitioner:     $nonStdDefs icke-standard (granskning krävs)" }
+        if ($ambaDefs -gt 0) { Write-Amba "Policydefinitioner:     $ambaDefs AMBA (Azure Monitor Baseline Alerts)" }
+        if ($deprDefs -gt 0) { Write-Info "Policydefinitioner:     $deprDefs utfasade" }
 
         if ($Detailed) {
             # Non-Deny mismatches first (DINE, Modify, Append, Audit, Other)
@@ -730,32 +720,32 @@ foreach ($scope in $mgScopes) {
                 if ($effCat -eq 'Deny') { continue }   # handled in the two Deny blocks below
                 switch ($effCat) {
                     'DeployIfNotExists' {
-                        Write-Warn "  [DINE RULE CHANGE] $($e.Name)"
-                        Write-Detail "    version: brownfield=$bfVer  library=$libVer"
-                        Write-Detail "    targets: $resTypes"
-                        Write-Warn  "    (medium risk — may trigger remediation tasks on existing resources)"
+                        Write-Warn "  [DINE REGELÄNDRING] $($e.Name)"
+                        Write-Detail "    version: brownfield=$bfVer  bibliotek=$libVer"
+                        Write-Detail "    påverkar: $resTypes"
+                        Write-Warn  "    (medelhög risk — kan trigga remedieringsuppgifter på befintliga resurser)"
                     }
                     'Modify' {
-                        Write-Warn "  [MODIFY RULE CHANGE] $($e.Name)"
-                        Write-Detail "    version: brownfield=$bfVer  library=$libVer"
-                        Write-Detail "    targets: $resTypes"
-                        Write-Warn  "    (medium risk — may change resource properties on next policy evaluation)"
+                        Write-Warn "  [MODIFY REGELÄNDRING] $($e.Name)"
+                        Write-Detail "    version: brownfield=$bfVer  bibliotek=$libVer"
+                        Write-Detail "    påverkar: $resTypes"
+                        Write-Warn  "    (medelhög risk — kan ändra resursegenskaper vid nästa policyutvärdering)"
                     }
                     'Append' {
-                        Write-Info "  [APPEND RULE CHANGE] $($e.Name)"
-                        Write-Detail "    version: brownfield=$bfVer  library=$libVer"
-                        Write-Detail "    targets: $resTypes"
-                        Write-Detail "    (low risk — append only adds properties on next resource update)"
+                        Write-Info "  [APPEND REGELÄNDRING] $($e.Name)"
+                        Write-Detail "    version: brownfield=$bfVer  bibliotek=$libVer"
+                        Write-Detail "    påverkar: $resTypes"
+                        Write-Detail "    (låg risk — append lägger bara till egenskaper vid nästa resursuppdatering)"
                     }
                     'Audit' {
-                        Write-Info "  [AUDIT RULE CHANGE] $($e.Name)"
-                        Write-Detail "    version: brownfield=$bfVer  library=$libVer"
-                        Write-Detail "    (low risk — audit only, no operational impact)"
+                        Write-Info "  [AUDIT REGELÄNDRING] $($e.Name)"
+                        Write-Detail "    version: brownfield=$bfVer  bibliotek=$libVer"
+                        Write-Detail "    (låg risk — audit är informativ, ingen operationell påverkan)"
                     }
                     default {
-                        Write-Warn "  [RULE-MISMATCH] $($e.Name)  [effect: $effect]"
-                        Write-Detail "    version: brownfield=$bfVer  library=$libVer"
-                        Write-Detail "    targets: $resTypes"
+                        Write-Warn "  [REGELAVVIKELSE] $($e.Name)  [effekt: $effect]"
+                        Write-Detail "    version: brownfield=$bfVer  bibliotek=$libVer"
+                        Write-Detail "    påverkar: $resTypes"
                     }
                 }
             }
@@ -776,20 +766,20 @@ foreach ($scope in $mgScopes) {
 
                 if ($denyAssigned.Count -gt 0) {
                     Write-Host ''
-                    Write-Err "  ── Deny-effect rule changes: ASSIGNED ($($denyAssigned.Count) — active risk) ──"
+                    Write-Err "  ── Deny-effekt regeländringar: TILLDELADE ($($denyAssigned.Count) — aktiv risk) ──"
                     foreach ($e in $denyAssigned) {
                         $libEntry  = $libPolicyDefs[$e.Name]
                         $bfVer     = if ($e.Version) { $e.Version } else { '?' }
                         $libVer    = if ($libEntry -and $libEntry.Version) { $libEntry.Version } else { '?' }
                         $resTypes  = if ($libEntry -and $libEntry.TargetResourceTypes -and $libEntry.TargetResourceTypes.Count -gt 0) {
                             $libEntry.TargetResourceTypes -join ', '
-                        } else { '(unknown)' }
+                        } else { '(okänd)' }
                         $assignScopes = @($defAssignmentScopes[$e.Name])
                         $scopeStr = ($assignScopes | ForEach-Object { "$($_.ScopeName) ($($_.ManagementGroupId))" }) -join ', '
-                        Write-Err    "  [DENY RULE CHANGE] $($e.Name)"
-                        Write-Detail "    version: brownfield=$bfVer  library=$libVer"
-                        Write-Detail "    targets: $resTypes"
-                        Write-Detail "    assigned at: $scopeStr"
+                        Write-Err    "  [DENY REGELÄNDRING] $($e.Name)"
+                        Write-Detail "    version: brownfield=$bfVer  bibliotek=$libVer"
+                        Write-Detail "    påverkar: $resTypes"
+                        Write-Detail "    tilldelad vid: $scopeStr"
                         if ($mgSubscriptions.Count -gt 0) {
                             $allSubsInScope = [System.Collections.Generic.List[string]]::new()
                             foreach ($as in $assignScopes) {
@@ -799,44 +789,44 @@ foreach ($scope in $mgScopes) {
                                 }
                             }
                             if ($allSubsInScope.Count -gt 0) {
-                                Write-Detail "    subscriptions in scope: $($allSubsInScope -join ', ')"
+                                Write-Detail "    prenumerationer i scope: $($allSubsInScope -join ', ')"
                             } else {
-                                Write-Detail "    subscriptions in scope: (none placed under assigned MGs)"
+                                Write-Detail "    prenumerationer i scope: (inga placerade under tilldelade MG:er)"
                             }
                         } else {
-                            Write-Detail "    subscriptions in scope: (re-run Export-BrownfieldState.ps1 to capture subscription placement)"
+                            Write-Detail "    prenumerationer i scope: (kör Export-BrownfieldState.ps1 igen för att samla prenumerationsplacering)"
                         }
-                        Write-Err    "    ⚠ Deny-effect rule is changing — verify resources of this type comply before deploying"
+                        Write-Err    "    ⚠ Deny-effekt-regel ändras — verifiera att resurser av denna typ uppfyller kraven innan deployment"
                     }
                 }
 
                 if ($denyUnassigned.Count -gt 0) {
                     Write-Host ''
-                    Write-Warn "  ── Deny-effect rule changes: UNASSIGNED ($($denyUnassigned.Count) — no current risk) ──"
+                    Write-Warn "  ── Deny-effekt regeländringar: OTILLDELADE ($($denyUnassigned.Count) — ingen nuvarande risk) ──"
                     foreach ($e in $denyUnassigned) {
                         $libEntry  = $libPolicyDefs[$e.Name]
                         $bfVer     = if ($e.Version) { $e.Version } else { '?' }
                         $libVer    = if ($libEntry -and $libEntry.Version) { $libEntry.Version } else { '?' }
                         $resTypes  = if ($libEntry -and $libEntry.TargetResourceTypes -and $libEntry.TargetResourceTypes.Count -gt 0) {
                             $libEntry.TargetResourceTypes -join ', '
-                        } else { '(unknown)' }
-                        Write-Warn   "  [DENY RULE CHANGE] $($e.Name)"
-                        Write-Detail "    version: brownfield=$bfVer  library=$libVer"
-                        Write-Detail "    targets: $resTypes"
-                        Write-Detail "    (definition exists but is not assigned — no operational impact unless assigned later)"
+                        } else { '(okänd)' }
+                        Write-Warn   "  [DENY REGELÄNDRING] $($e.Name)"
+                        Write-Detail "    version: brownfield=$bfVer  bibliotek=$libVer"
+                        Write-Detail "    påverkar: $resTypes"
+                        Write-Detail "    (definition finns men är inte tilldelad — ingen operationell påverkan såvida den inte tilldelas)"
                     }
                 }
             }
 
             foreach ($e in $nonStdDefList) {
-                Write-Warn "  [NON-STD] $($e.Name)  —  $($e.DisplayName)"
+                Write-Warn "  [ICKE-STD] $($e.Name)  —  $($e.DisplayName)"
             }
             if ($Detailed -and $IncludeAmba) {
                 foreach ($e in $ambaDefList) {
                     Write-Amba "  [AMBA] $($e.Name)  —  $($e.DisplayName)"
                 }
                 foreach ($e in $deprDefList) {
-                    Write-Info "  [DEPRECATED] $($e.Name)  —  $($e.DisplayName)"
+                    Write-Info "  [UTFASAD] $($e.Name)  —  $($e.DisplayName)"
                 }
             }
         }
@@ -865,24 +855,24 @@ foreach ($scope in $mgScopes) {
 
     $totalSets = $stdSets + $nonStdSets + $ambaSets + $deprSets
     if ($totalSets -eq 0) {
-        Write-Detail "Policy Set Definitions: (none)"
+        Write-Detail "Policysetdefinitioner: (inga)"
     }
     else {
-        if ($stdSets -gt 0) { Write-Ok   "Policy Set Defs:        $stdSets standard" }
-        if ($nonStdSets -gt 0) { Write-Warn "Policy Set Defs:        $nonStdSets non-standard (review required)" }
-        if ($ambaSets -gt 0) { Write-Amba "Policy Set Defs:        $ambaSets AMBA" }
-        if ($deprSets -gt 0) { Write-Info "Policy Set Defs:        $deprSets deprecated" }
+        if ($stdSets -gt 0) { Write-Ok   "Policysetdefinitioner:  $stdSets standard" }
+        if ($nonStdSets -gt 0) { Write-Warn "Policysetdefinitioner:  $nonStdSets icke-standard (granskning krävs)" }
+        if ($ambaSets -gt 0) { Write-Amba "Policysetdefinitioner:  $ambaSets AMBA" }
+        if ($deprSets -gt 0) { Write-Info "Policysetdefinitioner:  $deprSets utfasade" }
 
         if ($Detailed) {
             foreach ($e in $nonStdSetList) {
-                Write-Warn "  [NON-STD] $($e.Name)  —  $($e.DisplayName)"
+                Write-Warn "  [ICKE-STD] $($e.Name)  —  $($e.DisplayName)"
             }
             if ($IncludeAmba) {
                 foreach ($e in $ambaSetList) {
                     Write-Amba "  [AMBA] $($e.Name)  —  $($e.DisplayName)"
                 }
                 foreach ($e in $deprSetList) {
-                    Write-Info "  [DEPRECATED] $($e.Name)  —  $($e.DisplayName)"
+                    Write-Info "  [UTFASAD] $($e.Name)  —  $($e.DisplayName)"
                 }
             }
         }
@@ -892,9 +882,9 @@ foreach ($scope in $mgScopes) {
 }
 
 #==============================================================================
-# Section 3: Policy Assignment Inventory
+# Sektion 3: Policytilldelningsinventering
 #==============================================================================
-Write-Step 'Section 3: Policy Assignment Inventory'
+Write-Step 'Sektion 3: Policytilldelningsinventering'
 
 # Build lookups of all brownfield def names for quick reference in Section 3
 $brownfieldDefNames = [System.Collections.Generic.HashSet[string]]::new()
@@ -919,7 +909,7 @@ foreach ($scope in $mgScopes) {
     if ($assignments.Count -eq 0) { continue }
 
     Write-Host ''
-    Write-Host "  ── Scope: $($scope.Name) ($($assignments.Count) assignments) ──"
+    Write-Host "  ── Scope: $($scope.Name) ($($assignments.Count) tilldelningar) ──"
 
     $scopeEntry = $reportScopes | Where-Object { $_.ScopeName -eq $scope.Name }
 
@@ -980,25 +970,25 @@ foreach ($scope in $mgScopes) {
                 $ambaDefNames.Contains($defN) -or $ambaSetNames.Contains($defN)
             }).Count
         $dne = @($assignments | Where-Object { $_.PSObject.Properties['EnforcementMode'] -and $_.EnforcementMode -eq 'DoNotEnforce' }).Count
-        Write-Ok   "  $total total assignments"
-        if ($nonStd -gt 0) { Write-Warn "  $nonStd reference non-standard definitions" }
-        if ($amba -gt 0) { Write-Amba "  $amba reference AMBA definitions" }
-        if ($dne -gt 0) { Write-Info "  $dne in DoNotEnforce mode" }
+        Write-Ok   "  $total tilldelningar totalt"
+        if ($nonStd -gt 0) { Write-Warn "  $nonStd refererar icke-standard-definitioner" }
+        if ($amba -gt 0) { Write-Amba "  $amba refererar AMBA-definitioner" }
+        if ($dne -gt 0) { Write-Info "  $dne i DoNotEnforce-läge" }
     }
 }
 
 #==============================================================================
-# Section 3b: Subscription-Level Assignments & Exemptions
+# Sektion 3b: Prenumerationsnivå-tilldelningar och undantag
 #==============================================================================
-Write-Step 'Section 3b: Subscription-Level Assignments & Exemptions'
+Write-Step 'Sektion 3b: Prenumerationsnivå-tilldelningar och undantag'
 
 $script:TotalSubLevelNonStdAssignments = 0
 $script:TotalSubLevelExemptions        = 0
 $script:TotalDenyExemptions            = 0
 
 if ($subscriptionGovernance.Count -eq 0) {
-    Write-Info '  No subscription governance data in export.'
-    Write-Info '  Re-run Export-BrownfieldState.ps1 to capture subscription-level assignments and exemptions.'
+    Write-Info '  Ingen prenumerationsstyrningsdata i exporten.'
+    Write-Info '  Kör Export-BrownfieldState.ps1 igen för att samla prenumerationsnivå-tilldelningar och undantag.'
 }
 else {
     foreach ($subGov in $subscriptionGovernance) {
@@ -1010,7 +1000,7 @@ else {
         if ($subAssignments.Count -eq 0 -and $subExemptions.Count -eq 0) { continue }
 
         Write-Host ''
-        Write-Host "  ── Subscription: $subDisplayName ($subId) ──"
+        Write-Host "  ── Prenumeration: $subDisplayName ($subId) ──"
 
         # --- Assignments ---
         if ($subAssignments.Count -gt 0) {
@@ -1047,10 +1037,10 @@ else {
             }
 
             if (-not $Detailed) {
-                Write-Ok "  $($subAssignments.Count) direct policy assignment(s)"
-                if ($nonStdA -gt 0) { Write-Warn "    $nonStdA reference non-standard definitions" }
-                if ($ambaA   -gt 0) { Write-Amba "    $ambaA reference AMBA definitions" }
-                if ($dneA    -gt 0) { Write-Info "    $dneA in DoNotEnforce mode" }
+                Write-Ok "  $($subAssignments.Count) direkt policytilldelning(ar)"
+                if ($nonStdA -gt 0) { Write-Warn "    $nonStdA refererar icke-standard-definitioner" }
+                if ($ambaA   -gt 0) { Write-Amba "    $ambaA refererar AMBA-definitioner" }
+                if ($dneA    -gt 0) { Write-Info "    $dneA i DoNotEnforce-läge" }
             }
         }
 
@@ -1074,17 +1064,17 @@ else {
                 if ($isDenyExemption) { $script:TotalDenyExemptions++ }
 
                 if ($isDenyExemption) {
-                    Write-Warn "  [EXEMPTION] $exDisplay  (category: $exCat)"
-                    Write-Warn "    ⚠ Exempts a Deny-effect policy — verify this exemption is intentional"
-                    Write-Detail "    assignment: $exAssignId"
+                    Write-Warn "  [UNDANTAG] $exDisplay  (kategori: $exCat)"
+                    Write-Warn "    ⚠ Undantar en Deny-effekt-policy — verifiera att detta undantag är avsiktligt"
+                    Write-Detail "    tilldelning: $exAssignId"
                 }
                 elseif ($Detailed) {
-                    Write-Info "  [EXEMPTION] $exDisplay  (category: $exCat)"
-                    Write-Detail "    assignment: $exAssignId"
+                    Write-Info "  [UNDANTAG] $exDisplay  (kategori: $exCat)"
+                    Write-Detail "    tilldelning: $exAssignId"
                 }
                 else {
-                    Write-Info "  $($subExemptions.Count) policy exemption(s)  (use -Detailed to list)"
-                    break  # summarised — don't print per-exemption in non-detailed mode
+                    Write-Info "  $($subExemptions.Count) policyundantag  (använd -Detailed för att lista)"
+                    break
                 }
             }
         }
@@ -1092,14 +1082,14 @@ else {
 
     if ($subscriptionGovernance.Count -gt 0 -and
         ($subscriptionGovernance | ForEach-Object { $_.PolicyAssignments.Count + $_.PolicyExemptions.Count } | Measure-Object -Sum).Sum -eq 0) {
-        Write-Info '  No subscription-level assignments or exemptions found.'
+        Write-Info '  Inga prenumerationsnivå-tilldelningar eller undantag hittades.'
     }
 }
 
 #==============================================================================
-# Section 4: RBAC Summary
+# Sektion 4: RBAC-sammanfattning
 #==============================================================================
-Write-Step 'Section 4: RBAC Summary'
+Write-Step 'Sektion 4: RBAC-sammanfattning'
 
 foreach ($scope in $mgScopes) {
     $ras = @($scope.Resources.RoleAssignments)
@@ -1110,22 +1100,21 @@ foreach ($scope in $mgScopes) {
     Write-Host ''
     Write-Host "  ── Scope: $($scope.Name) ──"
 
-    # Role assignments by principal type
+    # Rolltilldelningar per principaltyp
     if ($ras.Count -gt 0) {
         $byType = $ras | Group-Object PrincipalType | Sort-Object Name
         foreach ($g in $byType) {
-            Write-Info "  Role assignments — $($g.Name): $($g.Count)"
+            Write-Info "  Rolltilldelningar — $($g.Name): $($g.Count)"
         }
     }
 
-    # Role definitions — per-role GUID/permission analysis is in the ALZ Engine Role Definition Check subsection below.
-    # Non-engine custom role defs are counted in Section 7 ($totalCustomRoles).
+    # Rolldefinitioner — per-roll GUID/behörighetsanalys finns i ALZ Engine-rolldefinitionskontroll nedan.
     if ($rds.Count -gt 0) {
         $customRdCount = @($rds | Where-Object { (Get-RoleDefClassification $_.RoleName) -eq 'Custom' }).Count
         if ($customRdCount -gt 0) {
-            Write-Warn "  Role definitions: $($rds.Count) total  ($customRdCount non-ALZ custom)"
+            Write-Warn "  Rolldefinitioner: $($rds.Count) totalt  ($customRdCount icke-ALZ anpassade)"
         } else {
-            Write-Info "  Role definitions: $($rds.Count)"
+            Write-Info "  Rolldefinitioner: $($rds.Count)"
         }
     }
 
@@ -1164,7 +1153,7 @@ foreach ($scope in $mgScopes) {
 }
 
 Write-Host ''
-Write-Host '  ── ALZ Engine Role Definition Check ──'
+Write-Host '  ── ALZ Engine-rolldefinitionskontroll ──'
 
 foreach ($erd in $engineRoleLibDefs) {
     # GUID match: export stores Name = full resource ID; extract trailing GUID segment
@@ -1204,9 +1193,9 @@ foreach ($erd in $engineRoleLibDefs) {
 
     switch ($status) {
         'MATCH'          { Write-Ok   "  [MATCH]          $($erd.RoleName)  (GUID: $($erd.Guid))" }
-        'DRIFT'          { Write-Warn "  [DRIFT]          $($erd.RoleName)  (GUID: $($erd.Guid)) — engine will overwrite actions on deploy" }
-        'NAME_COLLISION' { Write-Err  "  [NAME_COLLISION] $($erd.RoleName)  (engine GUID: $($erd.Guid)) — brownfield has same display name under GUID: $bfGuid" }
-        'MISSING'        { Write-Ok   "  [MISSING]        $($erd.RoleName) — not in brownfield, engine will create" }
+        'DRIFT'          { Write-Warn "  [DRIFT]          $($erd.RoleName)  (GUID: $($erd.Guid)) — engine skriver över behörigheter vid deployment" }
+        'NAME_COLLISION' { Write-Warn "  [NAME_COLLISION] $($erd.RoleName)  (engine GUID: $($erd.Guid)) — befintlig roll med samma visningsnamn under GUID: $bfGuid" }
+        'MISSING'        { Write-Ok   "  [SAKNAS]         $($erd.RoleName) — finns ej i brownfield, engine skapar den" }
     }
     foreach ($line in $permDiff) { Write-Detail $line }
 
@@ -1308,14 +1297,13 @@ foreach ($s in $mgScopes) {
 }
 
 Write-Host ''
-Write-Host '  ── Policy-Driven Identity Audit ──'
+Write-Host '  ── Policy-driven identitetsgranskning ──'
 
 if ($allPaWithIdentity.Count -eq 0) {
-    Write-Info '  No policy assignments with managed identities found — export may be missing identity data'
-    Write-Info '  (Re-run Export-BrownfieldState.ps1 to capture managed identity principal IDs)'
+    Write-Info '  Inga policytilldelningar med managed identities hittades — exporten kan sakna identitetsdata'
+    Write-Info '  (Kör Export-BrownfieldState.ps1 igen för att samla managed identity-principal-ID:n)'
 } else {
-    # --- Part 1: ORPHAN_RISK — identities with existing cross-MG role assignments ---
-    # These will be orphaned when the engine creates new assignments with fresh managed identities.
+    # --- Del 1: ORPHAN_RISK — identiteter med befintliga cross-MG-rolltilldelningar ---
     foreach ($paEntry in $allPaWithIdentity) {
         $crossMgRas = @()
         if ($raByPrincipalId.ContainsKey($paEntry.PrincipalId)) {
@@ -1327,16 +1315,16 @@ if ($allPaWithIdentity.Count -eq 0) {
         $script:OrphanRiskCount++
         Write-Warn "  [ORPHAN_RISK] $($paEntry.AssignmentName) @ $($paEntry.ScopeName)"
         Write-Detail "    Identity principal ID: $($paEntry.PrincipalId)"
-        Write-Detail "    Engine migration will orphan $($crossMgRas.Count) cross-MG role assignment(s):"
+        Write-Detail "    Engine skapar ny managed identity — $($crossMgRas.Count) cross-MG-rolltilldelning(ar) föräldralösa:"
         foreach ($ra in $crossMgRas) {
-            $roleGuid    = if ($ra.RoleDefinitionId) { ($ra.RoleDefinitionId -split '/')[-1] } else { '(unknown)' }
+            $roleGuid    = if ($ra.RoleDefinitionId) { ($ra.RoleDefinitionId -split '/')[-1] } else { '(okänd)' }
             $roleName    = if ($roleGuidToName.ContainsKey($roleGuid)) { $roleGuidToName[$roleGuid] } else { $roleGuid }
-            Write-Detail "      Target scope: $($ra.ScopeName) — $roleName"
+            Write-Detail "      Målscope: $($ra.ScopeName) — $roleName"
             if ($ra.ResourceId) { Write-Detail "        $($ra.ResourceId)" }
         }
     }
 
-    # --- Part 2: MISSING_RBAC — expected cross-MG grant not present in brownfield ---
+    # --- Del 2: MISSING_RBAC — förväntad cross-MG-behörighet saknas i brownfield ---
     foreach ($expectation in $engineCrossMgRbacExpectations) {
         $paEntries = @($allPaWithIdentity | Where-Object {
             $_.AssignmentName -eq $expectation.AssignmentName -and $_.ScopeName -eq $expectation.SourceScope
@@ -1363,7 +1351,7 @@ if ($allPaWithIdentity.Count -eq 0) {
             $script:MissingRbacCount++
             Write-Warn "  [MISSING_RBAC] $($expectation.AssignmentName) @ $($expectation.SourceScope) → $($expectation.TargetScope)"
             Write-Detail "    Identity principal ID: $($paEntry.PrincipalId)"
-            Write-Detail "    Missing role(s) at target scope:"
+            Write-Detail "    Saknade roll(er) vid målscope:"
             foreach ($g in $missingRoles) {
                 $roleName = if ($roleGuidToName.ContainsKey($g)) { $roleGuidToName[$g] } else { $g }
                 Write-Detail "      $roleName  ($g)"
@@ -1371,29 +1359,29 @@ if ($allPaWithIdentity.Count -eq 0) {
         }
     }
 
-    # --- Part 3: CLEAN scopes ---
+    # --- Del 3: RENA scopes ---
     $scopesWithIdentities = @($allPaWithIdentity | Select-Object -ExpandProperty ScopeName | Sort-Object -Unique)
     foreach ($s in $mgScopes) {
         if ($scopesWithIdentities -notcontains $s.Name) {
-            Write-Ok "  [CLEAN] $($s.Name) — no policy-driven identities"
+            Write-Ok "  [REN] $($s.Name) — inga policy-drivna identiteter"
         }
     }
 
     if ($script:OrphanRiskCount -eq 0 -and $script:MissingRbacCount -eq 0) {
-        Write-Ok "  Cross-MG RBAC: all policy-driven identities are clean"
+        Write-Ok "  Cross-MG RBAC: alla policy-drivna identiteter är rena"
     } else {
         if ($script:OrphanRiskCount  -gt 0) {
-            Write-Warn "  $($script:OrphanRiskCount) ORPHAN_RISK item(s) — role assignments in old hierarchy will need cleanup during decommissioning"
-            Write-Detail "             These identities remain functional until the old MG hierarchy is removed."
+            Write-Warn "  $($script:OrphanRiskCount) ORPHAN_RISK-post(er) — cross-MG-rolltilldelningar föräldralösa när engine skapar nya managed identities"
+            Write-Detail "             Befintliga identiteter kan rensas bort efter att engine är deployed."
         }
-        if ($script:MissingRbacCount -gt 0) { Write-Warn "  $($script:MissingRbacCount) MISSING_RBAC item(s) — brownfield may already be missing required cross-MG grants" }
+        if ($script:MissingRbacCount -gt 0) { Write-Warn "  $($script:MissingRbacCount) MISSING_RBAC-post(er) — brownfield saknar redan förväntade cross-MG-behörigheter" }
     }
 }
 
 #==============================================================================
-# Section 4b: Blueprint Assessment
+# Sektion 4b: Blueprint-granskning
 #==============================================================================
-Write-Step 'Section 4b: Blueprint Assessment'
+Write-Step 'Sektion 4b: Blueprint-granskning'
 
 # Known ALZ / CAF blueprint display name fragments (matched case-insensitively)
 $knownAlzBlueprintPatterns = @(
@@ -1409,9 +1397,9 @@ if ($export.PSObject.Properties['BlueprintAssignments'] -and $null -ne $export.B
 $script:BlueprintCount = $blueprintAssignments.Count
 
 if ($blueprintAssignments.Count -eq 0) {
-    Write-Ok '  No blueprint assignments found'
+    Write-Ok '  Inga blueprint-tilldelningar hittades'
 } else {
-    Write-Err "  $($blueprintAssignments.Count) blueprint assignment(s) found — MUST be unassigned before engine deployment"
+    Write-Err "  $($blueprintAssignments.Count) blueprint-tilldelning(ar) hittades — MÅSTE tas bort innan engine-deployment"
     Write-Host ''
 
     foreach ($ba in $blueprintAssignments) {
@@ -1422,7 +1410,7 @@ if ($blueprintAssignments.Count -eq 0) {
         $lockMode  = if ($ba.PSObject.Properties['LockMode'])          { $ba.LockMode }          else { $ba['LockMode'] }
         if (-not $lockMode) { $lockMode = 'None' }
 
-        # Check if this looks like a known ALZ/CAF blueprint
+        # Kontrollera om detta ser ut som ett känt ALZ/CAF-blueprint
         $isAlzBlueprint = $false
         $checkStr = "$name $bpId".ToLower()
         foreach ($pattern in $knownAlzBlueprintPatterns) {
@@ -1430,36 +1418,36 @@ if ($blueprintAssignments.Count -eq 0) {
         }
 
         $tag = if ($isAlzBlueprint) { '[ALZ_BLUEPRINT]' } else { '[BLUEPRINT]' }
-        Write-Err "  $tag  $name  (sub: $subId)"
-        Write-Detail "    Blueprint ID:       $bpId"
-        Write-Detail "    Provisioning state: $state"
+        Write-Err "  $tag  $name  (prenumeration: $subId)"
+        Write-Detail "    Blueprint-ID:       $bpId"
+        Write-Detail "    Provisioneringsstatus: $state"
 
         if ($lockMode -eq 'AllResourcesReadOnly') {
-            Write-Err  "    Lock mode:          $lockMode — BLOCKING: engine cannot modify blueprint-managed resources"
+            Write-Err  "    Låsläge:            $lockMode — BLOCKERAR: engine kan inte ändra blueprint-hanterade resurser"
         } elseif ($lockMode -eq 'AllResourcesDoNotDelete') {
-            Write-Warn "    Lock mode:          $lockMode — engine can modify but not delete blueprint-managed resources"
+            Write-Warn "    Låsläge:            $lockMode — engine kan ändra men inte ta bort blueprint-hanterade resurser"
         } else {
-            Write-Info "    Lock mode:          $lockMode"
+            Write-Info "    Låsläge:            $lockMode"
         }
 
         Write-Host ''
-        Write-Detail "    Action required:"
-        Write-Detail "      1. Unassign this blueprint before running the engine"
-        Write-Detail "         Blueprint-managed resources persist but become unmanaged after unassignment"
-        Write-Detail "      2. Review blueprint artifacts — identify which policy assignments and role"
-        Write-Detail "         assignments it created; the engine will need to own these after migration"
+        Write-Detail "    Åtgärd krävs:"
+        Write-Detail "      1. Ta bort tilldelningen av detta blueprint innan engine körs"
+        Write-Detail "         Blueprint-hanterade resurser kvarstår men blir ohanterade efter borttagning"
+        Write-Detail "      2. Granska blueprint-artefakter — identifiera vilka policytilldelningar och"
+        Write-Detail "         rolltilldelningar det skapade; engine behöver äga dessa efter migration"
         if ($isAlzBlueprint) {
-            Write-Detail "      3. This appears to be an ALZ/CAF blueprint — its policy assignments will"
-            Write-Detail "         likely conflict directly with the engine's governance deployment"
+            Write-Detail "      3. Detta verkar vara ett ALZ/CAF-blueprint — dess policytilldelningar"
+            Write-Detail "         kommer troligen att direkt konflikta med engine:ns styrningsdeployment"
         }
         Write-Host ''
     }
 }
 
 #==============================================================================
-# Section 4c: CI/CD Identity Assessment
+# Sektion 4c: CI/CD-identitetsgranskning
 #==============================================================================
-Write-Step 'Section 4c: CI/CD Identity Assessment'
+Write-Step 'Sektion 4c: CI/CD-identitetsgranskning'
 
 $highPrivList = @()
 if ($export.PSObject.Properties['HighPrivilegeIdentities'] -and $null -ne $export.HighPrivilegeIdentities) {
@@ -1467,8 +1455,8 @@ if ($export.PSObject.Properties['HighPrivilegeIdentities'] -and $null -ne $expor
 }
 
 if ($highPrivList.Count -eq 0) {
-    Write-Info '  No high-privilege identity data captured'
-    Write-Detail '    Re-run Export-BrownfieldState.ps1 to include CI/CD identity data'
+    Write-Info '  Ingen högprivilegierad identitetsdata insamlad'
+    Write-Detail '    Kör Export-BrownfieldState.ps1 igen för att inkludera CI/CD-identitetsdata'
 } else {
     $spnEntries  = @($highPrivList | Where-Object {
         $pt = if ($_.PSObject.Properties['PrincipalType']) { $_.PrincipalType } else { $_['PrincipalType'] }
@@ -1483,7 +1471,7 @@ if ($highPrivList.Count -eq 0) {
         $pt -eq 'Group'
     })
 
-    Write-Info "  High-privilege (Owner/Contributor) assignments at int-root MG: $($highPrivList.Count)"
+    Write-Info "  Högprivilegierade (Owner/Contributor) tilldelningar vid int-root MG: $($highPrivList.Count)"
     Write-Host ''
 
     foreach ($hp in $highPrivList) {
@@ -1494,16 +1482,16 @@ if ($highPrivList.Count -eq 0) {
         switch ($pt) {
             'ServicePrincipal' {
                 Write-Warn "  $rn — ServicePrincipal: $pi"
-                Write-Detail '    Likely CI/CD identity. Verify if this is the current deployment principal.'
-                Write-Detail '    Action: plan decommissioning after engine OIDC bootstrap is validated.'
+                Write-Detail '    Troligen CI/CD-identitet. Verifiera om detta är nuvarande deployment-principal.'
+                Write-Detail '    Åtgärd: verifiera och planera borttagning efter att engine OIDC-bootstrap är validerad.'
             }
             'User' {
-                Write-Info "  $rn — User: $pi"
-                Write-Detail '    Human admin — not affected by bootstrap. Review for least-privilege.'
+                Write-Info "  $rn — Användare: $pi"
+                Write-Detail '    Mänsklig administratör — påverkas inte av bootstrap. Granska för lägsta privilegium.'
             }
             'Group' {
-                Write-Info "  $rn — Group: $pi"
-                Write-Detail '    Entra ID group — not affected by bootstrap. Review for least-privilege.'
+                Write-Info "  $rn — Grupp: $pi"
+                Write-Detail '    Entra ID-grupp — påverkas inte av bootstrap. Granska för lägsta privilegium.'
             }
             default {
                 Write-Info "  $rn — ${pt}: $pi"
@@ -1512,13 +1500,12 @@ if ($highPrivList.Count -eq 0) {
         if ($sc) { Write-Detail "    Scope: $sc" }
     }
 
-    # Guidance summary
     Write-Host ''
     if ($spnEntries.Count -gt 0) {
-        Write-Warn "  $($spnEntries.Count) service principal(s) with Owner/Contributor at int-root — review before decommissioning"
+        Write-Warn "  $($spnEntries.Count) tjänsteprincipal(er) med Owner/Contributor vid int-root — granska innan engine-bootstrap"
     }
     if ($userEntries.Count -gt 0 -or $groupEntries.Count -gt 0) {
-        Write-Info "  $($userEntries.Count + $groupEntries.Count) user/group assignment(s) — consider least-privilege review"
+        Write-Info "  $($userEntries.Count + $groupEntries.Count) användare/grupptilldelning(ar) — överväg granskning för lägsta privilegium"
     }
 }
 
@@ -1556,23 +1543,23 @@ foreach ($scope in $mgScopes) {
 
 Write-Host ''
 if ($existingBootstrapUamis.Count -gt 0 -or $existingWhatIfRole) {
-    Write-Warn '  Existing bootstrap artifacts detected (bootstrap may have been partially run):'
+    Write-Warn '  Befintliga bootstrap-artefakter detekterade (bootstrap kan ha körts delvis):'
     foreach ($u in $existingBootstrapUamis) {
         Write-Detail "    UAMI: $u"
     }
     if ($existingWhatIfRole) {
-        Write-Detail "    Custom role: '$whatIfRoleName' (or action $whatIfAction) found"
+        Write-Detail "    Anpassad roll: '$whatIfRoleName' (eller åtgärd $whatIfAction) hittad"
     }
-    Write-Detail '  Action: verify bootstrap state before re-running onboard.ps1 (run cleanup.ps1 first if needed)'
+    Write-Detail '  Åtgärd: verifiera bootstrap-tillstånd innan onboard.ps1 körs igen (kör cleanup.ps1 först vid behov)'
 } else {
-    Write-Ok '  No existing bootstrap artifacts detected'
-    Write-Detail '    Bootstrap will create new UAMIs + OIDC federation for GitHub Actions'
+    Write-Ok '  Inga befintliga bootstrap-artefakter detekterade'
+    Write-Detail '    Bootstrap skapar nya UAMIs + OIDC-federation för GitHub Actions'
 }
 
 #==============================================================================
-# Section 5: Infrastructure Assessment
+# Sektion 5: Infrastrukturgranskning
 #==============================================================================
-Write-Step 'Section 5: Infrastructure Assessment'
+Write-Step 'Sektion 5: Infrastrukturgranskning'
 
 $alzRgPrefixes = @('alz-', 'ALZ-', 'rg-alz-', 'rg-amba-')
 $skipRgPrefixes = @('VisualStudioOnline-', 'NetworkWatcherRG', 'cloud-shell-storage')
@@ -1582,7 +1569,7 @@ $infraReport = @()
 
 foreach ($ss in @($subScope)) {
     Write-Host ''
-    Write-Host "  ── Subscription: $($ss.SubscriptionId) ──"
+    Write-Host "  ── Prenumeration: $($ss.SubscriptionId) ──"
 
     $rgs = @($ss.Resources.ResourceGroups)
     $keyRes = @($ss.Resources.KeyResources)
@@ -1590,10 +1577,10 @@ foreach ($ss in @($subScope)) {
     $alzRgs = @($rgs | Where-Object { $n = $_.Name; $alzRgPrefixes | Where-Object { $n -like "$_*" } })
     $nonAlzRgs = @($rgs | Where-Object { $n = $_.Name; -not ($alzRgPrefixes | Where-Object { $n -like "$_*" }) })
 
-    Write-Info "  Resource groups: $($rgs.Count) total  ($($alzRgs.Count) ALZ-related, $($nonAlzRgs.Count) other)"
+    Write-Info "  Resursgrupper: $($rgs.Count) totalt  ($($alzRgs.Count) ALZ-relaterade, $($nonAlzRgs.Count) övriga)"
 
     if ($nonAlzRgs.Count -gt 0) {
-        Write-Warn "  Non-ALZ resource groups (may be unrelated workloads):"
+        Write-Warn "  Icke-ALZ-resursgrupper (kan vara orelaterade arbetsbelastningar):"
         foreach ($rg in $nonAlzRgs) {
             Write-Detail "    $($rg.Name) [$($rg.Location)]"
         }
@@ -1619,10 +1606,10 @@ foreach ($ss in @($subScope)) {
 
         if ($engineName) {
             if ($kr.Name -eq $engineName) {
-                Write-Ok "  $($kr.Type): $($kr.Name) [matches engine convention]"
+                Write-Ok "  $($kr.Type): $($kr.Name) [matchar engine-konvention]"
             }
             else {
-                Write-Warn "  $($kr.Type): $($kr.Name) [engine would use: $engineName]"
+                Write-Warn "  $($kr.Type): $($kr.Name) [engine skulle använda: $engineName]"
             }
         }
         else {
@@ -1630,13 +1617,13 @@ foreach ($ss in @($subScope)) {
         }
     }
 
-    # Flag missing expected resources
+    # Flagga saknade förväntade resurser
     $missing = @()
-    if (-not $foundTypes.ContainsKey('logAnalyticsWorkspace')) { $missing += 'Log Analytics Workspace' }
+    if (-not $foundTypes.ContainsKey('logAnalyticsWorkspace')) { $missing += 'Log Analytics-arbetsyta' }
     if (-not $foundTypes.ContainsKey('automationAccount')) { $missing += 'Automation Account' }
-    foreach ($m in $missing) { Write-Warn "  Missing expected resource: $m" }
+    foreach ($m in $missing) { Write-Warn "  Förväntad resurs saknas: $m" }
 
-    # --- Hub Networking Assessment ---
+    # --- Hub-nätverksgranskning ---
     $networkingWarnings = [System.Collections.Generic.List[string]]::new()
 
     $ddosFound    = @($keyRes | Where-Object { $_.Type -eq 'ddosProtectionPlan' })
@@ -1656,20 +1643,19 @@ foreach ($ss in @($subScope)) {
                         $resolversF.Count -gt 0 -or $hubVnetsF.Count -gt 0
     if ($hasAnyNetworking) {
         Write-Host ''
-        Write-Host "  Hub Networking Assessment:"
+        Write-Host "  Hub-nätverksgranskning (override-värden för tenant-konfig-repo):"
 
-        # DDoS Protection Plans
+        # DDoS-skyddsplaner — extrahera resurs-ID för override
         if ($ddosFound.Count -gt 0) {
             foreach ($ddos in $ddosFound) {
-                Write-Warn "  [COST]  DDoS Protection Plan: $($ddos.Name) (~`$2,944/month)"
-                Write-Detail "          Engine would deploy: YES (unless deployDdosProtectionPlan=false in hubnetworking params)"
-                Write-Detail "          Risk: DUPLICATE COST — pass existing plan ID as override or disable engine DDoS deployment"
-                [void]$networkingWarnings.Add("DDoS plan exists: $($ddos.Name)")
-                $script:NetworkingRiskCount++
+                Write-Info "  [OVERRIDE]  DDoS-skyddsplan: $($ddos.Name)"
+                Write-Detail "    Resurs-ID (ange som ddosProtectionPlanResourceId i hubnetworking-params):"
+                Write-Detail "    $($ddos.ResourceId)"
+                [void]$networkingWarnings.Add("DDoS-plan finns: $($ddos.Name)")
             }
         }
 
-        # Azure Firewalls
+        # Azure-brandväggar — extrahera resurs-ID för override
         if ($firewallsF.Count -gt 0) {
             foreach ($fw in $firewallsF) {
                 $fwSku = if ($fw.PSObject.Properties['Sku'] -and $fw.Sku) {
@@ -1678,34 +1664,32 @@ foreach ($ss in @($subScope)) {
                     elseif ($skuObj.PSObject.Properties['Name']) { " (SKU: $($skuObj.Name)/$($skuObj.Tier))" }
                     else { '' }
                 } else { '' }
-                Write-Warn "  [COST]  Azure Firewall: $($fw.Name)$fwSku"
-                Write-Detail "          Engine deploys its own firewall by default with hubnetworking"
-                Write-Detail "          Risk: DUPLICATE if both target AzureFirewallSubnet in the same VNet"
-                [void]$networkingWarnings.Add("Firewall exists: $($fw.Name) — engine deploys its own by default")
+                Write-Info "  [OVERRIDE]  Azure-brandvägg: $($fw.Name)$fwSku"
+                Write-Detail "    Resurs-ID:"
+                Write-Detail "    $($fw.ResourceId)"
+                [void]$networkingWarnings.Add("Brandvägg finns: $($fw.Name)")
             }
         }
 
-        # VPN Gateways
+        # VPN-gateways — extrahera resurs-ID för override
         if ($vpnGwsFound.Count -gt 0) {
             foreach ($gw in $vpnGwsFound) {
                 $skuStr = if ($gw.PSObject.Properties['Sku'] -and $gw.Sku) { " (SKU: $($gw.Sku))" } else { '' }
-                Write-Warn "  [COST]  VPN Gateway: $($gw.Name)$skuStr (30+ min deploy, significant monthly cost)"
-                Write-Detail "          Engine deploys VPN gateway if enabled in hubnetworking config"
-                Write-Detail "          Risk: DUPLICATE COST — disable engine VPN gateway or reuse existing"
-                [void]$networkingWarnings.Add("VPN gateway exists: $($gw.Name) — disable engine VPN gateway or reuse")
-                $script:NetworkingRiskCount++
+                Write-Info "  [OVERRIDE]  VPN-gateway: $($gw.Name)$skuStr"
+                Write-Detail "    Resurs-ID:"
+                Write-Detail "    $($gw.ResourceId)"
+                [void]$networkingWarnings.Add("VPN-gateway finns: $($gw.Name)")
             }
         }
 
-        # ExpressRoute Gateways
+        # ExpressRoute-gateways — extrahera resurs-ID för override
         if ($erGwsFound.Count -gt 0) {
             foreach ($gw in $erGwsFound) {
                 $skuStr = if ($gw.PSObject.Properties['Sku'] -and $gw.Sku) { " (SKU: $($gw.Sku))" } else { '' }
-                Write-Warn "  [COST]  ExpressRoute Gateway: $($gw.Name)$skuStr (significant monthly cost)"
-                Write-Detail "          Engine deploys ER gateway if enabled in hubnetworking config"
-                Write-Detail "          Risk: DUPLICATE COST — disable engine ER gateway or reuse existing"
-                [void]$networkingWarnings.Add("ExpressRoute gateway exists: $($gw.Name) — disable engine ER gateway or reuse")
-                $script:NetworkingRiskCount++
+                Write-Info "  [OVERRIDE]  ExpressRoute-gateway: $($gw.Name)$skuStr"
+                Write-Detail "    Resurs-ID:"
+                Write-Detail "    $($gw.ResourceId)"
+                [void]$networkingWarnings.Add("ExpressRoute-gateway finns: $($gw.Name)")
             }
         }
 
@@ -1714,54 +1698,54 @@ foreach ($ss in @($subScope)) {
             foreach ($b in $bastionsF) {
                 $skuStr = if ($b.PSObject.Properties['Sku'] -and $b.Sku) { " (SKU: $($b.Sku))" } else { '' }
                 Write-Info "  [INFO]  Bastion Host: $($b.Name)$skuStr"
-                Write-Detail "          Engine deploys Bastion by default — verify AzureBastionSubnet not duplicated"
+                Write-Detail "    Resurs-ID: $($b.ResourceId)"
             }
         }
 
-        # Firewall Policies
+        # Brandväggspolicyer — extrahera resurs-ID för override
         if ($fwPoliciesF.Count -gt 0) {
             foreach ($fp in $fwPoliciesF) {
                 $tierStr = if ($fp.PSObject.Properties['SkuTier'] -and $fp.SkuTier) { " (tier: $($fp.SkuTier))" } else { '' }
-                Write-Warn "  [INFO]  Firewall Policy: $($fp.Name)$tierStr"
-                Write-Detail "          Engine creates its own policy unless firewallPolicyId override is provided"
-                Write-Detail "          Existing policy ResourceId (for override): $($fp.ResourceId)"
-                [void]$networkingWarnings.Add("Firewall policy exists: $($fp.Name) — set as firewallPolicyId override if desired")
+                Write-Info "  [OVERRIDE]  Brandväggspolicy: $($fp.Name)$tierStr"
+                Write-Detail "    Resurs-ID (ange som firewallPolicyId override):"
+                Write-Detail "    $($fp.ResourceId)"
+                [void]$networkingWarnings.Add("Brandväggspolicy finns: $($fp.Name)")
             }
         }
 
-        # Hub VNets + route table notes
+        # Hub-VNets — extrahera resurs-ID för override
         if ($hubVnetsF.Count -gt 0) {
             foreach ($vnet in $hubVnetsF) {
-                $addrStr = if ($vnet.PSObject.Properties['AddressSpace'] -and $vnet.AddressSpace) { $vnet.AddressSpace -join ', ' } else { '(unknown)' }
-                Write-Info "  [INFO]  Hub VNet: $($vnet.Name) ($addrStr)"
-                Write-Detail "          Engine default hub address: 10.20.0.0/16 — verify no overlap with workload spokes"
+                $addrStr = if ($vnet.PSObject.Properties['AddressSpace'] -and $vnet.AddressSpace) { $vnet.AddressSpace -join ', ' } else { '(okänt)' }
+                Write-Info "  [OVERRIDE]  Hub-VNet: $($vnet.Name) ($addrStr)"
+                Write-Detail "    Resurs-ID (hubVirtualNetworkResourceId för peering-override):"
+                Write-Detail "    $($vnet.ResourceId)"
             }
             if ($routeTablesF.Count -gt 0) {
-                Write-Info "  [INFO]  Route tables: $($routeTablesF.Count) found"
-                Write-Detail "          Engine creates route tables pointing 0.0.0.0/0 → firewall private IP"
-                Write-Detail "          If existing route tables use a different firewall IP, traffic will reroute on first deploy"
+                Write-Info "  [INFO]  Route tables: $($routeTablesF.Count) hittade"
+                Write-Detail "    Engine skapar route tables med 0.0.0.0/0 → brandväggens privata IP"
+                Write-Detail "    Om befintliga route tables pekar på annat brandväggs-IP reroutes trafik vid första deployment"
             }
         }
 
         # DNS Private Resolvers
         if ($resolversF.Count -gt 0) {
             foreach ($r in $resolversF) {
-                Write-Warn "  [INFO]  DNS Private Resolver: $($r.Name)"
-                Write-Detail "          Engine conditionally deploys a resolver — verify DNS chain does not conflict"
-                Write-Detail "          Engine DNS chain: Resolver → FW Policy DNS proxy → VNet custom DNS"
-                [void]$networkingWarnings.Add("DNS Private Resolver exists: $($r.Name) — verify engine DNS chain compatibility")
+                Write-Info "  [INFO]  DNS Private Resolver: $($r.Name)"
+                Write-Detail "    Resurs-ID: $($r.ResourceId)"
+                Write-Detail "    Engine-DNS-kedja: Resolver → FW Policy DNS-proxy → VNet custom DNS — verifiera kompatibilitet"
+                [void]$networkingWarnings.Add("DNS Private Resolver finns: $($r.Name)")
             }
         }
 
-        # DCRs and UAMIs
+        # DCR:er och UAMI:s — extrahera resurs-ID:n för override
         if ($dcrsF.Count -gt 0) {
-            Write-Info "  [INFO]  Data Collection Rules: $($dcrsF.Count)"
-            Write-Detail "          Engine deploys 3 DCRs (VM Insights, Change Tracking, MDFC SQL)"
-            Write-Detail "          Existing DCRs are not removed; workloads referencing old DCRs are unaffected"
+            Write-Info "  [OVERRIDE]  Data Collection Rules: $($dcrsF.Count)"
+            foreach ($dcr in $dcrsF) { Write-Detail "    $($dcr.Name): $($dcr.ResourceId)" }
         }
         if ($uamisF.Count -gt 0) {
-            Write-Info "  [INFO]  User Assigned Managed Identities: $($uamisF.Count)"
-            Write-Detail "          Engine creates its own UAMI for AMA — coexists with existing UAMIs"
+            Write-Info "  [OVERRIDE]  User Assigned Managed Identities: $($uamisF.Count)"
+            foreach ($uami in $uamisF) { Write-Detail "    $($uami.Name): $($uami.ResourceId)" }
         }
     }
 
@@ -1773,7 +1757,7 @@ foreach ($ss in @($subScope)) {
 
     if ($allLocks.Count -gt 0) {
         Write-Host ''
-        Write-Host "  Resource Lock Assessment: ($($allLocks.Count) lock(s) found)"
+        Write-Host "  Resurslås-granskning: ($($allLocks.Count) lås hittade)"
 
         # RG name patterns the engine deploys into or creates
         $engineRgPatterns = @('alz-', 'ALZ-', 'rg-alz-', 'rg-amba-')
@@ -1820,9 +1804,9 @@ foreach ($ss in @($subScope)) {
             $script:LockTotalCount++
 
             $scopeDesc = switch ($scope) {
-                'subscription'  { "subscription" }
+                'subscription'  { "prenumeration" }
                 'resourceGroup' { "RG: $rgName" }
-                'resource'      { "resource: $resName ($resType) in $rgName" }
+                'resource'      { "resurs: $resName ($resType) i $rgName" }
                 default         { $scope }
             }
 
@@ -1839,25 +1823,24 @@ foreach ($ss in @($subScope)) {
 
             switch ($classification) {
                 'BLOCKING' {
-                    Write-Warn "  [BLOCKING] $level lock '$($lock.Name)' on $scopeDesc"
-                    Write-Detail "             Lock is on old hierarchy resources — does not affect parallel engine deployment."
-                    Write-Detail "             Review during decommissioning of old hierarchy."
+                    Write-Warn "  [BLOCKERAR] $level-lås '$($lock.Name)' på $scopeDesc"
+                    Write-Detail "             Låset blockerar engine-deployment direkt vid in-place."
+                    Write-Detail "             Åtgärd: ta bort låset eller exkludera resursen före deployment."
                 }
                 'CAUTION' {
-                    Write-Warn "  [CAUTION]  $level lock '$($lock.Name)' on $scopeDesc"
-                    Write-Detail "             CanNotDelete lock will not block deployments but may prevent stack cleanup operations."
-                    Write-Detail "             Lock is on old hierarchy resources — does not affect parallel engine deployment."
-                    Write-Detail "             Review during decommissioning of old hierarchy."
+                    Write-Warn "  [VARNING]  $level-lås '$($lock.Name)' på $scopeDesc"
+                    Write-Detail "             CanNotDelete-lås blockerar inte deployment men kan förhindra stack-rensningsoperationer."
+                    Write-Detail "             Åtgärd: kontrollera om låset påverkar engine-resurser."
                 }
                 'SAFE' {
-                    Write-Info "  [SAFE]     $level lock '$($lock.Name)' on $scopeDesc"
+                    Write-Info "  [OK]       $level-lås '$($lock.Name)' på $scopeDesc"
                 }
             }
         }
 
         if ($script:LockBlockingCount -gt 0) {
             Write-Host ''
-            Write-Warn "  Lock recommendation: configure parGlobalResourceLock in the engine to match desired post-migration lock state."
+            Write-Warn "  Lås-rekommendation: åtgärda blockerande lås innan engine-deployment."
         }
     }
 
@@ -1873,67 +1856,13 @@ foreach ($ss in @($subScope)) {
 }
 
 if ($subScope.Count -eq 0) {
-    Write-Info '  No subscription scope in export.'
+    Write-Info '  Inget prenumerationsscope i exporten.'
 }
 
 #==============================================================================
-# Section 5b: Cost Risk Assessment
+# Sektion 5b: Defender for Cloud-granskning
 #==============================================================================
-Write-Step 'Section 5b: Cost Risk Assessment'
-
-$costResourceDefs = @(
-    [PSCustomObject]@{ Type = 'ddosProtectionPlan';    DisplayName = 'DDoS Protection Plan';    MonthlyCost = 2944; EngineCreates = 'per-hub (unless ddosProtectionPlanResourceId override provided)' }
-    [PSCustomObject]@{ Type = 'azureFirewall';         DisplayName = 'Azure Firewall';           MonthlyCost = 912;  EngineCreates = 'per-hub (unless deployAzureFirewall=false)' }
-    [PSCustomObject]@{ Type = 'vpnGateway';            DisplayName = 'VPN Gateway';              MonthlyCost = 365;  EngineCreates = 'per-hub (if deployVpnGateway=true)' }
-    [PSCustomObject]@{ Type = 'expressRouteGateway';   DisplayName = 'ExpressRoute Gateway';     MonthlyCost = 292;  EngineCreates = 'per-hub (if deployExpressRouteGateway=true)' }
-    [PSCustomObject]@{ Type = 'bastionHost';           DisplayName = 'Bastion Host';             MonthlyCost = 270;  EngineCreates = 'per-hub (if deployBastion=true)' }
-)
-
-# Aggregate key resources across all infrastructure subscriptions
-$allKeyResources = @($infraReport | ForEach-Object { $_.KeyResources })
-
-$worstCaseTotal = 0
-
-foreach ($def in $costResourceDefs) {
-    $found = @($allKeyResources | Where-Object { $_.Type -eq $def.Type })
-
-    if ($found.Count -gt 0) {
-        $names = ($found | ForEach-Object { $_.Name }) -join ', '
-        Write-Info "  [INFO]  $($def.DisplayName): $($found.Count) in brownfield ($names)"
-        Write-Detail "          Engine will deploy its own in the new hierarchy."
-        Write-Detail "          Estimated transitional cost during migration: ~`$$($def.MonthlyCost)/month"
-        Write-Detail "          After migration, decommission the old resource(s) to avoid continued cost."
-
-        $worstCaseTotal += $def.MonthlyCost * $found.Count
-    }
-    else {
-        Write-Info "  [INFO]  $($def.DisplayName): 0 in brownfield — engine will create new (~`$$($def.MonthlyCost)/month) if configured"
-    }
-}
-
-# Log Analytics Workspace — variable cost, handled separately
-$lawResources = @($allKeyResources | Where-Object { $_.Type -eq 'logAnalyticsWorkspace' })
-if ($lawResources.Count -gt 0) {
-    $lawNames = ($lawResources | ForEach-Object { $_.Name }) -join ', '
-    Write-Info "  [INFO]  Log Analytics Workspace: $($lawResources.Count) found ($lawNames)"
-    Write-Detail "          Cost: variable (per-GB ingestion). If both old and new LAW ingest simultaneously, data costs double."
-    Write-Detail "          Action: point all sources at the engine-deployed LAW as soon as it is created."
-}
-
-$script:CostRiskWorstCase = $worstCaseTotal
-
-Write-Host ''
-if ($worstCaseTotal -gt 0) {
-    Write-Info "  [INFO]  Estimated transitional monthly cost (both old and new running): `$$worstCaseTotal/month"
-    Write-Detail "          Decommission old resources after migration to return to baseline cost."
-} else {
-    Write-Ok   "  [OK]    No new cost-incurring resources in brownfield."
-}
-
-#==============================================================================
-# Section 5c: Defender for Cloud Assessment
-#==============================================================================
-Write-Step 'Section 5c: Defender for Cloud Assessment'
+Write-Step 'Sektion 5b: Defender for Cloud-granskning'
 
 # Defender plans the engine enables via Deploy-MDFC-Config-H224 (subset most commonly enabled by portal ALZ)
 $engineEnabledPlans = @(
@@ -1948,14 +1877,14 @@ if ($export.PSObject.Properties['DefenderState'] -and $null -ne $export.Defender
 }
 
 if ($defenderStateList.Count -eq 0) {
-    Write-Info '  No Defender state captured — re-run Export-BrownfieldState.ps1 to include Defender data'
+    Write-Info '  Ingen Defender-data insamlad — kör Export-BrownfieldState.ps1 igen för att inkludera Defender-data'
 } else {
     foreach ($ds in $defenderStateList) {
         $subId = if ($ds.PSObject.Properties['SubscriptionId']) { $ds.SubscriptionId } else { $ds['SubscriptionId'] }
         Write-Host ''
-        Write-Host "  ── Subscription: $subId ──"
+        Write-Host "  ── Prenumeration: $subId ──"
 
-        # --- Defender plans ---
+        # --- Defender-planer ---
         $plans = @(if ($ds.PSObject.Properties['DefenderPlans']) { $ds.DefenderPlans } else { $ds['DefenderPlans'] })
         if ($plans.Count -gt 0) {
             $enabledPlans  = @($plans | Where-Object {
@@ -1967,49 +1896,49 @@ if ($defenderStateList.Count -eq 0) {
                 $t -ne 'Standard'
             })
 
-            Write-Info "  Defender plans: $($enabledPlans.Count) enabled (Standard), $($disabledPlans.Count) disabled (Free)"
+            Write-Info "  Defender-planer: $($enabledPlans.Count) aktiverade (Standard), $($disabledPlans.Count) inaktiverade (Free)"
 
-            # Plans the engine will enable that are currently disabled
+            # Planer som engine kommer att aktivera men som nu är inaktiverade
             $willEnable = @($disabledPlans | Where-Object {
                 $n = if ($_.PSObject.Properties['Name']) { $_.Name } else { $_['Name'] }
                 $engineEnabledPlans -contains $n
             })
             if ($willEnable.Count -gt 0) {
-                Write-Warn "  Engine will enable $($willEnable.Count) additional plan(s):"
+                Write-Warn "  Engine aktiverar $($willEnable.Count) ytterligare plan(er):"
                 foreach ($p in $willEnable) {
                     $n = if ($p.PSObject.Properties['Name']) { $p.Name } else { $p['Name'] }
-                    Write-Detail "    $n (currently Free — engine policy will set Standard)"
+                    Write-Detail "    $n (nu Free — engine-policy sätter Standard)"
                 }
             } else {
-                Write-Ok '  All engine-required Defender plans already enabled'
+                Write-Ok '  Alla engine-obligatoriska Defender-planer är redan aktiverade'
             }
 
-            # Plans enabled with sub-plans (P1/P2 — engine may change tier)
+            # Planer med sub-planer (P1/P2 — engine kan ändra tier)
             foreach ($p in $enabledPlans) {
                 $n  = if ($p.PSObject.Properties['Name'])    { $p.Name }    else { $p['Name'] }
                 $sp = if ($p.PSObject.Properties['SubPlan']) { $p.SubPlan } else { $p['SubPlan'] }
                 if ($sp) {
-                    Write-Info "  $n — sub-plan: $sp (verify engine policy matches desired tier)"
+                    Write-Info "  $n — sub-plan: $sp (verifiera att engine-policy matchar önskad tier)"
                 }
             }
         }
 
-        # --- Security contacts ---
+        # --- Säkerhetskontakter ---
         $contacts = @(if ($ds.PSObject.Properties['SecurityContacts']) { $ds.SecurityContacts } else { $ds['SecurityContacts'] })
         if ($contacts.Count -gt 0) {
             foreach ($c in $contacts) {
                 $emails = if ($c.PSObject.Properties['Emails']) { $c.Emails } else { $c['Emails'] }
                 if ($emails) {
-                    Write-Info "  Security contact email(s): $emails"
-                    Write-Detail "    Engine policy (Deploy-MDFC-Config-H224) will overwrite this."
-                    Write-Detail "    Action: ensure emailSecurityContact in platform.json policy overrides matches desired value."
+                    Write-Info "  Säkerhetskontakt-e-post: $emails"
+                    Write-Detail "    Engine-policy (Deploy-MDFC-Config-H224) skriver över detta."
+                    Write-Detail "    Åtgärd: kontrollera att emailSecurityContact i platform.json policy-overrides matchar önskat värde."
                 }
             }
         } else {
-            Write-Info '  No security contacts configured'
+            Write-Info '  Inga säkerhetskontakter konfigurerade'
         }
 
-        # --- Auto-provisioning (MMA detection) ---
+        # --- Auto-provisionering (MMA-detektering) ---
         $autoProv = @(if ($ds.PSObject.Properties['AutoProvisioning']) { $ds.AutoProvisioning } else { $ds['AutoProvisioning'] })
         $mmaEntry = $autoProv | Where-Object {
             $n = if ($_.PSObject.Properties['Name']) { $_.Name } else { $_['Name'] }
@@ -2019,21 +1948,21 @@ if ($defenderStateList.Count -eq 0) {
             $mmaState = if ($mmaEntry.PSObject.Properties['AutoProvision']) { $mmaEntry.AutoProvision } else { $mmaEntry['AutoProvision'] }
             if ($mmaState -eq 'On') {
                 $script:MmaProvisioningCount++
-                Write-Warn '  MMA auto-provisioning: ON — legacy Log Analytics agent will be deployed to new VMs'
-                Write-Detail '    Engine uses AMA-based monitoring (Deploy-MDFC-DefSQL-AMA, DCRs).'
-                Write-Detail '    Both MMA and AMA will run simultaneously post-migration.'
-                Write-Detail '    Action: plan MMA deprecation after AMA coverage is confirmed.'
+                Write-Warn '  MMA auto-provisionering: PÅ — äldre Log Analytics-agent driftsätts på nya VM:ar'
+                Write-Detail '    Engine använder AMA-baserad monitorering (Deploy-MDFC-DefSQL-AMA, DCR:er).'
+                Write-Detail '    Både MMA och AMA körs parallellt efter deployment.'
+                Write-Detail '    Åtgärd: planera MMA-avveckling efter att AMA-täckning är bekräftad.'
             } else {
-                Write-Ok "  MMA auto-provisioning: $mmaState"
+                Write-Ok "  MMA auto-provisionering: $mmaState"
             }
         }
     }
 }
 
 #==============================================================================
-# Section 5d: Tag Schema Assessment
+# Sektion 5c: Tagg-schemabedömning
 #==============================================================================
-Write-Step 'Section 5d: Tag Schema Assessment'
+Write-Step 'Sektion 5c: Tagg-schemabedömning'
 
 # Collect all tag keys from RGs and key resources across every subscription scope
 $tagKeyCounts  = @{}   # key -> count of resources that carry it
@@ -2090,7 +2019,7 @@ $totalSampleObjects = [System.Math]::Max($taggedObjects, 1)
 $mandatoryThreshold = 0.80
 
 if ($tagKeyCounts.Count -eq 0) {
-    Write-Info '  No tags found on scanned resources'
+    Write-Info '  Inga taggar hittades på granskade resurser'
 } else {
     # Separate mandatory candidates from optional
     $mandatoryKeys = @($tagKeyCounts.GetEnumerator() | Where-Object {
@@ -2101,49 +2030,49 @@ if ($tagKeyCounts.Count -eq 0) {
         ($_.Value / $totalSampleObjects) -lt $mandatoryThreshold
     } | Sort-Object { -$_.Value })
 
-    Write-Info "  Tag inventory: $($tagKeyCounts.Count) distinct key(s) across $taggedObjects scanned object(s)"
+    Write-Info "  Tagg-inventering: $($tagKeyCounts.Count) distinkta nyckel(ar) across $taggedObjects granskade objekt"
     Write-Host ''
-    Write-Host '  Tag frequency (key → coverage):'
+    Write-Host '  Tagg-frekvens (nyckel → täckning):'
     foreach ($entry in (@($mandatoryKeys) + @($optionalKeys))) {
         $pct    = [int](($entry.Value / $totalSampleObjects) * 100)
-        $marker = if (($entry.Value / $totalSampleObjects) -ge $mandatoryThreshold) { '[LIKELY MANDATORY]' } else { '[optional]        ' }
+        $marker = if (($entry.Value / $totalSampleObjects) -ge $mandatoryThreshold) { '[TROLIGEN OBLIGATORISK]' } else { '[valfri]               ' }
         $valCount = $tagKeyValues[$entry.Key].Count
-        $valHint  = if ($valCount -le 5) { " — values: $($tagKeyValues[$entry.Key] -join ', ')" } else { " — $valCount distinct values" }
+        $valHint  = if ($valCount -le 5) { " — värden: $($tagKeyValues[$entry.Key] -join ', ')" } else { " — $valCount distinkta värden" }
         Write-Detail "    $marker  $($entry.Key)  ($($entry.Value)/$taggedObjects = $pct%)$valHint"
     }
 
     if ($mandatoryKeys.Count -gt 0) {
         Write-Host ''
-        Write-Ok   "  $($mandatoryKeys.Count) tag key(s) appear on ≥$([int]($mandatoryThreshold*100))% of objects (likely mandatory):"
+        Write-Ok   "  $($mandatoryKeys.Count) tagg-nyckel(ar) förekommer på ≥$([int]($mandatoryThreshold*100))% av objekt (troligen obligatoriska):"
         foreach ($mk in $mandatoryKeys) {
             Write-Detail "    $($mk.Key)"
         }
-        Write-Detail '  Action: add these to parTags in platform.json (see Section 6 suggestion)'
+        Write-Detail '  Åtgärd: lägg till dessa i parTags i platform.json (se Sektion 6-förslag)'
     } else {
-        Write-Info  '  No tag keys meet the ≥80% mandatory threshold — tagging is sparse or inconsistent'
+        Write-Info  '  Inga tagg-nycklar uppnår ≥80%-tröskeln — taggning är gles eller inkonsekvent'
     }
 }
 
 if ($tagPolicies.Count -gt 0) {
     Write-Host ''
-    Write-Warn "  Tag-enforcement policies detected ($($tagPolicies.Count)):"
+    Write-Warn "  Tagg-enforcement-policies detekterade ($($tagPolicies.Count)):"
     foreach ($tp in $tagPolicies) {
         Write-Detail "    $tp"
     }
-    Write-Detail '  Action: verify these assignments are not assigned inside an ALZ initiative — engine may reassign them.'
+    Write-Detail '  Åtgärd: verifiera att dessa tilldelningar inte ingår i ett ALZ-initiativ — engine kan omtilldela dem.'
 } else {
-    Write-Info '  No tag-enforcement policy assignments detected'
+    Write-Info '  Inga tagg-enforcement-policytilldelningar detekterade'
 }
 
 #==============================================================================
-# Section 6: Config Extraction
+# Sektion 6: Konfigurationsextraktion
 #==============================================================================
-Write-Step 'Section 6: Config Extraction (draft platform.json values)'
+Write-Step 'Sektion 6: Konfigurationsextraktion (override-värden för tenant-konfig-repo)'
 
 Write-Host ''
-Write-Host '  The following values were discovered in the existing environment.'
-Write-Host '  Use to inform the new hierarchy''s platform.json configuration.'
-Write-Host '  The engine will deploy its own resources — these are reference values, not overrides.'
+Write-Host '  Följande värden hittades i den befintliga miljön.'
+Write-Host '  Använd dem som override-parametrar i tenant-konfigurationsrepot.'
+Write-Host '  Vid in-place takeover behåller engine:n befintlig infrastruktur — ange resurs-ID:n som overrides.'
 Write-Host ''
 
 $subScopeObj = @($subScope) | Select-Object -First 1
@@ -2155,11 +2084,11 @@ if ($subScopeObj) {
 }
 
 if ($script:CollectedLawIds.Count -eq 1) {
-    Write-Host "    // Log Analytics workspace found:"
+    Write-Host "    // Log Analytics-arbetsyta hittad:"
     Write-Host "    // $($script:CollectedLawIds | Select-Object -First 1)"
 }
 elseif ($script:CollectedLawIds.Count -gt 1) {
-    Write-Warn "  Multiple LAW IDs found (drift!) — review carefully:"
+    Write-Warn "  Flera LAW-ID:n hittade (avvikelse!) — granska noggrant:"
     foreach ($lawId in $script:CollectedLawIds) { Write-Detail "    $lawId" }
 }
 
@@ -2167,50 +2096,42 @@ if ($script:CollectedEmails.Count -gt 0) {
     Write-Host "    `"SECURITY_CONTACT_EMAIL`": `"$($script:CollectedEmails | Select-Object -First 1)`","
 }
 if ($script:CollectedEmails.Count -gt 1) {
-    Write-Warn "  Multiple email addresses found — verify which is correct:"
+    Write-Warn "  Flera e-postadresser hittade — verifiera vilken som är korrekt:"
     foreach ($e in $script:CollectedEmails) { Write-Detail "    $e" }
 }
 Write-Host '  }' -ForegroundColor Gray
 
 if ($script:CollectedDcrIds.Count -gt 0) {
     Write-Host ''
-    Write-Info "  DCR IDs referenced in assignments:"
+    Write-Info "  DCR-ID:n refererade i tilldelningar:"
     foreach ($id in $script:CollectedDcrIds) { Write-Detail "    $id" }
 }
 if ($script:CollectedUamiIds.Count -gt 0) {
     Write-Host ''
-    Write-Info "  UAMI IDs referenced in assignments:"
+    Write-Info "  UAMI-ID:n refererade i tilldelningar:"
     foreach ($id in $script:CollectedUamiIds) { Write-Detail "    $id" }
 }
 
-# parTags suggestion (from Section 5d mandatory tag analysis)
+# parTags-förslag (från Sektion 5c obligatorisk tagg-analys)
 if ($tagKeyCounts.Count -gt 0) {
     $mandatoryTagsForSec6 = @($tagKeyCounts.GetEnumerator() | Where-Object {
         ($_.Value / [System.Math]::Max($taggedObjects, 1)) -ge $mandatoryThreshold
     } | Sort-Object Name | ForEach-Object { $_.Key })
     if ($mandatoryTagsForSec6.Count -gt 0) {
         Write-Host ''
-        Write-Info "  Suggested parTags (based on tag frequency analysis — update values as needed):"
+        Write-Info "  Föreslagna parTags (baserat på tagg-frekvensanalys — uppdatera värden vid behov):"
         Write-Host '  parTags: {' -ForegroundColor Gray
         foreach ($tk in $mandatoryTagsForSec6) {
-            $sampleVal = if ($tagKeyValues[$tk].Count -eq 1) { $tagKeyValues[$tk] | Select-Object -First 1 } else { '<update-value>' }
+            $sampleVal = if ($tagKeyValues[$tk].Count -eq 1) { $tagKeyValues[$tk] | Select-Object -First 1 } else { '<uppdatera-värde>' }
             Write-Host "    `"$tk`": `"$sampleVal`"" -ForegroundColor Gray
         }
         Write-Host '  }' -ForegroundColor Gray
     }
 }
 
-if ($script:DnsDuplicateRiskCount -gt 0) {
-    Write-Host ''
-    Write-Warn "  Private DNS zone config (DUPLICATE_RISK detected — see Section 5 for options):"
-    Write-Detail "    Option A: Deploy engine to a different connectivity subscription (no conflict)"
-    Write-Detail "    Option B: Move brownfield zones to engine DNS RG before engine deployment"
-    Write-Detail "    Option C: Set privateDnsSettings.deployPrivateDnsZones = false and reuse existing zones"
-}
-
-# Platform subscription mapping from SubscriptionPlacement (requires Export-BrownfieldState v2+)
+# Plattformsprenumerationsmapping från SubscriptionPlacement
 Write-Host ''
-Write-Host '  Platform subscription mapping (from MG placement):'
+Write-Host '  Plattformsprenumerationsmapping (från MG-placering):'
 if ($mgSubscriptions.Count -gt 0) {
     $platformMgMap = @{
         'management'   = 'SUBSCRIPTION_ID_MANAGEMENT'
@@ -2234,53 +2155,52 @@ if ($mgSubscriptions.Count -gt 0) {
         if ($subs.Count -eq 1) {
             $fullModeSubsFound++
             $sub = $subs[0]
-            $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '(unknown)' }
+            $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '(okänd)' }
             $subName = if ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { " ($($sub.DisplayName))" } else { '' }
             Write-Ok "    $key`: $subId$subName"
         } elseif ($subs.Count -gt 1) {
             $fullModeSubsFound++
-            Write-Warn "    $key`: multiple subscriptions found under $actualId — check placement:"
+            Write-Warn "    $key`: flera prenumerationer hittade under $actualId — kontrollera placering:"
             foreach ($sub in $subs) {
                 $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '?' }
                 $subName = if ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { $sub.DisplayName } else { '' }
                 Write-Detail "      $subId ($subName)"
             }
         } else {
-            Write-Detail "    $key`: (none found)"
+            Write-Detail "    $key`: (ej hittad)"
         }
     }
 
-    # PLATFORM_MODE=simple: one subscription placed directly under the platform MG rather
-    # than under the four child MGs. Detect this and suggest SUBSCRIPTION_ID_PLATFORM.
+    # PLATFORM_MODE=simple: en prenumeration direkt under platform-MG
     if ($fullModeSubsFound -eq 0) {
         $platformActualId = if ($normalizedToActualMg.ContainsKey('platform')) { $normalizedToActualMg['platform'] } else { 'platform' }
         $platformDirectSubs = @(if ($mgSubscriptions.ContainsKey($platformActualId)) { $mgSubscriptions[$platformActualId] } else { @() })
         if ($platformDirectSubs.Count -eq 1) {
             $sub = $platformDirectSubs[0]
-            $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '(unknown)' }
+            $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '(okänd)' }
             $subName = if ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { " ($($sub.DisplayName))" } else { '' }
-            Write-Ok  "    SUBSCRIPTION_ID_PLATFORM (simple mode): $subId$subName"
-            Write-Detail "    Set PLATFORM_MODE=simple and SUBSCRIPTION_ID_PLATFORM in platform.json."
-            Write-Detail "    The four full-mode sub IDs should also be set to this value (schema requires all keys)."
+            Write-Ok  "    SUBSCRIPTION_ID_PLATFORM (simple-läge): $subId$subName"
+            Write-Detail "    Sätt PLATFORM_MODE=simple och SUBSCRIPTION_ID_PLATFORM i platform.json."
+            Write-Detail "    De fyra full-mode-sub-ID:na bör också sättas till detta värde (schemat kräver alla nycklar)."
         } elseif ($platformDirectSubs.Count -gt 1) {
-            Write-Warn "    Multiple subscriptions found directly under platform MG ($platformActualId) — check placement:"
+            Write-Warn "    Flera prenumerationer hittade direkt under platform-MG ($platformActualId) — kontrollera placering:"
             foreach ($sub in $platformDirectSubs) {
                 $subId = if ($sub.PSObject.Properties['Id']) { $sub.Id } else { '?' }
                 $subName = if ($sub.PSObject.Properties['DisplayName'] -and $sub.DisplayName) { $sub.DisplayName } else { '' }
                 Write-Detail "      $subId ($subName)"
             }
         } else {
-            Write-Warn "    No subscriptions found under management/connectivity/identity/security or platform MG."
-            Write-Detail "    Re-run Export-BrownfieldState.ps1 and ensure -PlatformSubscriptionIds covers the correct subscriptions."
+            Write-Warn "    Inga prenumerationer hittades under management/connectivity/identity/security eller platform-MG."
+            Write-Detail "    Kör Export-BrownfieldState.ps1 igen och kontrollera att -PlatformSubscriptionIds täcker rätt prenumerationer."
         }
     }
 } else {
-    Write-Detail "    (not available — re-run Export-BrownfieldState.ps1 to capture subscription placement)"
+    Write-Detail "    (ej tillgänglig — kör Export-BrownfieldState.ps1 igen för att samla prenumerationsplacering)"
 }
 
-# Hub networking from infrastructure scan
+# Hub-nätverksresurser från infrastrukturscan — resurs-ID:n för overrides
 Write-Host ''
-Write-Host '  Hub networking (from infrastructure scan):'
+Write-Host '  Hub-nätverk (från infrastrukturscan) — resurs-ID:n för overrides:'
 $hubVnets        = @($infraReport | ForEach-Object { $_.KeyResources } | Where-Object { $_.Type -eq 'hubVirtualNetwork' })
 $firewalls       = @($infraReport | ForEach-Object { $_.KeyResources } | Where-Object { $_.Type -eq 'azureFirewall' })
 $privateDnsZones = @($infraReport | ForEach-Object { $_.KeyResources } | Where-Object { $_.Type -eq 'privateDnsZone' })
@@ -2295,56 +2215,72 @@ $uamisAll        = @($infraReport | ForEach-Object { $_.KeyResources } | Where-O
 
 if ($hubVnets.Count -gt 0) {
     foreach ($vnet in $hubVnets) {
-        $addrSpace = if ($vnet.PSObject.Properties['AddressSpace'] -and $vnet.AddressSpace) { $vnet.AddressSpace -join ', ' } else { '(unknown)' }
-        Write-Ok "    Hub VNet: $($vnet.Name) ($addrSpace) in $($vnet.ResourceGroup)"
+        $addrSpace = if ($vnet.PSObject.Properties['AddressSpace'] -and $vnet.AddressSpace) { $vnet.AddressSpace -join ', ' } else { '(okänt)' }
+        Write-Ok "    Hub-VNet: $($vnet.Name) ($addrSpace) i $($vnet.ResourceGroup)"
+        Write-Detail "      Resurs-ID (hubVirtualNetworkResourceId): $($vnet.ResourceId)"
     }
 } else {
-    Write-Detail "    Hub VNet: (none found — check -PlatformSubscriptionIds covers the connectivity sub)"
+    Write-Detail "    Hub-VNet: (ej hittad — kontrollera att -PlatformSubscriptionIds täcker connectivity-sub)"
 }
 if ($firewalls.Count -gt 0) {
     foreach ($fw in $firewalls) {
-        Write-Warn "    Azure Firewall: $($fw.Name) in $($fw.ResourceGroup) [engine will also deploy one by default]"
+        Write-Info "    Azure-brandvägg: $($fw.Name) i $($fw.ResourceGroup)"
+        Write-Detail "      Resurs-ID: $($fw.ResourceId)"
     }
 } else {
-    Write-Detail "    Azure Firewall: (none found)"
+    Write-Detail "    Azure-brandvägg: (ej hittad)"
 }
 if ($ddosPlansAll.Count -gt 0) {
     foreach ($d in $ddosPlansAll) {
-        Write-Warn "    DDoS Protection Plan: $($d.Name) (~`$2,944/month — engine may deploy a second)"
+        Write-Info "    DDoS-skyddsplan: $($d.Name)"
+        Write-Detail "      Resurs-ID (ddosProtectionPlanResourceId): $($d.ResourceId)"
     }
 } else {
-    Write-Detail "    DDoS Protection Plan: (none found)"
+    Write-Detail "    DDoS-skyddsplan: (ej hittad)"
 }
 if ($vpnGwsAll.Count -gt 0) {
-    foreach ($gw in $vpnGwsAll) { Write-Warn "    VPN Gateway: $($gw.Name) (cost + 30-min deploy — engine may add another if enabled)" }
+    foreach ($gw in $vpnGwsAll) {
+        Write-Info "    VPN-gateway: $($gw.Name)"
+        Write-Detail "      Resurs-ID: $($gw.ResourceId)"
+    }
 } else {
-    Write-Detail "    VPN Gateway: (none found)"
+    Write-Detail "    VPN-gateway: (ej hittad)"
 }
 if ($erGwsAll.Count -gt 0) {
-    foreach ($gw in $erGwsAll) { Write-Warn "    ExpressRoute Gateway: $($gw.Name) (significant cost — engine may add another if enabled)" }
+    foreach ($gw in $erGwsAll) {
+        Write-Info "    ExpressRoute-gateway: $($gw.Name)"
+        Write-Detail "      Resurs-ID: $($gw.ResourceId)"
+    }
 } else {
-    Write-Detail "    ExpressRoute Gateway: (none found)"
+    Write-Detail "    ExpressRoute-gateway: (ej hittad)"
 }
 if ($bastionsAll.Count -gt 0) {
-    foreach ($b in $bastionsAll) { Write-Info "    Bastion Host: $($b.Name)" }
+    foreach ($b in $bastionsAll) {
+        Write-Info "    Bastion Host: $($b.Name)"
+        Write-Detail "      Resurs-ID: $($b.ResourceId)"
+    }
 } else {
-    Write-Detail "    Bastion Host: (none found)"
+    Write-Detail "    Bastion Host: (ej hittad)"
 }
 if ($fwPoliciesAll.Count -gt 0) {
     foreach ($fp in $fwPoliciesAll) {
-        Write-Info "    Firewall Policy: $($fp.Name) (engine creates its own unless firewallPolicyId override is set)"
+        Write-Info "    Brandväggspolicy: $($fp.Name)"
+        Write-Detail "      Resurs-ID (firewallPolicyId): $($fp.ResourceId)"
     }
 }
 if ($resolversAll.Count -gt 0) {
-    foreach ($r in $resolversAll) { Write-Warn "    DNS Private Resolver: $($r.Name) (verify DNS chain compatibility with engine)" }
+    foreach ($r in $resolversAll) {
+        Write-Info "    DNS Private Resolver: $($r.Name)"
+        Write-Detail "      Resurs-ID: $($r.ResourceId)"
+    }
 }
-# ── Private DNS Zone Assessment ──
+# ── Privat DNS-zonbedömning ──
 Write-Host ''
-Write-Host '  Private DNS Zone Assessment:'
+Write-Host '  Privat DNS-zon-inventering och override-extraktion:'
 if ($privateDnsZones.Count -eq 0) {
-    Write-Detail "    (none found — engine will create the full Private Link zone set on deployment)"
+    Write-Detail "    (inga hittade — engine skapar det fullständiga Private Link-zonsettet vid deployment)"
 } else {
-    # Zone inventory by resource group
+    # Zoninventering per resursgrupp
     $zonesByRg = @{}
     foreach ($z in ($privateDnsZones | Sort-Object ResourceGroup, Name)) {
         if (-not $zonesByRg.Contains($z.ResourceGroup)) {
@@ -2352,13 +2288,12 @@ if ($privateDnsZones.Count -eq 0) {
         }
         $zonesByRg[$z.ResourceGroup].Add($z)
     }
-    Write-Info "    Zone inventory ($($privateDnsZones.Count) total):"
+    Write-Info "    Zoninventering ($($privateDnsZones.Count) totalt):"
     foreach ($rg in $zonesByRg.Keys) {
-        Write-Detail "      $rg ($($zonesByRg[$rg].Count) zones)"
+        Write-Detail "      $rg ($($zonesByRg[$rg].Count) zoner)"
     }
 
-    # Engine default zones (avm/ptn/network/private-link-private-dns-zones:0.7.2)
-    # Source: state-snapshots/state-alen-after-cd4.json — update if AVM module version changes
+    # Engine-defaultzoner (avm/ptn/network/private-link-private-dns-zones:0.7.2)
     $engineDefaultZones = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     @(
         'privatelink.adf.azure.com'
@@ -2419,19 +2354,14 @@ if ($privateDnsZones.Count -eq 0) {
         }
     }
 
-    $matchCount          = 0
-    $duplicateRiskCount  = 0
-    $extraCount          = 0
-    $activeCount         = 0
-    $hubLinkedCount      = 0
+    $engineZoneCount = 0
+    $extraCount      = 0
+    $activeCount     = 0
+    $hubLinkedCount  = 0
     $dnsRgSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-
-    # Engine DNS RG pattern: parDnsResourceGroupNamePrefix (default 'rg-alz-dns') + '-' + location
-    $engineDnsRgPattern = 'rg-alz-dns-*'
 
     Write-Host ''
     foreach ($zone in ($privateDnsZones | Sort-Object Name)) {
-        # Engine default check — also matches region-parameterized backup zone
         $isEngineZone = $engineDefaultZones.Contains($zone.Name) -or
                         ($zone.Name -match '^privatelink\.\w+\.backup\.windowsazure\.com$')
 
@@ -2447,31 +2377,25 @@ if ($privateDnsZones.Count -eq 0) {
         })
 
         $flags = [System.Collections.Generic.List[string]]::new()
-        if ($hasActiveRecords)       { [void]$flags.Add("ACTIVE_RECORDS:$recordCount") }
-        if ($hubLinks.Count -gt 0)   { [void]$flags.Add('HUB_LINKED') }
-        if ($spokeLinks.Count -gt 0) { [void]$flags.Add("SPOKE_LINKS:$($spokeLinks.Count)") }
+        if ($hasActiveRecords)       { [void]$flags.Add("AKTIVA_POSTER:$recordCount") }
+        if ($hubLinks.Count -gt 0)   { [void]$flags.Add('HUB_LÄNKAD') }
+        if ($spokeLinks.Count -gt 0) { [void]$flags.Add("SPOKE-LÄNKAR:$($spokeLinks.Count)") }
         $flagStr = if ($flags.Count -gt 0) { "  [$($flags -join ', ')]" } else { '' }
 
         if ($isEngineZone) {
-            if ($zone.ResourceGroup -like $engineDnsRgPattern) {
-                $matchCount++
-                Write-Ok   "    MATCH           $($zone.Name)$flagStr"
-            } else {
-                $duplicateRiskCount++
-                $script:DnsDuplicateRiskCount++
-                [void]$dnsRgSet.Add($zone.ResourceGroup)
-                Write-Err  "    DUPLICATE_RISK  $($zone.Name)  (in $($zone.ResourceGroup))$flagStr"
-            }
+            $engineZoneCount++
+            [void]$dnsRgSet.Add($zone.ResourceGroup)
+            Write-Info "    ENGINE-zon  $($zone.Name)  (RG: $($zone.ResourceGroup))$flagStr"
         } else {
             $extraCount++
-            Write-Info "    EXTRA           $($zone.Name)$flagStr"
+            Write-Detail "    ANPASSAD    $($zone.Name)  (RG: $($zone.ResourceGroup))$flagStr"
         }
 
         if ($hasActiveRecords)     { $activeCount++ }
         if ($hubLinks.Count -gt 0) { $hubLinkedCount++ }
     }
 
-    # MISSING: engine defaults not present in brownfield
+    # Saknade engine-defaultzoner
     $brownfieldZoneSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($z in $privateDnsZones) { [void]$brownfieldZoneSet.Add($z.Name) }
     $missingCount = 0
@@ -2480,43 +2404,37 @@ if ($privateDnsZones.Count -eq 0) {
     }
 
     Write-Host ''
-    if ($matchCount -gt 0)         { Write-Ok   "    MATCH:          $matchCount — in engine DNS RG, fully managed" }
-    if ($duplicateRiskCount -gt 0) { Write-Err  "    DUPLICATE_RISK: $duplicateRiskCount — wrong RG, engine will create conflicting duplicates" }
-    if ($extraCount -gt 0)         { Write-Info "    EXTRA:          $extraCount — not in engine defaults, engine won't touch these" }
-    if ($missingCount -gt 0)       { Write-Info "    MISSING:        $missingCount engine default zones not yet deployed (will be created)" }
-    if ($activeCount -gt 0)        { Write-Warn "    ACTIVE_RECORDS: $activeCount zone(s) have records beyond SOA+NS — orphaning breaks Private Link resolution" }
-    if ($hubLinkedCount -gt 0)     { Write-Warn "    HUB_LINKED:     $hubLinkedCount zone(s) already linked to hub VNet — verify engine link creation is idempotent" }
+    Write-Info "    Engine-defaultzoner: $engineZoneCount   Anpassade: $extraCount   Saknas: $missingCount"
+    if ($activeCount -gt 0)    { Write-Warn "    AKTIVA_POSTER: $activeCount zon(er) har poster utöver SOA+NS — verifiera att orphaning inte bryter Private Link-resolution" }
+    if ($hubLinkedCount -gt 0) { Write-Warn "    HUB_LÄNKAD: $hubLinkedCount zon(er) redan länkade till hub-VNet — verifiera att engine-länkning är idempotent" }
 
-    if ($duplicateRiskCount -gt 0) {
+    # DNS-RG override-extraktion — primär override för in-place
+    if ($dnsRgSet.Count -gt 0) {
         Write-Host ''
-        Write-Warn "    ! DUPLICATE_RISK — action required if engine uses same connectivity subscription:"
-        Write-Detail "      Option A: Deploy engine to a different connectivity subscription (no conflict)"
-        Write-Detail "      Option B: Move brownfield zones to engine DNS RG before engine deployment"
-        Write-Detail "      Option C: Set privateDnsSettings.deployPrivateDnsZones = false and reuse existing zones"
-        if ($dnsRgSet.Count -gt 0) {
-            Write-Detail "      Brownfield DNS RG(s): $($dnsRgSet -join ', ')"
+        Write-Ok "    Befintlig DNS-resursgrupp (ange som privateDnsSettings.dnsResourceGroupId):"
+        foreach ($rg in $dnsRgSet) {
+            Write-Detail "      $rg"
         }
-    }
-    if ($hubLinkedCount -gt 0 -and $duplicateRiskCount -eq 0) {
-        Write-Host ''
-        Write-Warn "    ! Engine will create hub VNet links for these zones — verify existing link names won't conflict."
+        Write-Detail "    Vid in-place hanterar engine:n zonerna i befintlig RG — inga duplikat skapas."
     }
 }
 if ($dcrsAll.Count -gt 0) {
-    Write-Info "    Data Collection Rules: $($dcrsAll.Count) (engine deploys 3 more — existing unaffected)"
+    Write-Info "    Data Collection Rules: $($dcrsAll.Count) befintliga"
+    foreach ($dcr in $dcrsAll) { Write-Detail "      $($dcr.Name): $($dcr.ResourceId)" }
 }
 if ($uamisAll.Count -gt 0) {
-    Write-Info "    User Assigned Managed Identities: $($uamisAll.Count)"
+    Write-Info "    User Assigned Managed Identities: $($uamisAll.Count) befintliga"
+    foreach ($uami in $uamisAll) { Write-Detail "      $($uami.Name): $($uami.ResourceId)" }
 }
 
 #==============================================================================
-# Section 7: Risk Summary
+# Sektion 7: Risksammanfattning
 #==============================================================================
-Write-Step 'Section 7: Risk Summary'
+Write-Step 'Sektion 7: Risksammanfattning'
 
 $totalStdDefs = 0; $totalStdMismatchDefs = 0; $totalNonStdDefs = 0; $totalAmbaDefs = 0; $totalDeprDefs = 0
 $totalStdSets = 0; $totalNonStdSets = 0; $totalAmbaSets = 0; $totalDeprSets = 0
-$totalNonStdAssignments = 0; $totalAmbaAssignments = 0
+$totalStdAssignments = 0; $totalNonStdAssignments = 0; $totalAmbaAssignments = 0
 $totalMissingInfra = 0
 $totalNonAlzRgs = 0
 $totalCustomRoles = 0
@@ -2524,24 +2442,25 @@ $totalCustomRoles = 0
 foreach ($sr in $reportScopes) {
     foreach ($d in $sr.PolicyDefs) {
         switch ($d.Classification) {
-            'Standard' { $totalStdDefs++ }
+            'Standard'         { $totalStdDefs++ }
             'StandardMismatch' { $totalStdMismatchDefs++ }
-            'NonStandard' { $totalNonStdDefs++ }
-            'AMBA' { $totalAmbaDefs++ }
-            'Deprecated' { $totalDeprDefs++ }
+            'NonStandard'      { $totalNonStdDefs++ }
+            'AMBA'             { $totalAmbaDefs++ }
+            'Deprecated'       { $totalDeprDefs++ }
         }
     }
     foreach ($s in $sr.PolicySetDefs) {
         switch ($s.Classification) {
-            'Standard' { $totalStdSets++ }
+            'Standard'    { $totalStdSets++ }
             'NonStandard' { $totalNonStdSets++ }
-            'AMBA' { $totalAmbaSets++ }
-            'Deprecated' { $totalDeprSets++ }
+            'AMBA'        { $totalAmbaSets++ }
+            'Deprecated'  { $totalDeprSets++ }
         }
     }
     foreach ($a in $sr.PolicyAssignments) {
-        if ($a.ReferencesAmba) { $totalAmbaAssignments++ }
-        elseif (-not $a.ReferencesStandard) { $totalNonStdAssignments++ }
+        if ($a.ReferencesAmba)         { $totalAmbaAssignments++ }
+        elseif ($a.ReferencesStandard) { $totalStdAssignments++ }
+        else                           { $totalNonStdAssignments++ }
     }
     foreach ($rd in $sr.RoleDefinitions) {
         if ((Get-RoleDefClassification $rd.RoleName) -eq 'Custom') { $totalCustomRoles++ }
@@ -2552,202 +2471,181 @@ foreach ($ir in $infraReport) {
     $totalNonAlzRgs += $ir.NonAlzRgs.Count
 }
 
+# Räkna MATCH och SAKNAS från RoleDefCheckResults (DRIFT och NAME_COLLISION redan räknade)
+$rdMatchCount   = @($script:RoleDefCheckResults | Where-Object { $_.Status -eq 'MATCH'   }).Count
+$rdMissingCount = @($script:RoleDefCheckResults | Where-Object { $_.Status -eq 'MISSING' }).Count
+
+#──────────────────────────────────────────────────────────────────────────────
+# Block 1: Inom engine-scope (påverkas vid deploy)
+#──────────────────────────────────────────────────────────────────────────────
 Write-Host ''
-Write-Host "  Policy Definitions:"
-if ($totalStdDefs -gt 0) { Write-Ok   "    Standard — exact match:   $totalStdDefs" }
+if ($NoColor) { Write-Host '  ── Inom engine-scope (påverkas vid deploy) ──' }
+else          { Write-Host "  `e[1m── Inom engine-scope (påverkas vid deploy) ──`e[0m" }
+
+Write-Host ''
+Write-Host '  Policydefinitioner:'
+Write-Ok   "    Exakt match:       $totalStdDefs"
 if ($totalStdMismatchDefs -gt 0) {
-    $hasDenyAssigned = $script:MismatchCountByEffect['DenyAssigned'] -gt 0
-    if ($hasDenyAssigned) {
-        Write-Err  "    Standard — rule mismatch: $totalStdMismatchDefs (engine will overwrite on deploy)"
+    if ($script:MismatchCountByEffect['DenyAssigned'] -gt 0) {
+        Write-Err  "    Regelavvikelse:    $totalStdMismatchDefs (engine skriver över vid deploy)"
     } else {
-        Write-Warn "    Standard — rule mismatch: $totalStdMismatchDefs (engine will overwrite on deploy)"
+        Write-Warn "    Regelavvikelse:    $totalStdMismatchDefs (engine skriver över vid deploy)"
     }
     Write-Host ''
-    Write-Host '  Rule mismatches by effect:'
-    if ($script:MismatchCountByEffect['DenyAssigned']      -gt 0) { Write-Err  "    Deny (assigned):        $($script:MismatchCountByEffect['DenyAssigned']) (active risk — review resource compliance before deploying)" }
-    if ($script:MismatchCountByEffect['DenyUnassigned']    -gt 0) { Write-Warn "    Deny (unassigned):      $($script:MismatchCountByEffect['DenyUnassigned']) (definition-only — no current impact)" }
-    if ($script:MismatchCountByEffect['DeployIfNotExists'] -gt 0) { Write-Warn "    DeployIfNotExists:      $($script:MismatchCountByEffect['DeployIfNotExists']) (may trigger remediations)" }
-    if ($script:MismatchCountByEffect['Modify']            -gt 0) { Write-Warn "    Modify:                 $($script:MismatchCountByEffect['Modify']) (may change resource properties)" }
-    if ($script:MismatchCountByEffect['Append']            -gt 0) { Write-Info "    Append:                 $($script:MismatchCountByEffect['Append']) (may add properties on next update)" }
-    if ($script:MismatchCountByEffect['Audit']             -gt 0) { Write-Ok   "    Audit/AuditIfNotExists: $($script:MismatchCountByEffect['Audit']) (informational only)" }
-    if ($script:MismatchCountByEffect['Other']             -gt 0) { Write-Warn "    Other/Unknown:          $($script:MismatchCountByEffect['Other'])" }
-} else { Write-Ok "    Rule mismatches:          0" }
-if ($totalNonStdDefs -gt 0) { Write-Warn "    Non-standard (review):    $totalNonStdDefs" } else { Write-Ok "    Non-standard:             0" }
-if ($totalAmbaDefs -gt 0) { Write-Amba "    AMBA (informational):     $totalAmbaDefs" }
-if ($totalDeprDefs -gt 0) {
-    $deprAssigned   = @($script:AllDeprDefList | Where-Object {
-        $defAssignmentScopes.ContainsKey($_.Name) -and $defAssignmentScopes[$_.Name].Count -gt 0
-    })
-    $deprUnassigned = $totalDeprDefs - $deprAssigned.Count
-    if ($deprAssigned.Count -gt 0) {
-        Write-Warn "    Deprecated (assigned):    $($deprAssigned.Count) (engine will replace with successor — review before deploying)"
-        Write-Info "    Deprecated (unassigned):  $deprUnassigned"
-        if ($Detailed) {
-            Write-Host ''
-            Write-Warn "  ── Deprecated definitions still assigned ──"
-            foreach ($e in $deprAssigned) {
-                $assignScopes = @($defAssignmentScopes[$e.Name])
-                $scopeStr = ($assignScopes | ForEach-Object { "$($_.ScopeName) ($($_.ManagementGroupId))" }) -join ', '
-                Write-Warn   "  [DEPRECATED ASSIGNED] $($e.Name)"
-                Write-Detail "    display name: $($e.DisplayName)"
-                Write-Detail "    assigned at:  $scopeStr"
-            }
-        }
-    } else {
-        Write-Info "    Deprecated:               $totalDeprDefs"
-    }
+    Write-Host '    Per effekt:'
+    if ($script:MismatchCountByEffect['DenyAssigned']      -gt 0) { Write-Err  "      Deny (tilldelade):      $($script:MismatchCountByEffect['DenyAssigned']) — aktiv risk, verifiera resursefterlevnad" }
+    if ($script:MismatchCountByEffect['DenyUnassigned']    -gt 0) { Write-Warn "      Deny (otilldelade):     $($script:MismatchCountByEffect['DenyUnassigned']) — definition finns, ingen nuvarande påverkan" }
+    if ($script:MismatchCountByEffect['DeployIfNotExists'] -gt 0) { Write-Warn "      DeployIfNotExists:      $($script:MismatchCountByEffect['DeployIfNotExists']) — kan trigga remedieringar" }
+    if ($script:MismatchCountByEffect['Modify']            -gt 0) { Write-Warn "      Modify:                 $($script:MismatchCountByEffect['Modify']) — kan ändra resursegenskaper" }
+    if ($script:MismatchCountByEffect['Append']            -gt 0) { Write-Info "      Append:                 $($script:MismatchCountByEffect['Append']) — kan lägga till egenskaper vid nästa uppdatering" }
+    if ($script:MismatchCountByEffect['Audit']             -gt 0) { Write-Ok   "      Audit/AuditIfNotExists: $($script:MismatchCountByEffect['Audit']) — informativ" }
+    if ($script:MismatchCountByEffect['Other']             -gt 0) { Write-Warn "      Övriga/okända:          $($script:MismatchCountByEffect['Other'])" }
+} else {
+    Write-Ok "    Regelavvikelse:    0"
 }
 
 Write-Host ''
-Write-Host "  Policy Set Definitions:"
-if ($totalStdSets -gt 0) { Write-Ok   "    Standard (safe):          $totalStdSets" }
-if ($totalNonStdSets -gt 0) { Write-Warn "    Non-standard (review):    $totalNonStdSets" } else { Write-Ok "    Non-standard:             0" }
-if ($totalAmbaSets -gt 0) { Write-Amba "    AMBA (informational):     $totalAmbaSets" }
-if ($totalDeprSets -gt 0) { Write-Info "    Deprecated:               $totalDeprSets" }
+Write-Host '  Policysetdefinitioner:'
+Write-Ok   "    Exakt match:       $totalStdSets"
+Write-Ok   "    Regelavvikelse:    0  (avvikelser i sets klassificeras ej separat)"
 
 Write-Host ''
-Write-Host "  Assignments:                  Non-standard refs: $totalNonStdAssignments   AMBA refs: $totalAmbaAssignments"
-Write-Host "  Custom role definitions:      $totalCustomRoles"
+Write-Host '  Policy assignments:'
+Write-Ok   "    Engine-library-refs: $totalStdAssignments"
+Write-Info "    (Parametrar/enforcement mode jämförs ej automatiskt — granska manuellt vid Deny-avvikelser)"
+
+Write-Host ''
+Write-Host '  Rolldefinitioner (ALZ engine-roller):'
 if ($script:RoleDefCheckResults.Count -gt 0) {
-    if ($script:RoleDefNameCollisionCount -gt 0) {
-        Write-Err  "  ALZ role def check:           $($script:RoleDefCheckResults.Count) roles — $($script:RoleDefNameCollisionCount) NAME_COLLISION, $($script:RoleDefDriftCount) DRIFT"
-    } elseif ($script:RoleDefDriftCount -gt 0) {
-        Write-Warn "  ALZ role def check:           $($script:RoleDefCheckResults.Count) roles — $($script:RoleDefDriftCount) DRIFT (engine will overwrite)"
+    Write-Ok   "    MATCH:          $rdMatchCount"
+    if ($script:RoleDefDriftCount -gt 0) {
+        Write-Warn "    DRIFT:          $($script:RoleDefDriftCount) — engine skriver över vid deploy"
     } else {
-        Write-Ok   "  ALZ role def check:           $($script:RoleDefCheckResults.Count) roles — all MATCH or MISSING (safe to deploy)"
+        Write-Ok   "    DRIFT:          0"
     }
-}
-Write-Host "  Non-ALZ resource groups:      $totalNonAlzRgs"
-Write-Host "  Missing expected resources:   $totalMissingInfra"
-if ($script:NetworkingRiskCount -gt 0) {
-    Write-Info "  Networking transitional cost: $($script:NetworkingRiskCount) item(s) — DDoS plan/VPN/ER gateway will run in parallel during migration"
+    if ($script:RoleDefNameCollisionCount -gt 0) {
+        Write-Warn "    NAME_COLLISION: $($script:RoleDefNameCollisionCount) — operationell förvirring, granska"
+    } else {
+        Write-Ok   "    NAME_COLLISION: 0"
+    }
+    Write-Ok   "    SAKNAS:         $rdMissingCount — engine skapar, säkert"
 } else {
-    Write-Ok   "  Networking cost-duplicate risk: 0"
+    Write-Info "    (rolldefinitionskontroll ej utförd)"
 }
-if ($script:CostRiskWorstCase -gt 0) {
-    Write-Info "  Estimated transitional monthly cost: `$$($script:CostRiskWorstCase)/month — see Section 5b for details"
+
+Write-Host ''
+Write-Host '  Blueprint-tilldelningar:'
+if ($script:BlueprintCount -gt 0) {
+    Write-Err "    $($script:BlueprintCount) blueprint-tilldelning(ar) — MÅSTE tas bort innan engine-deployment"
 } else {
-    Write-Ok   "  Estimated transitional monthly cost: `$0"
+    Write-Ok  "    0  (inga blockerare)"
 }
-if ($script:DnsDuplicateRiskCount -gt 0) {
-    Write-Err  "  Private DNS duplicate-zone risk: $($script:DnsDuplicateRiskCount) zone(s) — wrong RG, engine will create conflicting duplicates"
-} else {
-    Write-Ok   "  Private DNS duplicate-zone risk: 0"
-}
+
+Write-Host ''
+Write-Host '  Resurslås som blockerar engine-deployment:'
 if ($script:LockTotalCount -gt 0) {
     if ($script:LockBlockingCount -gt 0) {
-        Write-Warn "  Resource locks: $($script:LockTotalCount) total  ($($script:LockBlockingCount) BLOCKING — old hierarchy, review during decommissioning)"
+        Write-Warn "    $($script:LockBlockingCount) BLOCKERAR  /  $($script:LockCautionCount) VARNING  /  $($script:LockTotalCount) totalt"
     } elseif ($script:LockCautionCount -gt 0) {
-        Write-Warn "  Resource locks: $($script:LockTotalCount) total  ($($script:LockCautionCount) CAUTION — review before stack operations)"
+        Write-Warn "    0 BLOCKERAR  /  $($script:LockCautionCount) VARNING  /  $($script:LockTotalCount) totalt"
     } else {
-        Write-Ok   "  Resource locks: $($script:LockTotalCount) total  (0 blocking)"
+        Write-Ok   "    0 blockerande  ($($script:LockTotalCount) informativa)"
     }
 } else {
-    Write-Ok   "  Resource locks: 0"
+    Write-Ok   "    0"
 }
 
 Write-Host ''
-Write-Host '  Subscription-level governance:'
-if ($subscriptionGovernance.Count -eq 0) {
-    Write-Detail '    (not captured — re-run Export-BrownfieldState.ps1 to include subscription-level data)'
-}
-else {
-    if ($script:TotalSubLevelNonStdAssignments -gt 0) {
-        Write-Warn "    Non-standard direct assignments: $($script:TotalSubLevelNonStdAssignments) (review required)"
-    }
-    else {
-        Write-Ok "    Non-standard direct assignments: 0"
-    }
-    if ($script:TotalSubLevelExemptions -gt 0) {
-        if ($script:TotalDenyExemptions -gt 0) {
-            Write-Warn "    Policy exemptions: $($script:TotalSubLevelExemptions) total  ($($script:TotalDenyExemptions) exempt Deny-effect — review)"
-        }
-        else {
-            Write-Info "    Policy exemptions: $($script:TotalSubLevelExemptions)"
-        }
-    }
-    else {
-        Write-Ok "    Policy exemptions:               0"
-    }
-}
-
-Write-Host ''
-Write-Host '  Defender for Cloud:'
-if ($script:MmaProvisioningCount -gt 0) {
-    Write-Warn "    MMA auto-provisioning ON: $($script:MmaProvisioningCount) subscription(s) — plan AMA migration post-deployment"
-} else {
-    Write-Ok   "    MMA auto-provisioning: off (or not captured)"
-}
-
-Write-Host ''
-Write-Host '  Blueprint assignments:'
-if ($script:BlueprintCount -gt 0) {
-    Write-Err  "    $($script:BlueprintCount) blueprint assignment(s) — MUST be unassigned before engine deployment"
-} else {
-    Write-Ok   "    0 blueprint assignments"
-}
-
-Write-Host ''
-Write-Host '  Cross-MG RBAC (policy-driven identities):'
+Write-Host '  Cross-MG RBAC (policy-drivna identiteter):'
 if ($script:OrphanRiskCount -gt 0) {
-    Write-Warn "    ORPHAN_RISK: $($script:OrphanRiskCount) identity/identities — will need cleanup during decommissioning of old hierarchy"
+    Write-Warn "    ORPHAN_RISK:  $($script:OrphanRiskCount) — cross-MG-rolltilldelningar föräldralösa när engine skapar nya identiteter"
 } else {
-    Write-Ok   "    ORPHAN_RISK: 0"
+    Write-Ok   "    ORPHAN_RISK:  0"
 }
 if ($script:MissingRbacCount -gt 0) {
-    Write-Warn "    MISSING_RBAC: $($script:MissingRbacCount) expected cross-MG grant(s) absent from brownfield"
+    Write-Warn "    MISSING_RBAC: $($script:MissingRbacCount) — förväntade cross-MG-behörigheter saknas i brownfield"
 } else {
     Write-Ok   "    MISSING_RBAC: 0"
 }
 
-# Traffic light — Parallel deployment model. AMBA does NOT count as non-standard for risk assessment.
-# DNS same-subscription conflicts and blueprints trigger RED.
-# Deny-effect mismatches are YELLOW — risk materializes at subscription move time, not engine deployment.
-# Locks in old hierarchy do not block parallel engine deployment.
+#──────────────────────────────────────────────────────────────────────────────
+# Block 2: Utanför engine-scope (rörs ej av engine)
+#──────────────────────────────────────────────────────────────────────────────
+Write-Host ''
+if ($NoColor) { Write-Host '  ── Utanför engine-scope (rörs ej av engine) ──' }
+else          { Write-Host "  `e[1m── Utanför engine-scope (rörs ej av engine) ──`e[0m" }
+Write-Host '  Inventering — ingen av dessa påverkar engine-deployment.'
+Write-Host ''
+Write-Host "    Non-standard policydefinitioner:          $totalNonStdDefs"
+Write-Host "    Non-standard policysetdefinitioner:       $totalNonStdSets"
+Write-Host "    AMBA policydefinitioner:                  $totalAmbaDefs"
+Write-Host "    AMBA policysetdefinitioner:               $totalAmbaSets"
+Write-Host "    Utfasade policydefinitioner:              $totalDeprDefs"
+Write-Host "    Utfasade policysetdefinitioner:           $totalDeprSets"
+Write-Host "    Non-standard policy assignments:          $totalNonStdAssignments"
+Write-Host "    Anpassade rolldefinitioner (icke-ALZ):    $totalCustomRoles"
+Write-Host "    Icke-ALZ resursgrupper:                   $totalNonAlzRgs"
+Write-Host "    Non-std prenumerationsnivå-tilldelningar: $($script:TotalSubLevelNonStdAssignments)"
+
+#──────────────────────────────────────────────────────────────────────────────
+# Trafikljus — baseras BARA på Block 1
+# RED:    blockers (blueprints, blocking locks, Deny-assigned mismatches)
+# YELLOW: avvikelser som kräver granskning (DINE/Modify, DRIFT, NAME_COLLISION, ORPHAN_RISK)
+# GREEN:  inga avvikelser, inga blockers inom engine-scope
+#──────────────────────────────────────────────────────────────────────────────
 Write-Host ''
 $hasDenyAssigned   = $script:MismatchCountByEffect['DenyAssigned'] -gt 0
-$hasDnsConflict    = $script:DnsDuplicateRiskCount -gt 0
 $hasBlueprintBlock = $script:BlueprintCount -gt 0
-$hasReviewItems    = $totalNonStdDefs -gt 0 -or $totalNonStdSets -gt 0 -or $totalStdMismatchDefs -gt 0 -or $script:RoleDefNameCollisionCount -gt 0
-$hasMinorDrift     = $totalDeprDefs -gt 0 -or $totalDeprSets -gt 0 -or $totalNonStdAssignments -gt 0 -or $totalNonAlzRgs -gt 0 -or $totalCustomRoles -gt 0 -or $script:TotalSubLevelNonStdAssignments -gt 0 -or $script:TotalDenyExemptions -gt 0 -or $script:NetworkingRiskCount -gt 0 -or $script:DnsDuplicateRiskCount -gt 0 -or $script:LockBlockingCount -gt 0 -or $script:LockCautionCount -gt 0 -or $script:CostRiskWorstCase -gt 0 -or $script:RoleDefDriftCount -gt 0 -or $script:OrphanRiskCount -gt 0 -or $script:MissingRbacCount -gt 0 -or $script:MmaProvisioningCount -gt 0
+$hasBlockingLocks  = $script:LockBlockingCount -gt 0
+$hasDineMismatch   = $script:MismatchCountByEffect['DeployIfNotExists'] -gt 0 -or $script:MismatchCountByEffect['Modify'] -gt 0
+$hasNameCollision  = $script:RoleDefNameCollisionCount -gt 0
+$hasRoleDrift      = $script:RoleDefDriftCount -gt 0
+$hasOrphanRisk     = $script:OrphanRiskCount -gt 0
+$hasAnyMismatch    = $totalStdMismatchDefs -gt 0
+$hasYellowItems    = $hasDineMismatch -or $hasRoleDrift -or $hasNameCollision -or $hasOrphanRisk -or
+                     $script:MismatchCountByEffect['DenyUnassigned'] -gt 0 -or
+                     $script:MismatchCountByEffect['Append'] -gt 0 -or
+                     $script:LockCautionCount -gt 0 -or
+                     $script:MissingRbacCount -gt 0
 
-if (-not $hasReviewItems -and -not $hasMinorDrift -and -not $hasBlueprintBlock -and -not $hasDnsConflict) {
-    Write-Colored 'GREEN' 'Green' "Brownfield is a clean portal accelerator deployment. Low risk for engine adoption."
+$isClean = -not $hasAnyMismatch -and -not $hasBlueprintBlock -and -not $hasBlockingLocks
+
+if ($isClean) {
+    Write-Colored 'GREEN' 'Green' "Befintlig miljö är ren. Låg risk för in-place takeover."
     if ($totalAmbaDefs -gt 0 -or $totalAmbaSets -gt 0) {
-        Write-Amba "  Note: AMBA monitoring stack detected ($totalAmbaDefs defs, $totalAmbaSets sets) — informational only."
+        Write-Amba "  OBS: AMBA-monitoringstack detekterad ($totalAmbaDefs definitioner, $totalAmbaSets sets) — inventerad i Block 2."
     }
 }
-elseif ($hasDnsConflict -or $hasBlueprintBlock) {
-    $redMsg = if ($hasDnsConflict) { "DNS zone conflicts in target subscription must be resolved before engine deployment." } else { "Brownfield has blockers that must be resolved before deploying the engine." }
-    Write-Colored 'RED' 'Red' $redMsg
-    if ($hasDnsConflict) {
-        Write-Host '  DNS: Private DNS zones in wrong RG — engine will create conflicting duplicates in same subscription.'
-        Write-Host '    a) Deploy engine to a different connectivity subscription (no conflict)'
-        Write-Host '    b) Move brownfield zones to engine DNS RG before engine deployment'
-        Write-Host '    c) Set privateDnsSettings.deployPrivateDnsZones = false and reuse existing zones'
-    }
+elseif ($hasBlueprintBlock -or $hasBlockingLocks -or $hasDenyAssigned) {
+    Write-Colored 'RED' 'Red' "Miljön har blockerare som måste åtgärdas innan engine-deployment."
     if ($hasBlueprintBlock) {
-        Write-Host "  Blueprints: $($script:BlueprintCount) active blueprint assignment(s) — will conflict with engine governance."
-        Write-Host '    a) Unassign all blueprints listed in Section 4b before running the engine'
-        Write-Host '    b) Review blueprint artifacts to identify policy/role assignments the engine must own'
+        Write-Host "  Blueprint: $($script:BlueprintCount) aktiv blueprint-tilldelning(ar) — blockerar engine-styrning."
+        Write-Host '    → Ta bort alla blueprints (Sektion 4b) innan engine startas.'
+        Write-Host '    → Granska blueprint-artefakter för att identifiera policy/rolltilldelningar engine måste äga.'
+    }
+    if ($hasBlockingLocks) {
+        Write-Host "  Resurslås: $($script:LockBlockingCount) blockerande lås — blockerar engine-deployment direkt."
+        Write-Host '    → Ta bort eller exkludera resurser med blockerande lås innan deployment.'
+    }
+    if ($hasDenyAssigned) {
+        Write-Host "  Deny-avvikelser (tilldelade): $($script:MismatchCountByEffect['DenyAssigned']) — verifiera resursefterlevnad innan deployment."
+        Write-Host '    → Kör med -Detailed för att se vilka policies ändras och vilka resurstyper de påverkar.'
     }
 }
-elseif ($hasDenyAssigned -or $hasReviewItems) {
-    Write-Colored 'YELLOW' 'Yellow' "Brownfield has items requiring attention during subscription migration."
-    Write-Host '  Engine deployment is safe. Review these items before moving subscriptions:'
-    Write-Host '    a) Verify subscription workloads comply with new hierarchy Deny policies'
-    Write-Host '    b) Plan decommissioning of old hierarchy resources after migration'
-    Write-Host '    c) Clean up orphaned managed identities from old policy assignments'
-    if ($hasDenyAssigned) {
-        Write-Host '  Run with -Detailed to see which policies change and which resource types they target.'
-    }
+elseif ($hasYellowItems) {
+    Write-Colored 'YELLOW' 'Yellow' "Miljön har poster som kräver granskning innan eller under engine-deployment."
+    Write-Host '  Engine-deployment är möjlig. Granska dessa poster:'
+    if ($hasDineMismatch)  { Write-Host '    → DINE/Modify-avvikelser: kan trigga remedieringar eller resursändringar vid deploy.' }
+    if ($hasRoleDrift)     { Write-Host '    → DRIFT i rolldefinitioner: engine skriver över — verifiera att inga anpassade behörigheter förloras.' }
+    if ($hasNameCollision) { Write-Host '    → NAME_COLLISION: skapar driftkonfusion — granska och ev. byt namn på befintlig roll.' }
+    if ($hasOrphanRisk)    { Write-Host '    → ORPHAN_RISK: rensa föräldralösa managed identity-rolltilldelningar efter engine-deployment.' }
 }
 else {
-    Write-Colored 'YELLOW' 'Yellow' "Brownfield has deprecated policies or minor drift — review before adoption."
+    Write-Colored 'YELLOW' 'Yellow' "Miljön har lägre avvikelse inom engine-scope — granska Block 1 innan adoption."
 }
 
 #==============================================================================
-# Optional: write JSON report
+# Valfritt: skriv JSON-rapport
 #==============================================================================
 if ($OutputFile -ne '') {
     $fullReport = [PSCustomObject]@{
@@ -2808,26 +2706,26 @@ if ($OutputFile -ne '') {
     }
     $fullReport | ConvertTo-Json -Depth 10 | Set-Content $OutputFile
     Write-Host ''
-    Write-Info "Full report written to: $OutputFile"
+    Write-Info "Fullständig rapport skriven till: $OutputFile"
 }
 
 Write-Host ''
 
 #==============================================================================
-# Optional: generate HTML diff report for Deny-effect rule mismatches
+# Valfritt: generera HTML-diff-rapport för Deny-effekt-regelavvikelser
 #==============================================================================
 if ($DiffReport -ne '') {
     $pythonScript = Join-Path $PSScriptRoot 'diff-deny-rules.py'
     if (-not (Test-Path $pythonScript)) {
-        Write-Warn "diff-deny-rules.py not found at $pythonScript — skipping diff report"
+        Write-Warn "diff-deny-rules.py hittades inte vid $pythonScript — hoppar över diff-rapport"
     } else {
         $python = if (Get-Command python3 -ErrorAction SilentlyContinue) { 'python3' }
                   elseif (Get-Command python -ErrorAction SilentlyContinue) { 'python' }
                   else { $null }
         if (-not $python) {
-            Write-Warn 'Python 3 not found in PATH — skipping diff report'
+            Write-Warn 'Python 3 hittades inte i PATH — hoppar över diff-rapport'
         } else {
-            Write-Info "Generating policy rule diff report: $DiffReport"
+            Write-Info "Genererar principregelsdiff-rapport: $DiffReport"
             # Build mismatch info from Compare's authoritative list and pass to Python.
             # Python renders diffs; Compare is the authority on what's actually different.
             $mismatchInfoArr = @($script:AllStdMismatchDefList | ForEach-Object {
@@ -2848,7 +2746,7 @@ if ($DiffReport -ne '') {
                     --output $DiffReport `
                     --mismatch-info $tempFile
                 if (Test-Path $DiffReport) {
-                    Write-Ok "Diff report written to: $DiffReport"
+                    Write-Ok "Diff-rapport skriven till: $DiffReport"
                 }
             } finally {
                 Remove-Item $tempFile -ErrorAction SilentlyContinue

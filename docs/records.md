@@ -1357,3 +1357,73 @@ Existing platform subscriptions — especially the connectivity subscription —
 2. **Reuse existing platform subscriptions**: Move the existing connectivity/management/identity subscriptions into the new hierarchy. Requires a pre-migration compliance pass: every resource in the subscription must satisfy the new hierarchy's Deny policies before the subscription is moved. For connectivity this means verifying NSGs on all subnets, setting the DDoS policy effect to Audit (or pointing it at a real plan), and ensuring no disallowed public IPs exist on non-firewall resources. The Compare report surfaces which Deny-effect policies are changing — the planned `discover.ps1` (compliance pre-check against live subscription resources) is the instrument for the subscription-level compliance verification step.
 
 **Implication for tooling**: The Compare report's updated YELLOW guidance now explicitly lists "verify subscription workloads comply with new hierarchy Deny policies" as item (a) before moving any subscription. The report does not yet distinguish between platform subscriptions (higher risk — contain infrastructure the engine will also deploy) and landing zone subscriptions (lower risk — workload-only, no overlap with engine-managed infrastructure). Making this distinction visible is a planned improvement to `discover.ps1`.
+
+---
+
+## Apr 11: Brownfield Tooling — In-Place Takeover Reframe & Section 7 Restructure
+
+### In-Place Takeover Reframe (feat/in-place-takeover-scripts)
+
+After further analysis of the actual migration strategy, we reversed the parallel deployment reframe from Apr 7. The correct model for this project is **in-place takeover**: the engine deploys directly against the existing MG hierarchy, Deployment Stacks take ownership of engine-defined resources (policy defs, sets, assignments, role defs), and all existing infrastructure (LAW, hub VNet, firewall, DDoS plan, DCRs, UAMIs) is kept in place. Operators pass existing resource IDs as override parameters — no parallel resources are created, no transitional cost.
+
+This changes the risk model again. Conflicts now materialise **at engine deployment time**, not at subscription move time:
+- Resource locks on resources the engine modifies block deployment directly.
+- Deny-assigned policy mismatches are active blockers (policy fires immediately on engine-deployed resources).
+- There is no "duplicate cost" concept — the engine never creates parallel copies of platform infrastructure.
+- DNS zone conflicts don't exist — the operator simply sets `privateDnsSettings.dnsResourceGroupId` to the existing DNS RG; the engine manages the zones in-place.
+
+**Changes to `Export-BrownfieldState.ps1`**:
+- `DiscoveryMode` output value changed from `'brownfield'` to `'in-place-takeover'`.
+- All user-facing text (SYNOPSIS, DESCRIPTION, output messages) translated to Swedish. Variable and function names remain English.
+
+**Changes to `Compare-BrownfieldState.ps1`**:
+
+- **Strategy banner**: Header changed to "ALZ In-Place Takeover — Jämförelserapport"; strategy line reads "engine tar över befintlig MG-hierarki".
+- **Section 5b removed**: Entire Cost Risk Assessment section (~50 lines) deleted. Variables `$script:NetworkingRiskCount`, `$script:DnsDuplicateRiskCount`, `$script:CostRiskWorstCase` removed. There is no concept of running old and new resources simultaneously in in-place.
+- **Section 5 networking — [COST] → [OVERRIDE]**: Each discovered hub network resource (LAW, hub VNet, firewall, firewall policy, DDoS plan, DCR, UAMI) now prints `[OVERRIDE]` with its full Resource ID and a note about which parameter to set in the tenant config repo. No cost warnings, no `$script:NetworkingRiskCount` increments.
+- **Section 6 DNS**: Replaced MATCH/DUPLICATE_RISK/EXTRA/MISSING classification with ENGINE-zon/ANPASSAD inventory. All discovered DNS zones are shown as informational. At the end of the zone list, the script extracts the distinct DNS resource group(s) and prints them as the value to set for `privateDnsSettings.dnsResourceGroupId`. Instruction: "vid in-place hanterar engine:n zonerna i befintlig RG — inga duplikat skapas."
+- **Lock messaging**: BLOCKING message changed from "does not affect parallel engine deployment — review during decommissioning" to "blockerar engine-deployment direkt vid in-place — åtgärd: ta bort låset eller exkludera resursen före deployment."
+- **ORPHAN_RISK**: Removed "old hierarchy decommissioning" framing. New text: "cross-MG-rolltilldelningar föräldralösa när engine skapar nya managed identities — befintliga identiteter kan rensas bort efter att engine är deployed."
+- **Section 4c CI/CD**: Removed "decommissioning old hierarchy" framing from service principal guidance.
+- **Traffic light**: RED condition now includes Deny-assigned mismatches (not just blueprints and blocking locks). DNS conflict removed from RED (no longer a risk in in-place). All text in Swedish.
+- **All output text in Swedish**: User-facing strings in all `Write-*` calls translated.
+
+---
+
+### Section 7 Restructure (same branch)
+
+Section 7 was restructured into two clearly separated blocks to match the in-place model's distinction between what the engine owns and what it ignores.
+
+**Block 1 — Inom engine-scope (påverkas vid deploy)**
+
+Covers everything that Deployment Stacks will manage. Displayed with full severity (OK/WARN/ERR). Each subsection:
+- **Policydefinitioner**: Exakt match count + regelavvikelse count; if avvikelser > 0, breakdown per effect (Deny assigned/unassigned, DINE, Modify, Append, Audit).
+- **Policysetdefinitioner**: Exakt match count (set mismatches are not classified separately — noted inline).
+- **Policy assignments**: Count of assignments referencing engine-library policies (standard refs). Note that parameter/enforcement mode comparison is not automated.
+- **Rolldefinitioner**: MATCH / DRIFT / NAME_COLLISION / SAKNAS as separate lines (computed inline from `$script:RoleDefCheckResults`; added `$rdMatchCount` and `$rdMissingCount` computed variables in Section 7 instead of adding new script-level counters).
+- **Blueprint-tilldelningar**: Count, MÅSTE tas bort if > 0.
+- **Resurslås**: X BLOCKERAR / Y VARNING / Z totalt.
+- **Cross-MG RBAC**: ORPHAN_RISK and MISSING_RBAC counts.
+
+**Block 2 — Utanför engine-scope (rörs ej av engine)**
+
+Inventory of resources that exist in the tenant but are never touched by the engine. Neutral `Write-Host` formatting — no OK/WARN/ERR severity. Listed items: non-standard policy defs, non-standard policy sets, AMBA defs, AMBA sets, deprecated defs, deprecated sets, non-standard assignments, custom (non-ALZ) role defs, non-ALZ resource groups, non-standard subscription-level assignments.
+
+**Traffic light — based only on Block 1**:
+- **RED**: blueprints OR blocking locks OR Deny-assigned mismatches. Each blocker type prints a specific action line.
+- **YELLOW**: DINE/Modify mismatches, role DRIFT, NAME_COLLISION, ORPHAN_RISK, DenyUnassigned, Append mismatches, caution locks, MISSING_RBAC. Per-item action lines only for items that are present.
+- **GREEN**: no mismatches within Block 1 at all; AMBA note printed if AMBA stack detected (informational only).
+
+Block 2 items (non-standard, AMBA, deprecated, custom roles) no longer influence the traffic light colour.
+
+**`$totalStdAssignments`** added to the aggregation loop — previously only non-standard and AMBA assignment counts were tracked; now standard (engine-library-referencing) assignment count is also available for Block 1 display.
+
+---
+
+## Apr 13: Engine Tag v1.0.0 — Config Repo Pinning & DDoS Fix (platform-connectivity)
+
+Engine repo (`alz-mgmt-templates`) tagged at `v1.0.0` to mark the end of iteration 1. Two changes in Oskar's config repo (`alz-mgmt`):
+
+**Workflow pinning:** `ci.yaml` and `cd.yaml` updated to reference `@v1.0.0` instead of `@main`, and `platform_ref` in `cd.yaml` set to `v1.0.0`. This pins the config repo to the stable iteration 1 engine — template upgrades require an explicit bump in both files.
+
+**DDoS effect override (`platform-connectivity/main.bicepparam`):** The `Enable-DDoS-VNET` override block was missing the `effect` parameter. Only `ddosPlan` was set, leaving the policy's default `Modify` effect active with the placeholder DDoS plan ID. Added `effect: { value: 'Audit' }` to match the overrides already present in `platform/main.bicepparam` and `landingzones/main.bicepparam`. Without this, a full-mode connectivity deployment would fail with `LinkedAuthorizationFailed` — the same root cause documented in the Mar 10 entry.
