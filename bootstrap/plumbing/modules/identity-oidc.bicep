@@ -8,10 +8,8 @@ param uamiApplyName string
 
 param githubOrg string
 param moduleRepo string
-param templatesRepo string
 param envPlan string
 param envApply string
-param workflowRefBranch string
 
 resource rg 'Microsoft.Resources/resourceGroups@2022-09-01' = {
   name: identityRgName
@@ -28,10 +26,8 @@ module uami 'uami-oidc.bicep' = {
 
     githubOrg: githubOrg
     moduleRepo: moduleRepo
-    templatesRepo: templatesRepo
     envPlan: envPlan
     envApply: envApply
-    workflowRefBranch: workflowRefBranch
   }
 }
 

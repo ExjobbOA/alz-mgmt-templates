@@ -222,19 +222,19 @@ function New-GitHubEnvironments {
 
 # ─── Step 4: Configure OIDC subject claim ────────────────────────────────────
 function Set-OidcSubjectClaim {
-    Write-Step 'Configuring OIDC subject claim (include job_workflow_ref)'
+    Write-Step 'Configuring OIDC subject claim (environment-only)'
 
-    # By default GitHub's OIDC sub for environment-based jobs is:
+    # GitHub's default OIDC subject for environment-based jobs is:
     #   repo:ORG/REPO:environment:ENV
-    # Our FICs require job_workflow_ref in the subject. This API call opts the
-    # repo into a custom subject format that appends it.
+    # This is exactly the format our FICs now match — reset to default so no
+    # custom claim keys (such as job_workflow_ref) are appended.
     if ($DryRun) {
         Write-Dry "Would configure OIDC sub: repos/$Script:GithubOrg/$Script:ModuleRepo/actions/oidc/customization/sub"
-        Write-Dry '  use_default=false, include_claim_keys=[repo, context, job_workflow_ref]'
+        Write-Dry '  use_default=true'
         return
     }
 
-    $body     = '{"use_default":false,"include_claim_keys":["repo","context","job_workflow_ref"]}'
+    $body     = '{"use_default":true}'
     $tempFile = [System.IO.Path]::GetTempFileName()
     $body | Set-Content $tempFile -Encoding UTF8
 
@@ -248,11 +248,11 @@ function Set-OidcSubjectClaim {
     if ($LASTEXITCODE -ne 0) {
         Write-Warn 'OIDC subject configuration failed. Set it manually:'
         Write-Warn "  gh api --method PUT repos/$Script:GithubOrg/$Script:ModuleRepo/actions/oidc/customization/sub --input <json-file>"
-        Write-Warn '  JSON: {"use_default":false,"include_claim_keys":["repo","context","job_workflow_ref"]}'
+        Write-Warn '  JSON: {"use_default":true}'
         return
     }
 
-    Write-Ok 'OIDC subject claim configured: sub will include repo + context + job_workflow_ref.'
+    Write-Ok 'OIDC subject claim configured: sub will be environment-only (repo:ORG/REPO:environment:ENV).'
 }
 
 # ─── Step 5: Run bootstrap Bicep ─────────────────────────────────────────────
