@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.40.2.10011",
-      "templateHash": "3519657342132624323"
+      "templateHash": "6505658786425408709"
     }
   },
   "parameters": {
@@ -40,7 +40,7 @@
       "type": "string",
       "defaultValue": "alz-mgmt-templates",
       "metadata": {
-        "description": "Templates/engine repo (där workflows ligger)."
+        "description": "Templates/engine repo. Retained for backward compatibility — existing plumbing.bicepparam files may supply this value. No longer used in FIC subjects."
       }
     },
     "envPlan": {
@@ -58,7 +58,7 @@
       "type": "string",
       "defaultValue": "refs/heads/main",
       "metadata": {
-        "description": "Branch som workflows är bundna till i job_workflow_ref."
+        "description": "Workflow branch ref. Retained for backward compatibility — existing plumbing.bicepparam files may supply this value. No longer used in FIC subjects."
       }
     },
     "identityRgName": {
@@ -186,17 +186,11 @@
           "moduleRepo": {
             "value": "[parameters('moduleRepo')]"
           },
-          "templatesRepo": {
-            "value": "[parameters('templatesRepo')]"
-          },
           "envPlan": {
             "value": "[parameters('envPlan')]"
           },
           "envApply": {
             "value": "[parameters('envApply')]"
-          },
-          "workflowRefBranch": {
-            "value": "[parameters('workflowRefBranch')]"
           }
         },
         "template": {
@@ -206,7 +200,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.40.2.10011",
-              "templateHash": "12380262697824739557"
+              "templateHash": "15687439548598960077"
             }
           },
           "parameters": {
@@ -228,16 +222,10 @@
             "moduleRepo": {
               "type": "string"
             },
-            "templatesRepo": {
-              "type": "string"
-            },
             "envPlan": {
               "type": "string"
             },
             "envApply": {
-              "type": "string"
-            },
-            "workflowRefBranch": {
               "type": "string"
             }
           },
@@ -274,17 +262,11 @@
                   "moduleRepo": {
                     "value": "[parameters('moduleRepo')]"
                   },
-                  "templatesRepo": {
-                    "value": "[parameters('templatesRepo')]"
-                  },
                   "envPlan": {
                     "value": "[parameters('envPlan')]"
                   },
                   "envApply": {
                     "value": "[parameters('envApply')]"
-                  },
-                  "workflowRefBranch": {
-                    "value": "[parameters('workflowRefBranch')]"
                   }
                 },
                 "template": {
@@ -294,7 +276,7 @@
                     "_generator": {
                       "name": "bicep",
                       "version": "0.40.2.10011",
-                      "templateHash": "12162058708552971458"
+                      "templateHash": "9633881296220912732"
                     }
                   },
                   "parameters": {
@@ -313,29 +295,18 @@
                     "moduleRepo": {
                       "type": "string"
                     },
-                    "templatesRepo": {
-                      "type": "string"
-                    },
                     "envPlan": {
                       "type": "string"
                     },
                     "envApply": {
-                      "type": "string"
-                    },
-                    "workflowRefBranch": {
                       "type": "string"
                     }
                   },
                   "variables": {
                     "issuer": "https://token.actions.githubusercontent.com",
                     "audience": "api://AzureADTokenExchange",
-                    "workflowCiPath": ".github/workflows/ci-template.yaml",
-                    "workflowCdPath": ".github/workflows/cd-template.yaml",
-                    "workflowRefCi": "[format('{0}/{1}/{2}@{3}', parameters('githubOrg'), parameters('templatesRepo'), variables('workflowCiPath'), parameters('workflowRefBranch'))]",
-                    "workflowRefCd": "[format('{0}/{1}/{2}@{3}', parameters('githubOrg'), parameters('templatesRepo'), variables('workflowCdPath'), parameters('workflowRefBranch'))]",
-                    "subjectCiPlan": "[format('repo:{0}/{1}:environment:{2}:job_workflow_ref:{3}', parameters('githubOrg'), parameters('moduleRepo'), parameters('envPlan'), variables('workflowRefCi'))]",
-                    "subjectCdPlan": "[format('repo:{0}/{1}:environment:{2}:job_workflow_ref:{3}', parameters('githubOrg'), parameters('moduleRepo'), parameters('envPlan'), variables('workflowRefCd'))]",
-                    "subjectCdApply": "[format('repo:{0}/{1}:environment:{2}:job_workflow_ref:{3}', parameters('githubOrg'), parameters('moduleRepo'), parameters('envApply'), variables('workflowRefCd'))]"
+                    "subjectPlan": "[format('repo:{0}/{1}:environment:{2}', parameters('githubOrg'), parameters('moduleRepo'), parameters('envPlan'))]",
+                    "subjectApply": "[format('repo:{0}/{1}:environment:{2}', parameters('githubOrg'), parameters('moduleRepo'), parameters('envApply'))]"
                   },
                   "resources": [
                     {
@@ -353,13 +324,13 @@
                     {
                       "type": "Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials",
                       "apiVersion": "2023-01-31",
-                      "name": "[format('{0}/{1}', parameters('uamiPlanName'), 'ci-plan')]",
+                      "name": "[format('{0}/{1}', parameters('uamiPlanName'), 'github-plan')]",
                       "properties": {
                         "issuer": "[variables('issuer')]",
                         "audiences": [
                           "[variables('audience')]"
                         ],
-                        "subject": "[variables('subjectCiPlan')]"
+                        "subject": "[variables('subjectPlan')]"
                       },
                       "dependsOn": [
                         "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('uamiPlanName'))]"
@@ -368,31 +339,17 @@
                     {
                       "type": "Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials",
                       "apiVersion": "2023-01-31",
-                      "name": "[format('{0}/{1}', parameters('uamiPlanName'), 'cd-plan')]",
+                      "name": "[format('{0}/{1}', parameters('uamiApplyName'), 'github-apply')]",
                       "properties": {
                         "issuer": "[variables('issuer')]",
                         "audiences": [
                           "[variables('audience')]"
                         ],
-                        "subject": "[variables('subjectCdPlan')]"
+                        "subject": "[variables('subjectApply')]"
                       },
                       "dependsOn": [
-                        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials', parameters('uamiPlanName'), 'ci-plan')]"
-                      ]
-                    },
-                    {
-                      "type": "Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials",
-                      "apiVersion": "2023-01-31",
-                      "name": "[format('{0}/{1}', parameters('uamiApplyName'), 'cd-apply')]",
-                      "properties": {
-                        "issuer": "[variables('issuer')]",
-                        "audiences": [
-                          "[variables('audience')]"
-                        ],
-                        "subject": "[variables('subjectCdApply')]"
-                      },
-                      "dependsOn": [
-                        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials', parameters('uamiPlanName'), 'cd-plan')]"
+                        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials', parameters('uamiPlanName'), 'github-plan')]",
+                        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('uamiApplyName'))]"
                       ]
                     }
                   ],
