@@ -346,7 +346,7 @@ function Get-GovernanceScope ([string]$MgId, [string]$ScopeName) {
             Type           = 'policyDefinition'
             Name           = $def.Name
             DisplayName    = (Get-PropSafe $def 'DisplayName')
-            Version        = (Get-PropSafe $def 'Version')
+            Version        = if ($def.properties -and $def.properties.metadata -and $def.properties.metadata.PSObject.Properties['version']) { $def.properties.metadata.version } else { (Get-PropSafe $def 'Version') }
             PolicyRuleHash = $hash
             PolicyRule     = (Get-PropSafe $def 'PolicyRule', 'Properties')
             Metadata       = (Get-PropSafe $def 'Metadata')
