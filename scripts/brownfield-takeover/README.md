@@ -155,41 +155,186 @@ $jsonRoot = Get-ChildItem ./scripts/brownfield-takeover/azgovviz-output -Directo
 Båda scripten är skrivskyddade mot Azure — inga API-anrop, all data kommer från
 AzGovViz JSON-output. Du kan köra om dem utan att autentisera om.
 
-### 4. Granska och committa till tenant-konfigurationsrepot
+### 4. Granska och committa
 
-Genererade filer hamnar i `takeover-fragments/`:
+Se [Granska outputen](#granska-outputen) nedan för hur du läser och städar
+filerna innan du kopierar dem in i tenant-konfigurationsrepot.
+
+---
+
+## Granska outputen
+
+De genererade filerna hamnar i `takeover-fragments/`:
 
 | Fil | Innehåll |
 |-----|----------|
-| `platform.json` | `platform.json`-kandidat med härledda skalärer + defaultvärden för icke-härledbara fält |
-| `platform.json.notes.txt` | Härledningsstatus per fält — vad som kom från brownfield och vad som är default |
-| `override-<mgId>.bicepparam` | `param parPolicyAssignmentParameterOverrides = {...}` per MG-scope, med literala värden från brownfield |
+| `platform.json` | Kandidat med härledda skalärer + defaultvärden för icke-härledbara fält |
+| `platform.json.notes.txt` | Härledningsstatus per fält |
+| `override-<mgId>.bicepparam` | `parPolicyAssignmentParameterOverrides`-block per MG-scope, literalerna från brownfield |
 | `custom-assignments.txt` | Tilldelningar utanför ALZ-biblioteket — informativ lista, ingen åtgärd krävs |
 
-#### 4a. platform.json
+Granskningen har tre delmoment. Ta dem i ordning.
 
-Öppna `takeover-fragments/platform.json.notes.txt` och läs igenom
-härledningsstatusen. Gå sen igenom kandidaten i `platform.json` och granska
-främst:
+### A. Granska `platform.json`
 
-- **Tomma fält.** Vissa arketyp-MG:er kanske inte finns i just denna tenant
-  (vanligt i "simple mode" där `management/connectivity/identity/security`
-  saknas). Scriptet hanterar det automatiskt genom att kollapsa alla
-  `SUBSCRIPTION_ID_*` till `platform`-suben, men verifiera att det stämmer.
-- **`NETWORK_TYPE`.** Default är `hubnetworking`. Bekräfta mot faktisk
-  brownfield-topologi — om kunden kör Virtual WAN byt till `virtualwan`.
-- **`LOCATION_SECONDARY`.** Inte härledbart. Fyll i om DR-geo-par är relevant
-  för engagemanget.
-- **`SUBSCRIPTION_ID_*` när flera prenumerationer finns under samma MG.**
-  Scriptet tar första, vilket oftast är rätt men inte alltid.
+Öppna `platform.json.notes.txt` för härledningsstatus per fält. Kolla sen
+kandidaten mot följande punkter:
+
+| Punkt | Vad du gör |
+|-------|-----------|
+| Tomma `MG_NAME_*` | Vanligt i simple mode där `management/connectivity/identity/security` saknas. Om din engine-template läser dem ändå, fyll i tomma strängar eller konventionsnamn |
+| `NETWORK_TYPE` | Default `hubnetworking`. Byt till `virtualwan` om kunden kör Virtual WAN |
+| `LOCATION_SECONDARY` | Tomt — fyll i om DR-geopar är relevant |
+| `SUBSCRIPTION_ID_*` när flera subs finns under samma MG | Scriptet tar första. Verifiera att det blev rätt för kundens arkitektur |
 
 Kopiera till `alz-mgmt-<tenant>/config/platform.json` när du är nöjd.
 
-#### 4b. Fragment
+### B. Städa overrides
 
-För varje `override-<mgId>.bicepparam`, öppna motsvarande `.bicepparam` i
-tenant-konfigurationsrepot och ersätt det befintliga
-`parPolicyAssignmentParameterOverrides`-blocket:
+**Tumregeln.** Titta på varje parametervärde och fråga: *kan engine veta det här
+utan att veta om min tenant?*
+
+- **Nej** → värdet är nödvändig konfiguration. Behåll.
+- **Ja** → värdet är brus som upprepar ALZ-bibliotekets default. Ta bort.
+
+**Namnprefix avslöjar default-effect** i ALZ-bibliotekets tilldelningar. Det är
+90%-pålitligt och räcker för granskningen:
+
+| Prefix | Default-effect | Vad `effect`-parametern betyder om den finns i overriden |
+|--------|----------------|----------------------------------------------------------|
+| `Audit-*` | `Audit` | Upprepar default → brus |
+| `Deny-*` | `Deny` | Upprepar default → brus |
+| `Deploy-*` | `DeployIfNotExists` | Upprepar default → brus |
+| `Enforce-*` | `Deny` eller initiativ | Troligen brus, verifiera |
+| `Enable-*` | `DeployIfNotExists` | Upprepar default → brus |
+
+Om du är osäker på ett specifikt värde, öppna motsvarande
+`*.alz_policy_definition.json` i `templates/core/governance/lib/alz/` och
+jämför mot `properties.parameters.<namn>.defaultValue`.
+
+**Tre konkreta exempel från Sylaviken:**
+
+*Nödvändig override — behåll:*
+```bicep
+'Deploy-AzActivity-Log': {
+  parameters: {
+    logAnalytics: {
+      value: '/subscriptions/6f05.../law-alz-swedencentral'  // LAW-ID, engine kan inte gissa
+    }
+  }
+}
+```
+
+*Brus — hela blocket kan tas bort:*
+```bicep
+'Audit-TrustedLaunch': {
+  parameters: {
+    effect: {
+      value: 'Audit'   // Audit-prefix → default är redan Audit → upprepning
+    }
+  }
+}
+```
+
+*Delvis brus — behåll LAW, ta bort `enableAscFor*`-upprepningar om de matchar
+definitionens default:*
+```bicep
+'Deploy-MDFC-Config-H224': {
+  parameters: {
+    logAnalytics: { value: '/subscriptions/...' }     // behåll
+    emailSecurityContact: { value: 'test@ex.com' }    // behåll
+    enableAscForAppServices: { value: 'Disabled' }    // granska mot def.default — troligen brus
+    enableAscForArm:        { value: 'Disabled' }    // samma
+    // ... osv
+  }
+}
+```
+
+### C. Parametrisera matchande literaler
+
+När en literal värde matchar vad engine skulle konstruera från `platform.json`,
+byt ut den mot variabelreferensen så att overriden överlever framtida
+`platform.json`-ändringar. Så här ser det ut i praktiken:
+
+**Före** (det verktyget emitterar):
+```bicep
+'Deploy-AzActivity-Log': {
+  parameters: {
+    logAnalytics: {
+      value: '/subscriptions/6f051987-3995-4c82-abb3-90ba101a0ab4/resourceGroups/rg-alz-logging-swedencentral/providers/Microsoft.OperationalInsights/workspaces/law-alz-swedencentral'
+    }
+  }
+}
+```
+
+**Efter** (vad du committar — om LAW-sökvägen matchar konventionen):
+```bicep
+'Deploy-AzActivity-Log': {
+  parameters: {
+    logAnalytics: {
+      value: lawResourceId
+    }
+  }
+}
+```
+
+`lawResourceId` är redan deklarerad som `var` högst upp i `int-root.bicepparam`
+och konstrueras från `SUBSCRIPTION_ID_MANAGEMENT`, `LOCATION` och namn-
+konventionen. Samma sak för `location` (→ `LOCATION_PRIMARY`) och
+`securityEmail` (→ `SECURITY_CONTACT_EMAIL`).
+
+**Jämförelsen du gör** mellan literal och variabel:
+
+| Literal innehåller | Jämför med | Matchar? |
+|--------------------|-----------|----------|
+| `/subscriptions/<sub>/resourceGroups/rg-alz-logging-<loc>/providers/Microsoft.OperationalInsights/workspaces/law-alz-<loc>` | `lawResourceId` | Ja → byt ut |
+| `swedencentral` | `location` | Ja → byt ut |
+| `rg-alz-asc-swedencentral` | `'rg-alz-asc-${location}'` | Ja → byt ut |
+| `test@example.com` | `securityEmail` (från platform.json) | Ja → byt ut |
+
+### D. När resurs-ID:n inte följer ALZ-konventionen
+
+I Sylaviken matchar alla resursnamn konventionen (`law-alz-swedencentral`,
+`dcr-alz-changetracking-swedencentral` osv.) eftersom portalen använde ALZ-
+defaults. I en riktig kund-brownfield kan det se helt annorlunda ut — LAW:en
+heter kanske `log-prod-sec-01` i en RG som heter `rg-monitoring`, och att byta
+namn på en Log Analytics workspace kräver omdeploy och historikförlust.
+
+Du har två val, välj baserat på omfattning:
+
+**Få resurser utanför konventionen → litera­lera i fragment.** Lämna den
+extraherade literala resurs-ID:n som den är i fragmentet. Varje referens till
+resursen blir då hårdkodad, men det är en liten mängd duplikat.
+
+**Flera policies refererar samma resurs → patcha var-deklarationen.**
+Öppna `alz-mgmt-<tenant>/config/core/governance/mgmt-groups/int-root.bicepparam`
+och byt ut `var lawResourceId = ...`-raden mot kundens faktiska sökväg:
+
+```bicep
+// Före
+var lawResourceId = '/subscriptions/${subIdMgmt}/resourceGroups/${rgLogging}/providers/Microsoft.OperationalInsights/workspaces/${lawName}'
+
+// Efter (kundens LAW utanför konventionen)
+var lawResourceId = '/subscriptions/xxxxxxxx-xxxx/resourceGroups/rg-monitoring/providers/Microsoft.OperationalInsights/workspaces/log-prod-sec-01'
+```
+
+Sen kan overriden i fragmentet fortsätta referera `lawResourceId` som variabel,
+och alla tilldelningar som pekar på LAW:en följer med automatiskt. En patch,
+många referenser uppdaterade.
+
+Samma logik gäller `rgLogging`, `lawName`, `uamiName`, DCR-namnen — alla är
+`var`-deklarationer i `int-root.bicepparam` som kan patchas individuellt.
+
+### E. custom-assignments.txt
+
+Listar tilldelningar utanför ALZ-biblioteket. Engine-stacken rör inte dessa vid
+takeover, så de överlever orörda. Om du vill att engine ska hantera dem
+framöver kan du lägga in dem i tenant-repots `customerPolicyAssignments`-array
+— annars behöver du inte göra något.
+
+---
+
+## Fragment-scopes och deras målfiler
 
 | Genererad fil | Mål i `alz-mgmt-<tenant>/` |
 |---------------|----------------------------|
@@ -203,31 +348,7 @@ tenant-konfigurationsrepot och ersätt det befintliga
 | `override-online.bicepparam` | `config/core/governance/mgmt-groups/landingzones/landingzones-online/main.bicepparam` |
 | `override-sandbox.bicepparam` | `config/core/governance/mgmt-groups/sandbox/main.bicepparam` |
 
-Bara filer för scopes som faktiskt hade ALZ-biblioteksmatchande tilldelningar
-genereras.
-
-Innan commit, gå igenom varje fragment och avgör per värde:
-
-- **Matchar engine-konventionen** (LAW-sökväg som `lawResourceId` skulle
-  konstruera från `platform.json`, location som matchar `LOCATION_PRIMARY`,
-  e-post som matchar `SECURITY_CONTACT_EMAIL`) → ersätt det literala värdet med
-  variabelreferensen (`lawResourceId`, `location`, `securityEmail`) så att
-  overriden överlever framtida `platform.json`-ändringar.
-- **Matchar inte** (fel RG-namn, fel LAW-namn, annan region) → behåll det
-  literala värdet. Bestäm separat om resursen ska migreras till
-  ALZ-konventionsnamn under eller efter takeover.
-- **Uppenbart brus** (parametrar där värdet bara upprepar ALZ-bibliotekets
-  default — t.ex. `effect: 'Audit'` på en Audit-tilldelning) → ta bort. Scriptet
-  bevarar alla brownfield-värden verbatim utan att jämföra mot biblioteket,
-  eftersom "är det här värdet brus eller medveten portal-drift" är en
-  omdömesfråga som inte låter sig automatiseras utan mer kontext.
-
-#### 4c. custom-assignments.txt
-
-Listar tilldelningar utanför ALZ-biblioteket. Engine-stacken rör inte dessa vid
-takeover, så de överlever orörda oavsett vad du gör. Om du vill att engine ska
-hantera dem framöver kan du lägga in dem i tenant-repots
-`customerPolicyAssignments`-array — annars behöver du inte göra något.
+Bara filer för scopes med ALZ-biblioteksmatchande tilldelningar genereras.
 
 ---
 
@@ -237,8 +358,8 @@ hantera dem framöver kan du lägga in dem i tenant-repots
 
 | Parameter | Obligatorisk | Beskrivning |
 |-----------|--------------|-------------|
-| `-AzGovVizJsonPath` | **Ja** | Sökväg till `JSON_<root>_<timestamp>/`-mappen producerad av `AzGovVizParallel.ps1` |
-| `-OutputDirectory` | **Ja** | Där `platform.json`-kandidaten skrivs; skapas om den saknas |
+| `-AzGovVizJsonPath` | **Ja** | Sökväg till `JSON_<root>_<timestamp>/`-mappen |
+| `-OutputDirectory` | **Ja** | Där `platform.json`-kandidaten skrivs |
 
 ### Härledningslogik
 
@@ -270,19 +391,17 @@ hantera dem framöver kan du lägga in dem i tenant-repots
 |-----------|--------------|-------------|
 | `-AzGovVizJsonPath` | **Ja** | Sökväg till `JSON_<root>_<timestamp>/`-mappen |
 | `-OutputDirectory` | **Ja** | Där fragment-filerna skrivs |
-| `-AlzLibraryPath` | Nej | Sökväg till `*.alz_policy_assignment.json`-filerna. När den anges genereras bara ALZ-biblioteksmatchande tilldelningsnamn till fragment; allt annat hamnar i `custom-assignments.txt`. **Starkt rekommenderad** — utan den läcker anpassade tenantspecifika tilldelningar in i fragment-outputen. |
+| `-AlzLibraryPath` | Nej | Sökväg till `*.alz_policy_assignment.json`-filerna. När den anges genereras bara ALZ-biblioteksmatchande tilldelningsnamn till fragment; allt annat hamnar i `custom-assignments.txt`. **Starkt rekommenderad.** |
 
 ### Driftsanteckningar
 
-- **Idempotent.** Varje körning skriver över output-mappen. Säkert att köra om.
+- **Idempotent.** Varje körning skriver över output-mappen.
 - **Skrivskyddat mot Azure.** Inga API-anrop.
-- **Bevarande av literala värden.** Parametervärden genereras exakt som de
-  ser ut i brownfield-tenanten. Ingen inferens, ingen substitution, ingen
-  jämförelse mot bibliotekets default. Städning och parametrering är
-  operatörens beslut under granskning.
-- **Tomma parametrar hoppas över.** Tilldelningar där `properties.parameters` är
-  tom exkluderas — engine-policydefinitionernas defaultvärden gäller och ingen
-  override behövs.
+- **Bevarande av literala värden.** Parametervärden emitteras verbatim från
+  brownfield. Ingen inferens, ingen jämförelse mot bibliotekets default.
+  Städning och parametrering är operatörens beslut under granskning.
+- **Tomma parametrar hoppas över.** Tilldelningar där `properties.parameters`
+  är tom exkluderas.
 
 ---
 
@@ -290,19 +409,18 @@ hantera dem framöver kan du lägga in dem i tenant-repots
 
 ### AzGovViz skapar inte output-mappen
 
-Du får ett `path ... does not exist - please create it!`-fel. Skapa mappen
-manuellt innan körning (se steg 1 ovan).
+Du får `path ... does not exist - please create it!`. Skapa mappen manuellt
+(se steg 1).
 
 ### Platshållare i kommandot
 
-Om du kopierar in `'<int-root-mg-id>'` bokstavligen istället för att byta ut det
-mot det faktiska MG-namnet får du ett `404 NotFound`-fel från ARM. Kör
-`Get-AzManagementGroup | Select-Object Name, DisplayName` för att hitta rätt
-namn.
+Om du kopierar in `'<int-root-mg-id>'` bokstavligen får du `404 NotFound` från
+ARM. Kör `Get-AzManagementGroup | Select-Object Name, DisplayName` för att
+hitta rätt namn.
 
 ### Simple mode vs hybrid mode
 
-En portaldriftsatt ALZ i "simple mode" har bara `platform`-MG:n utan
+En portaldriftsatt ALZ i simple mode har bara `platform`-MG:n utan
 `management/connectivity/identity/security`-underbarnen. Prenumerationen ligger
 direkt under `platform`, inte under `management`. `Build-PlatformJson.ps1`
 upptäcker detta automatiskt och kollapsar alla `SUBSCRIPTION_ID_*` till
@@ -314,10 +432,10 @@ platform-suben.
 
 | Fråga | Var det hanteras |
 |-------|------------------|
-| Infrastruktur-resurs-ID:n (hub-VNet, Firewall, DNS-zoner) | Engine konstruerar dem från `platform.json`-skalärer i `.bicepparam`-filer; redigera dem direkt om kundens resurser inte följer ALZ-namnkonventionen |
-| Namnkollisioner för policydefinitioner | Flaggas inte — engine skriver över biblioteksnamngivna anpassade definitioner vid första deployen, vilket är rätt beteende för takeover |
+| Infrastruktur-resurs-ID:n (hub-VNet, Firewall, DNS-zoner) | Engine konstruerar dem från `platform.json`-skalärer i `.bicepparam`-filer. När konventionen inte stämmer, patcha `var`-deklarationerna i `int-root.bicepparam` — se [avsnitt D](#d-när-resurs-idn-inte-följer-alz-konventionen) |
+| Namnkollisioner för policydefinitioner | Flaggas inte — engine skriver över biblioteksnamngivna anpassade definitioner vid första deployen |
 | Rolltilldelningar, blueprints, resurslås | Engine driftsätter sina egna; befintliga utanför stackens hanterade set lämnas orörda |
-| Parametrisering av literala värden till `lawResourceId`/`location`/`securityEmail` | Manuell operatörsuppgift under granskning — kräver omdöme om värdet matchar engine-konventionen |
+| Automatisk parametrisering till variabelreferenser | Manuell operatörsuppgift — kräver omdöme om värdet matchar engine-konventionen, se [avsnitt C](#c-parametrisera-matchande-literaler) |
 
 Se `../README.md` för den fullständiga examensarbets-kontexten om varför
 in-place-takeover-strategin kollapsar större delen av den traditionella
@@ -329,8 +447,7 @@ brownfield-auditerings-ytan.
 
 Output-mapparna innehåller tenantspecifik data (subscription-ID:n,
 LAW-resurs-ID:n, säkerhetskontakt-e-postadresser) som **aldrig** får committas
-till engine-repot. Den hör bara hemma i tenant-konfigurationsrepot, efter
-operatörens granskning.
+till engine-repot.
 
 Lägg till i rot-`.gitignore`:
 
