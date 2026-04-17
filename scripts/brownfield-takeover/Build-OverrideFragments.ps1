@@ -324,9 +324,10 @@ foreach ($grp in $byMg) {
 if ($customAssignments.Count -gt 0) {
     $customFile = Join-Path $OutputDirectory 'custom-assignments.txt'
     $lines = [System.Collections.Generic.List[string]]::new()
-    [void]$lines.Add('# Assignments at MG scopes that are NOT in the ALZ library.')
-    [void]$lines.Add('# These are NOT emitted into the parPolicyAssignmentParameterOverrides fragments.')
-    [void]$lines.Add('# Review per-assignment: migrate into tenant-repo customPolicyAssignments, or drop.')
+    [void]$lines.Add('# Tilldelningar vid MG-scopes som inte finns i ALZ-biblioteket.')
+    [void]$lines.Add('# Engine-stacken rör inte dessa vid takeover — de överlever orörda.')
+    [void]$lines.Add('# Om du vill att engine ska hantera dem framöver, lägg in dem i')
+    [void]$lines.Add("# tenant-repots customerPolicyAssignments. Annars — gör ingenting.")
     [void]$lines.Add('')
     [void]$lines.Add("MgId`tAssignmentName")
     foreach ($a in ($customAssignments | Sort-Object MgId, Name)) {
