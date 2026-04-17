@@ -5,3 +5,5 @@ state-snapshots/state-sylaviken-brownfield.json
 compare-output.txt
 compare-output-detailed.txt
 deny-diff-report.html
+scripts/brownfield-takeover/azgovviz-output/
+scripts/brownfield-takeover/takeover-fragments/
