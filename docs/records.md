@@ -1464,3 +1464,158 @@ Engine repo (`alz-mgmt-templates`) tagged at `v1.0.0` to mark the end of iterati
 **Workflow pinning:** `ci.yaml` and `cd.yaml` updated to reference `@v1.0.0` instead of `@main`, and `platform_ref` in `cd.yaml` set to `v1.0.0`. This pins the config repo to the stable iteration 1 engine — template upgrades require an explicit bump in both files.
 
 **DDoS effect override (`platform-connectivity/main.bicepparam`):** The `Enable-DDoS-VNET` override block was missing the `effect` parameter. Only `ddosPlan` was set, leaving the policy's default `Modify` effect active with the placeholder DDoS plan ID. Added `effect: { value: 'Audit' }` to match the overrides already present in `platform/main.bicepparam` and `landingzones/main.bicepparam`. Without this, a full-mode connectivity deployment would fail with `LinkedAuthorizationFailed` — the same root cause documented in the Mar 10 entry.
+
+---
+
+## Apr 17: Brownfield Tooling Collapse — AzGovViz Adoption & Synthesis-Only Rewrite
+
+### Context
+
+Jesper introduced Azure Governance Visualizer (AzGovViz) during a review. Initial framing was "does this replace Export-BrownfieldState + Compare-BrownfieldState?" A deeper scope-review of what in-place takeover actually requires ended with a full rewrite of the brownfield toolchain.
+
+### What the existing scripts actually did
+
+`Export-BrownfieldState.ps1` (1482 lines) captured MG hierarchy, policy definitions, policy set definitions, policy assignments (MG-scope and sub-scope), custom role definitions, role assignments, policy exemptions, blueprint assignments, Defender for Cloud state, high-privilege identities, resource locks, infrastructure resources (LAW, VNets, firewalls, DNS zones, DCRs, UAMIs, etc.) — everything ARM can report.
+
+`Compare-BrownfieldState.ps1` (2756 lines) classified each captured resource against the ALZ library, producing:
+- Section 1: structural overview
+- Section 2: library comparison with SHA256 rule-hash drift detection, classifying policies as Standard, StandardMismatch, Deprecated, AMBA, NonStandard; Deny mismatches split into Assigned (active risk) and Unassigned
+- Section 3/3b: assignment inventory, sub-level assignments and exemptions
+- Section 4/4b/4c: RBAC summary, blueprint review, CI/CD identity audit
+- Section 5/5b/5c: infrastructure review, Defender for Cloud review, tag schema assessment
+- Section 6: config extraction — regex scan of assignment parameters to collect LAW IDs, emails, DCR/UAMI resource IDs, locations, RG names as candidate `platform.json` overrides
+- Section 7: risk summary with traffic-light gating (RED/YELLOW/GREEN)
+
+`diff-deny-rules.py` (840 lines) generated HTML side-by-side diffs of Deny-effect rule mismatches.
+
+Total: 5078 lines of brownfield-specific PowerShell and Python.
+
+### Why it grew that big
+
+Scope creep driven by an imagined risk model. The original fear was that takeover would cause outages — existing customer resources getting overwritten, production breaking. Each section was insurance against a specific failure mode. Hash drift detection guarded against "ALZ library changed under us." Assigned/unassigned split guarded against "Deny policy blocks existing workload." Lock classification guarded against "engine cannot deploy because resource is locked." Config extraction automated the tedious part of migrating parameter values.
+
+The scripts worked. They produced accurate audits. But they were insurance against a risk the actual deployment model already handles.
+
+### What in-place takeover actually needs
+
+Deployment stacks with `deleteResources` only manage resources declared in the stack. Custom policies, custom role definitions, resources outside the stack's managed set — all untouched. Definitions with the same name as an ALZ-library object get overwritten on first deploy, which is the intended behaviour for takeover.
+
+Applying the filter "if this section surfaced something bad, what would I do?":
+- **Section 2 hash drift → overwrite anyway.** Portal-deployed library objects that differ from the current library version are almost always stale defaults or portal-era edits with no business rationale. Engine is authoritative.
+- **Section 3 assignment inventory → engine redeploys.** No decision.
+- **Section 3b sub-level exemptions → overwrite or migrate blindly.**
+- **Section 4 RBAC → engine's RBAC wins.** Custom role assignments outside the stack survive.
+- **Section 4b blueprints → deprecated anyway.**
+- **Section 4c CI/CD identity → we are adding new ones.**
+- **Section 5 infrastructure → resource IDs genuinely needed for `platform.json`.** Keep the extraction, drop the audit framing.
+- **Section 5b/5c/7 → observability, not tooling.** Belongs in a governance dashboard, not a deployment pipeline.
+- **Section 6 config extraction → actual takeover input.** Keep.
+
+The minimal thing takeover needs reduces to two artifacts: the `platform.json` scalars (sub-IDs, MG-name overrides, location, security email) and `parPolicyAssignmentParameterOverrides` with the preserved parameter values. Everything else is either handled by stacks' scope semantics or is information without an action.
+
+### AzGovViz evaluation
+
+AzGovViz is a 37k-line governance reporting tool maintained by Julian Hayward at Microsoft. It polls ARM + Graph and produces HTML/CSV/JSON of MG hierarchy, policies, RBAC, PIM, PSRule findings, etc. Its per-assignment JSON output under `JSON_<root>/Assignments/PolicyAssignments/Mg/**/*.json` contains the raw ARM response including `properties.parameters` — the exact data Section 6's regex scan reconstructed painfully from ARM responses.
+
+Overlap with the existing scripts:
+- `-ALZPolicyAssignmentsChecker` does roughly what Compare Section 2's assignment inventory does, with upstream-maintained ALZ reference data
+- Full governance inventory (definitions, assignments, RBAC) is produced as a side effect
+- PSRule integration, PIM eligibility, orphaned resource detection — capabilities we did not have
+
+Gaps:
+- No concept of deployment stacks
+- No differentiation between "engine-owned" and "customer-owned" at takeover-relevant granularity
+- No synthesis into engine-consumable form (`platform.json`, `.bicepparam` fragments)
+- Output is per-HTML report, not pipeline-consumable
+
+The honest picture after the evaluation: AzGovViz handles the *discovery* cleanly, and what we actually need to build is the *synthesis* step that translates discovery output into engine configuration.
+
+### Decision
+
+Adopt AzGovViz as the upstream discovery layer. Rewrite the synthesis tooling as two small scripts with tight scope.
+
+### New tooling
+
+Delete: `Export-BrownfieldState.ps1`, `Compare-BrownfieldState.ps1`, `diff-deny-rules.py`. Net −5078 lines.
+
+Add: `scripts/brownfield-takeover/` containing:
+
+**`Build-OverrideFragments.ps1`** (~340 lines). Walks AzGovViz's MG-scope assignment JSONs, filters to ALZ-library-known assignment names (via `-AlzLibraryPath`), groups by MG, emits one `override-<mgId>.bicepparam` per scope with a complete `param parPolicyAssignmentParameterOverrides = {...}` block. Non-library assignments listed informationally in `custom-assignments.txt`.
+
+Design choice: literal values are emitted verbatim — no inference, no substitution, no default-comparison against the library. If the portal set `effect: 'Audit'` on an `Audit-*` assignment (which is the library default), that appears in the output as a literal override. Cleanup is a manual operator step during review, guided by the prefix convention (`Audit-*` → default `Audit`, `Deny-*` → default `Deny`, etc.). The rationale: "is this a noise override or a meaningful portal-time override?" is a judgment call the tool cannot automate without more context, and drift-filtering silently is worse than requiring manual review.
+
+**`Build-PlatformJson.ps1`** (~340 lines). Reads AzGovViz's tenant tree + per-MG assignments. Derives:
+- `INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID` from the AzGovViz input argument
+- `MANAGEMENT_GROUP_ID` from int-root's `mgParentId`
+- `PLATFORM_MODE` — `simple` if `management/connectivity/identity/security` MGs are absent, else `hybrid`
+- `MG_NAME_*` by normalising child IDs under the expected parent (uses the same normalisation logic as the old Export script)
+- `SUBSCRIPTION_ID_*` from first subscription placed directly under the respective MG; in simple mode, collapses all five to the platform sub
+- `LOCATION`/`LOCATION_PRIMARY` from the modal Azure-region string across assignment parameters
+- `SECURITY_CONTACT_EMAIL` from `Deploy-MDFC-Config-*.emailSecurityContact`, falling back to `Deploy-SvcHealth-BuiltIn.actionGroupEmail`
+
+Defaults (not derivable): `NETWORK_TYPE = 'hubnetworking'`, `ENABLE_TELEMETRY = 'true'`, `LOCATION_SECONDARY = ''`. Operator adjusts during review.
+
+Both scripts are read-only against Azure — zero API calls, pure JSON-to-JSON/bicepparam transformation. Can be re-run against an existing AzGovViz dump without reauthentication.
+
+### AzGovViz hosting
+
+Not vendored into the repo. README instructs the operator to clone `Azure/Azure-Governance-Visualizer` as a sibling directory. Rationale: vendoring drags in 37k lines of upstream code, creates unclear version-bump ownership, and MIT-compliance overhead that's not worth it for a tool we explicitly point the operator at with a link. Keeping it external makes the attribution boundary crisp — what's ours vs what's Julian Hayward's — which matters for the thesis contribution claim.
+
+Recommended AzGovViz invocation for takeover synthesis (documented in `scripts/brownfield-takeover/README.md`):
+```
+./pwsh/AzGovVizParallel.ps1 -ManagementGroupId '<int-root>' \
+    -OutputPath <path> \
+    -NoMDfCSecureScore -NoPolicyComplianceStates \
+    -NoResourceDiagnosticsPolicyLifecycle -NoPIMEligibility \
+    -NoResources -NoCsvExport
+```
+The `-No*` flags suppress everything not consumed by the synthesis scripts. `-NoResources` is the main runtime saver — skips the per-resource scan that dominates AzGovViz execution time on tenants with real workloads.
+
+### Verification against Sylaviken
+
+Ran AzGovViz + both new scripts against Sylaviken. Fragment extraction matched the hand-written `parPolicyAssignmentParameterOverrides` in `alz-mgmt-oskar/config/core/governance/mgmt-groups/int-root.bicepparam` for the four assignments Oskar had maintained (`Deploy-MDFC-Config-H224`, `Deploy-AzActivity-Log`, `Deploy-Diag-LogsCat`, `Deploy-SvcHealth-BuiltIn`).
+
+Three categories of difference surfaced, all informative:
+
+1. **Noise** — `Audit-*` and `Deny-*` assignments with `effect` values that just echo the library default. Portal-driftsatt artefact. Operator removes during review.
+2. **Actual drift** — `Deploy-MDFC-Config-H224` had 11 additional `enableAscFor*: 'Disabled'` parameters not present in the hand-written override. Either portal defaults all MDFC plans to Disabled, or Sylaviken's security posture was intentionally relaxed. Captured by the tool, flagged for review — exactly the case where literal preservation pays off.
+3. **Misplaced override in Oskar's manual config** — `Deploy-AzSqlDb-Auditing` appeared in Oskar's `int-root.bicepparam` but is actually assigned at `landingzones` scope. The tool correctly placed it in `override-landingzones.bicepparam`. Oskar's manual config had a scope bug the tool surfaced by being mechanical.
+
+`platform.json` output matched Oskar's hand-written version exactly after simple-mode detection (all five `SUBSCRIPTION_ID_*` collapsed to the same GUID, `PLATFORM_MODE: 'simple'`, all arketyp names present, `LOCATION: 'swedencentral'`, `SECURITY_CONTACT_EMAIL: 'test@example.com'`).
+
+### Gotchas discovered during Sylaviken test
+
+- AzGovViz does not create its own `-OutputPath` directory; operator must `New-Item` first or deploy fails with "path does not exist".
+- If operator copy-pastes the example invocation without replacing `'<int-root-mg-id>'`, ARM returns `404 NotFound` on the placeholder string. README now names this explicitly.
+- Simple mode hierarchies had to be detected explicitly — initial `SUBSCRIPTION_ID_*` fallback logic assumed hybrid mode and produced empty values for management/connectivity/identity/security. Fix: detect simple mode by absence of the four platform child MGs, collapse all sub references to the platform sub.
+- Strict mode + `Get-ChildItem` returning a single item: `.Count` throws. Wrapped result in `@(...)` to force array.
+
+### Out of scope for the new tool
+
+Retained as operator manual steps, documented in README:
+- Parametrisation of literal values to `lawResourceId`/`location`/`securityEmail` when they match engine convention — judgment call, not automatable
+- Resource-ID convention breaks (customer LAW named `log-prod-sec-01` instead of `law-alz-<loc>`) — operator patches the `var lawResourceId = ...` declaration in tenant-repo's `int-root.bicepparam`, which propagates through all overrides that reference the variable. One patch, many references updated.
+- MI-remediation window during assignment redeployment — system-assigned managed identities get a new `principalId` on every redeploy. Existing role assignments pointing at the old principal become orphaned until ARM propagates the new ones. Not a tooling problem; flagged as operational concern requiring post-deploy DINE-remediation verification on first takeover against a new tenant.
+
+### Thesis implications
+
+K10/T7/T8 contribution claim shifts from "custom brownfield auditor" to "synthesis tool bridging AzGovViz discovery and engine configuration." That is a tighter, more defensible claim — the contribution is the transformation step, not the discovery or the execution.
+
+Methodologically, the scope reduction is itself a finding: the in-place takeover strategy combined with Deployment Stacks' scope semantics collapses most of what traditional brownfield-audit tooling concerns itself with. The pre-deploy risk surface is smaller than a naive reading of ARM's capabilities would suggest. Writing this up as part of the discussion chapter strengthens the methodological narrative more than reporting a 4000-line tool would.
+
+### Files
+
+```
+scripts/brownfield-takeover/
+├── README.md                      (Swedish; granskning-walkthrough with examples)
+├── Build-PlatformJson.ps1
+└── Build-OverrideFragments.ps1
+```
+
+`.gitignore` additions (added to root):
+```
+scripts/brownfield-takeover/azgovviz-output/
+scripts/brownfield-takeover/takeover-fragments/
+```
+
+Both output directories contain tenant-specific data (subscription IDs, LAW resource IDs, security contact emails) that belongs only in the tenant config repo after operator review.
