@@ -222,9 +222,11 @@ var alzPolicySetDefsJson = [
   loadJsonContent('../../lib/alz/Enforce-ALZ-Sandbox.alz_policy_set_definition.json')
   loadJsonContent('../../lib/alz/Enforce-Backup.alz_policy_set_definition.json')
   loadJsonContent('../../lib/alz/Enforce-Encryption-CMK_20250218.alz_policy_set_definition.json')
+  /* comment out these because they are breaking
   loadJsonContent('../../lib/alz/Enforce-EncryptTransit_20240509.alz_policy_set_definition.json')
   loadJsonContent('../../lib/alz/Enforce-EncryptTransit_20241211.alz_policy_set_definition.json')
   loadJsonContent('../../lib/alz/Enforce-EncryptTransit.alz_policy_set_definition.json')
+  */
   loadJsonContent('../../lib/alz/Enforce-Guardrails-APIM.alz_policy_set_definition.json')
   loadJsonContent('../../lib/alz/Enforce-Guardrails-AppServices.alz_policy_set_definition.json')
   loadJsonContent('../../lib/alz/Enforce-Guardrails-Automation.alz_policy_set_definition.json')
