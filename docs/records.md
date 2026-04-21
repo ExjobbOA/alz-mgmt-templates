@@ -1663,3 +1663,7 @@ docs/brownfield-feature-plan.md                 (describes streamlined-away tool
 ### Rationale for the aggressive cleanup
 
 The thesis evaluation depends on `tests/` being the single canonical source for empirical evidence. Mixing old iteration-1 test records into the same repo creates ambiguity about which artifacts back which claims. Treating everything outside `tests/` and `records.md` as ephemeral also forces discipline — if a doc matters long-term it goes into records.md or the thesis itself; if it's a working draft, it can live in a branch or a local scratch file but shouldn't accumulate in `main`.
+
+## April 21
+
+In order to produce a baseline will still using the old library version we have needed to remove the broken policies from the our library aswell as comment out them from the loadjsoncontent part of int-root.bicep
