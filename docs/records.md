@@ -1619,3 +1619,47 @@ scripts/brownfield-takeover/takeover-fragments/
 ```
 
 Both output directories contain tenant-specific data (subscription IDs, LAW resource IDs, security contact emails) that belongs only in the tenant config repo after operator review.
+
+## Apr 20: T10 Reframe — Forced Bump as Methodology, Plus Repo Cleanup
+
+### T10 under production pressure
+
+The T10 (K11 Livscykeluppdatering) protocol drafted earlier assumed a clean baseline, a planned library bump, and bundled the `DetachAll` → `DeleteAll` flip into the same run as Phase 1. Reality: the `Enforce-EncryptTransit` case-sensitivity bug (`deny` vs `Deny`, `AKSIngressHttpsOnlyEffect` parameter default) kept blocking deploys across multiple 2025.x library versions. The tenant repo had been carrying a `managementGroupExcludedPolicyAssignments: ['Enforce-EncryptTransit']` workaround as a result. When the upstream fix landed in `2026.04.0`, the bump was no longer optional — production pressure forced it.
+
+Initial instinct was to treat this as contamination of the test: degraded baseline, mixed motivations, not a clean experiment. Reversed the framing after thinking through what K11 actually measures. K11 is explicitly about operator absorption of upstream changes, grounded in Kumara et al. (2021) and Alonso et al. (2023) on configuration drift and code/infrastructure divergence. A fabricated bump against a clean baseline would have measured *capability*; a forced bump under production pressure measures the *mechanism working under the exact conditions it exists to address*. Ecological validity goes up, not down. The degraded baseline isn't a flaw — it's the condition.
+
+Reframed T10.md accordingly:
+
+- Added "Metodologisk not — körningens kontext" at the top establishing run conditions honestly
+- Dropped Phase 1 (DeleteAll flip) from T10. Moved to **T10b** — separate protocol, triggered by next patch bump, isolates the auto-cleanup variable from library-content changes. Better experimental design than confounding two independent variables in one run.
+- Phase 0.1 rewritten to document degraded baseline as baseline. "Last CD run: failed" is a valid pre-state.
+- Added Phase 3.7 "Minimum viable evidence" checklist — baseline snapshot, commit SHA, tag URL, CD run URL, what-if screenshot, CD log screenshot, post-deploy snapshot, portal assignment screenshots. Everything else is nice-to-have.
+- Critical evidence capture points marked *icke-förhandlingsbar* — the before/after state snapshots especially; without them there is no delta to report.
+- Findings rewritten. Finding 1: upstream bug lifespan as illustration of K11's necessity. Finding 2: forced bump validates mechanism more strongly than planned bump would have. Finding 3: `DetachAll` default/documentation gap deferred to T10b rather than folded in.
+- Appendix C as T10b placeholder (also T10c placeholder for AVM module bump, same lifecycle mechanism, different attribution).
+
+### Numbering digression
+
+Briefly went down a rabbit hole of whether to renumber T10 → T9 (reasoning: T1–T9 was the sequential test range I had cached). Corrected on reference to the chapter 4 criterion-mapping draft: ten test scenarios exist (T1–T10), the gap is that K3 has no dedicated T-number because it's verified architecturally across all scenarios. T-numbering runs 1–10 contiguously; K-numbering is 1–11 with K3 not mapped to a single test. T10 stays T10.
+
+### Repo cleanup — docs/ consolidated to records.md
+
+Going-forward convention: all test documentation lives in `tests/`. `docs/records.md` remains as thesis logbook. Everything else in `docs/` was ad-hoc artifacts from earlier iterations — iteration-1 empiri records, iteration-1 testplans for my and Alen's tenants, iteration-2 planning docs, an early brownfield brainstorm stub, and the pre-rewrite copy of T10. `state-snapshots/` held JSON exports from those earlier runs, referenced only by the docs being deleted.
+
+Deleted on `chore/cleanup-obsolete-docs`:
+state-snapshots/                                (10 JSON files, ~2.9MB)
+docs/screenshots/                               (17 del1/del3/del4 PNGs)
+docs/empiri.md                                  (iteration-1 T1–T4/T6/T9 run record)
+docs/testing.md                                 (iteration-1 testplan)
+docs/testplan-alen.md                           (iteration-1 Alen tenant testplan)
+docs/iteration2-tests.md                        (superseded by tests/T10.md)
+docs/iteration2-plan.md                         (completed planning doc)
+docs/iteration2-repo-architecture-tradeoff.md   (completed planning doc)
+docs/brownfield.md                              (early brainstorm stub)
+docs/brownfield-feature-plan.md                 (describes streamlined-away tooling)
+
+`docs/` post-cleanup contains only `records.md`. Verified no references from `records.md` to any deleted file before running the deletions.
+
+### Rationale for the aggressive cleanup
+
+The thesis evaluation depends on `tests/` being the single canonical source for empirical evidence. Mixing old iteration-1 test records into the same repo creates ambiguity about which artifacts back which claims. Treating everything outside `tests/` and `records.md` as ephemeral also forces discipline — if a doc matters long-term it goes into records.md or the thesis itself; if it's a working draft, it can live in a branch or a local scratch file but shouldn't accumulate in `main`.
