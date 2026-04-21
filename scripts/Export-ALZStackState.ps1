@@ -28,6 +28,8 @@ $mgStacks = @(
     @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-landingzones-online" }
     @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-sandbox" }
     @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-decommissioned" }
+    @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-platform-rbac" }
+    @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-landingzones-rbac" }
 )
 
 $subStacks = @(
