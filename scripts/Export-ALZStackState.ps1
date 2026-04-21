@@ -51,14 +51,14 @@ $ErrorActionPreference = "Stop"
 
 $mgStacks = @(
     @{ Scope = "mg"; MgId = $TenantIntRootMgId; Name = "$TenantIntRootMgId-governance-int-root" }
-    @{ Scope = "mg"; MgId = "alz";              Name = "alz-governance-platform" }
-    @{ Scope = "mg"; MgId = "alz";              Name = "alz-governance-landingzones" }
-    @{ Scope = "mg"; MgId = "alz";              Name = "alz-governance-landingzones-corp" }
-    @{ Scope = "mg"; MgId = "alz";              Name = "alz-governance-landingzones-online" }
-    @{ Scope = "mg"; MgId = "alz";              Name = "alz-governance-sandbox" }
-    @{ Scope = "mg"; MgId = "alz";              Name = "alz-governance-decommissioned" }
-    @{ Scope = "mg"; MgId = "alz";              Name = "alz-governance-platform-rbac" }
-    @{ Scope = "mg"; MgId = "alz";              Name = "alz-governance-landingzones-rbac" }
+    @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-platform" }
+    @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-landingzones" }
+    @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-landingzones-corp" }
+    @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-landingzones-online" }
+    @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-sandbox" }
+    @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-decommissioned" }
+    @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-platform-rbac" }
+    @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-landingzones-rbac" }
 )
 
 $subStacks = @(
@@ -160,10 +160,10 @@ Write-Host "Output: $OutputFile" -ForegroundColor Cyan
 Set-AzContext -SubscriptionId $SubscriptionId | Out-Null
 
 $export = @{
-    ExportTimestamp = (Get-Date -Format "o")
-    SubscriptionId = $SubscriptionId
+    ExportTimestamp   = (Get-Date -Format "o")
+    SubscriptionId    = $SubscriptionId
     TenantIntRootMgId = $TenantIntRootMgId
-    Stacks = @()
+    Stacks            = @()
 }
 
 # Management group stacks
@@ -180,16 +180,16 @@ foreach ($s in $mgStacks) {
         }
 
         $stackExport = @{
-            Name               = $stack.Name
-            Scope              = "managementGroup"
-            ManagementGroupId  = $s.MgId
-            ProvisioningState  = $stack.ProvisioningState
-            DeploymentId       = $stack.DeploymentId
-            ResourceCount      = $resourceIds.Count
-            ResourceIds        = $resourceIds | Sort-Object
-            DeletedResources   = @($stack.DeletedResources | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.Id } })
-            DetachedResources  = @($stack.DetachedResources | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.Id } })
-            ResourceSnapshots  = @(Get-StackResourceSnapshot -StackName $s.Name -ResourceIds $resourceIds)
+            Name              = $stack.Name
+            Scope             = "managementGroup"
+            ManagementGroupId = $s.MgId
+            ProvisioningState = $stack.ProvisioningState
+            DeploymentId      = $stack.DeploymentId
+            ResourceCount     = $resourceIds.Count
+            ResourceIds       = $resourceIds | Sort-Object
+            DeletedResources  = @($stack.DeletedResources | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.Id } })
+            DetachedResources = @($stack.DetachedResources | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.Id } })
+            ResourceSnapshots = @(Get-StackResourceSnapshot -StackName $s.Name -ResourceIds $resourceIds)
         }
 
         $export.Stacks += $stackExport
@@ -219,15 +219,15 @@ foreach ($s in $subStacks) {
         }
 
         $stackExport = @{
-            Name               = $stack.Name
-            Scope              = "subscription"
-            ProvisioningState  = $stack.ProvisioningState
-            DeploymentId       = $stack.DeploymentId
-            ResourceCount      = $resourceIds.Count
-            ResourceIds        = $resourceIds | Sort-Object
-            DeletedResources   = @($stack.DeletedResources | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.Id } })
-            DetachedResources  = @($stack.DetachedResources | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.Id } })
-            ResourceSnapshots  = @(Get-StackResourceSnapshot -StackName $s.Name -ResourceIds $resourceIds)
+            Name              = $stack.Name
+            Scope             = "subscription"
+            ProvisioningState = $stack.ProvisioningState
+            DeploymentId      = $stack.DeploymentId
+            ResourceCount     = $resourceIds.Count
+            ResourceIds       = $resourceIds | Sort-Object
+            DeletedResources  = @($stack.DeletedResources | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.Id } })
+            DetachedResources = @($stack.DetachedResources | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.Id } })
+            ResourceSnapshots = @(Get-StackResourceSnapshot -StackName $s.Name -ResourceIds $resourceIds)
         }
 
         $export.Stacks += $stackExport
