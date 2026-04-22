@@ -1667,3 +1667,102 @@ The thesis evaluation depends on `tests/` being the single canonical source for 
 ## April 21
 
 In order to produce a baseline will still using the old library version we have needed to remove the broken policies from the our library aswell as comment out them from the loadjsoncontent part of int-root.bicep
+
+Här är en records.md-post för dagen:
+markdown
+
+## Apr 22: T10 Reframe, Repo Cleanup, och en dag i ALZ-biblioteks-buggarnas helvete
+
+### T10 reframe — forcerad bump som metod
+
+T10-protokollet (K11 Livscykeluppdatering) som draftades tidigare antog en ren baseline, en planerad library-bump, och bundlade `DetachAll` → `DeleteAll`-flippen i samma körning som Phase 1. Verkligheten: `Enforce-EncryptTransit` case-sensitivity-buggen (`deny` vs `Deny`, parametern `AKSIngressHttpsOnlyEffect` med default-värde) har blockerat deploys över flera 2025.x-versioner. Tenant-repot bar ett `managementGroupExcludedPolicyAssignments: ['Enforce-EncryptTransit']`-workaround som följd. När uppströmsfixen landade i `2026.04.0` var bumpen inte längre valbar — produktionsbehov forcerade den.
+
+Första reaktion var att behandla detta som kontamination av testet: degraderad baseline, blandade motiv, inte ett rent experiment. Tankegången vändes efter att jag gick igenom vad K11 faktiskt mäter. K11 handlar explicit om operatörens absorption av uppströmsförändringar, grundat i Kumara et al. (2021) och Alonso et al. (2023) om konfigurationsdrift och kod/infrastruktur-divergens. En fabricerad bump mot en ren baseline hade mätt *kapacitet*; en forcerad bump under driftspress mäter *mekanismen som fungerar under precis de förhållanden den finns för att adressera*. Ekologisk validitet går upp, inte ner. Den degraderade baselinen är inte en brist — den är villkoret.
+
+Omskrev T10.md enligt följande:
+
+- La till "Metodologisk not — körningens kontext" överst som ärligt etablerar körningens förhållanden
+- Flyttade Phase 1 (DeleteAll-flippen) från T10 till **T10b** — separat protokoll, triggas av nästa patch-bump, isolerar auto-cleanup-variabeln från lib-innehålls-ändringar. Bättre experimentdesign än att sammanblanda två oberoende variabler i samma körning.
+- Skrev om Phase 0.1 till att dokumentera degraderad baseline som baseline. "Last CD run: failed" är ett giltigt pre-state.
+- La till Phase 3.7 "Minimum viable evidence"-checklista — baseline snapshot, commit SHA, tag URL, CD run URL, what-if screenshot, CD log screenshot, post-deploy snapshot, portal assignment screenshots. Allt annat är nice-to-have.
+- Markerade kritiska evidence-punkter som *icke-förhandlingsbar* — särskilt före/efter-snapshots; utan dem finns inget delta att rapportera.
+- Findings omskrivna. Finding 1: uppströmsbuggens livslängd som illustration av K11:s nödvändighet. Finding 2: forcerad bump validerar mekanismen starkare än planerad. Finding 3: `DetachAll` default/dokumentation-gapet deferrat till T10b snarare än infogat.
+- Appendix C som T10b-placeholder (plus T10c-placeholder för AVM module-bump, samma livscykelmekanism, annan attribution).
+
+### Numrerings-sidospår
+
+Gick kort ner i en kaninhåla om huruvida T10 skulle numreras om till T9 (resonemang: T1–T9 var den sekventiella test-räckvidden jag hade cachat). Rättad efter referens till kapitel 4-kriterie-mappningen: tio test-scenarier existerar (T1–T10), gapet är att K3 inte har ett dedikerat T-nummer eftersom den verifieras arkitekturellt över alla scenarier. T-numreringen löper 1–10 sammanhängande; K-numreringen är 1–11 med K3 omappad till ett enskilt test. T10 förblir T10.
+
+### Repo-cleanup — docs/ konsoliderat till records.md
+
+Framtida konvention: all testdokumentation bor i `tests/`. `docs/records.md` kvarstår som thesis-logbok. Allt annat i `docs/` var ad-hoc-artefakter från tidigare iterationer — iteration-1 empiri-records, iteration-1-testplaner för min och Alens tenants, iteration-2-planeringsdokument, en tidig brownfield-brainstorm-stub, och pre-rewrite-kopian av T10. `state-snapshots/` höll JSON-exports från dessa tidigare körningar, endast refererade av dokumenten som raderades.
+
+Raderat på `chore/cleanup-obsolete-docs`:
+
+state-snapshots/                                (10 JSON-filer, ~2.9MB)
+docs/screenshots/                               (17 del1/del3/del4 PNGs)
+docs/empiri.md                                  (iteration-1 T1–T4/T6/T9 run record)
+docs/testing.md                                 (iteration-1 testplan)
+docs/testplan-alen.md                           (iteration-1 Alen tenant testplan)
+docs/iteration2-tests.md                        (ersatt av tests/T10.md)
+docs/iteration2-plan.md                         (slutfört planeringsdokument)
+docs/iteration2-repo-architecture-tradeoff.md   (slutfört planeringsdokument)
+docs/brownfield.md                              (tidig brainstorm-stub)
+docs/brownfield-feature-plan.md                 (beskriver borttagen tooling)
+
+
+`docs/` innehåller nu enbart `records.md`. Verifierade inga referenser från `records.md` till något raderat dokument innan raderingen kördes.
+
+### T10 Phase 0 — försöken att få en fungerande baseline
+
+Phase 0.3 kräver en baseline-snapshot innan bumpen. Körde `Export-ALZStackState.ps1` — 9 governance-stackar exporterades rent, men `alz-core-logging` och `alz-networking-hub` failade. Började arbetet med att få dem i grönt tillstånd.
+
+**Networking-stacken — fyra buggar djupt i en kedja:**
+
+1. Flippade alla `deploy*: false` i `config/networking/hubnetworking/main.bicepparam` för att slippa ~$6300/mån i infrastrukturkostnader (AzFW, Bastion, VPN gateway, ER gateway, DDoS, DNS Private Resolver). VNets, subnets, peering och Private DNS Zones kostar inget själva.
+
+2. CD failade med `RequestDisallowedByPolicy` — `Deny-Subnet-Without-Nsg`-policyn blockerade `AzureBastionSubnet`, `DNSPrivateResolverInboundSubnet`, `DNSPrivateResolverOutboundSubnet`. Bonus-observation: felmeddelandet innehöll `{enforcementMode}`-placeholder som aldrig resolverats — en orealiserad template-variable i själva policy-beskrivningen. Ännu en ALZ-bibliotek-bugg av samma familj som EncryptTransit. Valde att ta bort de NSG-krävande subnets helt eftersom tjänsterna ändå var `deploy: false`.
+
+3. CD failade med `BCP022 Expected a property name` — när jag tog bort subnets genom att kommentera ut `/* ... */`-block hade jag lämnat syntaktiskt ogiltig Bicep (kapslade kommentarer, hängande klamrar). Städade upp filen helt och satte `subnets: []` på båda hub-networks explicit. En lexer-bug i Bicep där nested `/* */` inte hanteras korrekt är en egen rabbit hole men utanför scope idag.
+
+4. CD failade med `A virtual network cannot be linked to multiple zones with overlapping namespaces` — båda hub-networks hade `deployPrivateDnsZones: true` och försökte båda länka samma zone-namespaces. Dessutom hade jag manuellt skapade Private DNS Zones i `rg-alz-dns` som kolliderade med de modulen ville skapa. Stängde av `deployPrivateDnsZones` helt på båda hubbar.
+
+Efter alla fyra fixar gick networking-stacken grön.
+
+**Logging-stacken — djupare bug, längre väg:**
+
+CD failade med `The resource 'Microsoft.Insights/dataCollectionRules/dcr-alz-vminsights-swedencentral/providers/Microsoft.Authorization/locks/GlobalResourceLock' is not defined in the template`. Vilseledande felmeddelande som tog tid att diagnostisera.
+
+Första hypotesen: orphaned DCR:er från tidigare deploy-försök. Bekräftat via portal (bild visade sex resurser kvar i RG). Försökte `Remove-AzResourceGroup` men blockerades av `DenyAction-DeleteUAMIAMA`-policyn — plattformens egen deny-policy på `uami-alz-swedencentral`. En fin validering att ALZ:s skyddspolicies faktiskt fungerar mot operatören. Raderade de tre DCR:erna manuellt istället för att bryta policyn med en exemption.
+
+Efter radering — samma fel tillbaka. Det var inte orphaned resurser, det var själva modulen.
+
+Kollade `parGlobalResourceLock` i logging-bicepparam — redan `kind: 'None'`. Pekade på bug i `avm/ptn/alz/ama:0.1.1` pattern-modulen. Gick till modulens changelog och hittade exakt vad jag letade efter i 0.2.0 release notes:
+
+> Give the VM Insights PerfOnly lock a unique name (`-perfonly-lock` suffix) to avoid duplicate lock resource name collision with the PerfAndMap lock during **Azure Deployment Stacks validation**.
+
+0.1.1 skapar två locks med samma namn på två olika DCR:er. ARM hanterar dubbletten med lite tur, men Deployment Stacks validation är striktare och avvisar med felmeddelandet "resource not defined in template" — i verkligheten är det en duplikat-namn-konflikt. Fixen i 0.2.0 ger dem unika suffix.
+
+Bump av `platform/templates/core/logging/main.bicep` rad 229 från `0.1.1` till `0.2.0`. Tagg krävs i engine-repot för att tenant-repot ska plocka upp den — planerad som `v1.0.1` (patch-bump från iteration-1-taggen `v1.0.0`, ren bugfix). Det betyder att T10-bumpen (ALZ policy library 2025.09.2 → 2026.04.0) kommer göras ovanpå `v1.0.1`, inte `v1.0.0`.
+
+### Dagens skörd av ALZ-biblioteks-buggar
+
+Konsoliderad lista för diskussionskapitlet:
+
+1. **`Enforce-EncryptTransit` case-sensitivity** — `AKSIngressHttpsOnlyEffect` accepterade `deny` gement medan built-in-policyn kräver `Deny` TitleCase. Fixad i `2026.04.0`. Själva anledningen till T10-bumpen.
+2. **`Deny-Subnet-Without-Nsg` orealiserad placeholder** — felmeddelandet innehöll `{enforcementMode}` som aldrig substituerats. Inte blockerande funktionellt men illustrerar kvalitetsbrist i library-shipping.
+3. **`avm/ptn/alz/ama:0.1.1` DCR lock-kollision** — två locks med samma namn skapas på olika resurser, vilket Deployment Stacks validation avvisar. Fixad i `0.2.0`.
+4. **Bicep parser `/* ... */`-nestning** — inte en ALZ-bug utan i Bicep-språket, men samma klass av "dokumentation vs verklighet"-divergens. Noll symmetri mellan hur kommentarer ska kunna nestas och hur lexern hanterar dem.
+
+Detta är **gold för kapitel 5**. Operator-som-förändringsabsorbent-modellen som K11 mäter är inte bara en fråga om planerade bumps. Den måste också hantera en stadig ström av mindre defekter som ackumuleras mellan versioner. Kumara et al.:s drift-narrativ får en extra dimension: driften är inte bara kod-vs-faktisk-infrastruktur, den är också spec-vs-implementering inom själva biblioteket. Alonso et al. (2023) varnar att små konfigurationsändringar kan spridas till oväntade systemdelar — det inkluderar att biblioteks-defekter sprids till drift som operatören måste remediera.
+
+### Status vid dagens slut
+
+- T10.md omskriven, commitad, i `tests/T10.md`
+- `docs/` rensad till bara `records.md`
+- Networking-baseline grön (11 stackar totalt)
+- Logging-baseline blockerad på AMA-modul-bump — engine-repo-bump + tagg `v1.0.1` + tenant-repo-pin-bump krävs innan logging kan gå grönt
+- Baseline-snapshot EJ tagen än — väntar på alla 11 stackar gröna innan `Export-ALZStackState.ps1` körs för `state-t10-baseline.json`
+- Phase 1 (faktiska T10 lib-bumpen) ej påbörjad
+
+Halv dags operativt arbete för att få en ren baseline, ingen faktisk K11-evidensinsamling än. Not to self: T10 Phase 0.1 "degraded baseline documentation" kan utökas med en not om att operativt var baselinen också blockerad av orelaterade defekter som krävdes fixas innan evidensinsamlingen kunde påbörjas.
