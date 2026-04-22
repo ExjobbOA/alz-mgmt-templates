@@ -144,9 +144,7 @@ var varGallerySolutions = [
       name: '${solution}(${parLogAnalyticsWorkspaceName})'
       product: solution == 'SecurityInsights'
         ? 'OMSGallery/SecurityInsights'
-        : solution == 'ChangeTracking'
-          ? 'OMSGallery/ChangeTracking'
-          : 'OMSGallery/${solution}'
+        : solution == 'ChangeTracking' ? 'OMSGallery/ChangeTracking' : 'OMSGallery/${solution}'
       publisher: 'Microsoft'
       promotionCode: ''
     }
@@ -211,7 +209,9 @@ module modLogAnalyticsWorkspace 'br/public:avm/res/operational-insights/workspac
     location: !empty(parLogAnalyticsWorkspaceLocation) ? parLogAnalyticsWorkspaceLocation : parLocations[0]
     skuName: parLogAnalyticsWorkspaceSku
     tags: parTags
-    skuCapacityReservationLevel: parLogAnalyticsWorkspaceSku == 'CapacityReservation' ? parLogAnalyticsWorkspaceCapacityReservationLevel : null
+    skuCapacityReservationLevel: parLogAnalyticsWorkspaceSku == 'CapacityReservation'
+      ? parLogAnalyticsWorkspaceCapacityReservationLevel
+      : null
     dataRetention: parLogAnalyticsWorkspaceLogRetentionInDays
     gallerySolutions: !empty(varGallerySolutions) ? varGallerySolutions : null
     onboardWorkspaceToSentinel: contains(parLogAnalyticsWorkspaceSolutions, 'SecurityInsights')
@@ -226,7 +226,7 @@ module modLogAnalyticsWorkspace 'br/public:avm/res/operational-insights/workspac
 }
 
 // Azure Monitoring Agent Resources
-module modAzureMonitoringAgent 'br/public:avm/ptn/alz/ama:0.1.1' = {
+module modAzureMonitoringAgent 'br/public:avm/ptn/alz/ama:0.2.0' = {
   scope: resResourceGroupPointer
   params: {
     dataCollectionRuleChangeTrackingName: parDataCollectionRuleChangeTrackingName
