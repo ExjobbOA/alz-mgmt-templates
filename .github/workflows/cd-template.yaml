@@ -10,7 +10,7 @@ on:
         description: "Path to JSON parameters file"
         required: false
         type: string
-        default: "platform.json"   # <- align with your repo
+        default: "platform.json" # <- align with your repo
       skip_what_if:
         default: false
         type: boolean
@@ -140,277 +140,300 @@ jobs:
 
       # ---- WHAT-IF in proven order (same as Apply order below) ----
 
-      - name: 'Plan: Governance-Intermediate Root'
+      - name: "Plan: Governance-Intermediate Root"
         if: ${{ inputs.governance-int-root }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
-          name: 'governance-int-root'
-          displayName: 'Governance-Intermediate Root'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/int-root/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/int-root.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'true'
-          firstRunWhatIf: 'false'
+          name: "governance-int-root"
+          displayName: "Governance-Intermediate Root"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/int-root/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/int-root.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "true"
+          firstRunWhatIf: "false"
           managementGroupId: ${{ env.MANAGEMENT_GROUP_ID }}
 
-      - name: 'Plan: Governance-Landing Zones'
+      - name: "Plan: Governance-Landing Zones"
         if: ${{ inputs.governance-landingzones }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
-          name: 'governance-landingzones'
-          displayName: 'Governance-Landing Zones'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/landingzones/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/landingzones/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'true'
-          firstRunWhatIf: 'false'
-          targetManagementGroupId: 'landingzones'
-          skipWhatIfIfTargetMgMissing: 'true'
+          name: "governance-landingzones"
+          displayName: "Governance-Landing Zones"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/landingzones/\
+            main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/landingzones/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "true"
+          firstRunWhatIf: "false"
+          targetManagementGroupId: "landingzones"
+          skipWhatIfIfTargetMgMissing: "true"
 
-      - name: 'Plan: Governance-Landing Zones Corp'
+      - name: "Plan: Governance-Landing Zones Corp"
         if: ${{ inputs.governance-landingzones-corp }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
-          name: 'governance-landingzones-corp'
-          displayName: 'Governance-Landing Zones Corp'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/landingzones/landingzones-corp/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/landingzones/landingzones-corp/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'true'
-          firstRunWhatIf: 'false'
-          targetManagementGroupId: 'corp'
-          skipWhatIfIfTargetMgMissing: 'true'
+          name: "governance-landingzones-corp"
+          displayName: "Governance-Landing Zones Corp"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/landingzones/\
+            landingzones-corp/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/landingzones/la\
+            ndingzones-corp/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "true"
+          firstRunWhatIf: "false"
+          targetManagementGroupId: "corp"
+          skipWhatIfIfTargetMgMissing: "true"
 
-      - name: 'Plan: Governance-Landing Zones Online'
+      - name: "Plan: Governance-Landing Zones Online"
         if: ${{ inputs.governance-landingzones-online }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
-          name: 'governance-landingzones-online'
-          displayName: 'Governance-Landing Zones Online'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/landingzones/landingzones-online/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/landingzones/landingzones-online/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'true'
-          firstRunWhatIf: 'false'
-          targetManagementGroupId: 'online'
-          skipWhatIfIfTargetMgMissing: 'true'
+          name: "governance-landingzones-online"
+          displayName: "Governance-Landing Zones Online"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/landingzones/\
+            landingzones-online/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/landingzones/la\
+            ndingzones-online/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "true"
+          firstRunWhatIf: "false"
+          targetManagementGroupId: "online"
+          skipWhatIfIfTargetMgMissing: "true"
 
-      - name: 'Plan: Governance-Platform'
+      - name: "Plan: Governance-Platform"
         if: ${{ inputs.governance-platform }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
-          name: 'governance-platform'
-          displayName: 'Governance-Platform'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'true'
-          firstRunWhatIf: 'false'
-          targetManagementGroupId: 'platform'
-          skipWhatIfIfTargetMgMissing: 'true'
+          name: "governance-platform"
+          displayName: "Governance-Platform"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/platform/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/platform/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "true"
+          firstRunWhatIf: "false"
+          targetManagementGroupId: "platform"
+          skipWhatIfIfTargetMgMissing: "true"
 
-      - name: 'Plan: Governance-Platform Connectivity'
-        if: ${{ inputs.governance-platform-connectivity && env.PLATFORM_MODE != 'simple' }}
+      - name: "Plan: Governance-Platform Connectivity"
+        if: ${{ inputs.governance-platform-connectivity && env.PLATFORM_MODE != 'simple'
+          }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
-          name: 'governance-platform-connectivity'
-          displayName: 'Governance-Platform Connectivity'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-connectivity/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/platform-connectivity/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'true'
-          firstRunWhatIf: 'false'
-          targetManagementGroupId: 'connectivity'
-          skipWhatIfIfTargetMgMissing: 'true'
+          name: "governance-platform-connectivity"
+          displayName: "Governance-Platform Connectivity"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/platform/plat\
+            form-connectivity/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/platform/platfo\
+            rm-connectivity/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "true"
+          firstRunWhatIf: "false"
+          targetManagementGroupId: "connectivity"
+          skipWhatIfIfTargetMgMissing: "true"
 
-      - name: 'Plan: Governance-Platform Identity'
+      - name: "Plan: Governance-Platform Identity"
         if: ${{ inputs.governance-platform-identity && env.PLATFORM_MODE != 'simple' }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
-          name: 'governance-platform-identity'
-          displayName: 'Governance-Platform Identity'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-identity/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/platform-identity/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'true'
-          firstRunWhatIf: 'false'
-          targetManagementGroupId: 'identity'
-          skipWhatIfIfTargetMgMissing: 'true'
+          name: "governance-platform-identity"
+          displayName: "Governance-Platform Identity"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/platform/plat\
+            form-identity/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/platform/platfo\
+            rm-identity/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "true"
+          firstRunWhatIf: "false"
+          targetManagementGroupId: "identity"
+          skipWhatIfIfTargetMgMissing: "true"
 
-      - name: 'Plan: Governance-Platform Management'
-        if: ${{ inputs.governance-platform-management && env.PLATFORM_MODE != 'simple' }}
+      - name: "Plan: Governance-Platform Management"
+        if: ${{ inputs.governance-platform-management && env.PLATFORM_MODE != 'simple'
+          }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
-          name: 'governance-platform-management'
-          displayName: 'Governance-Platform Management'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-management/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/platform-management/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'true'
-          firstRunWhatIf: 'false'
-          targetManagementGroupId: 'management'
-          skipWhatIfIfTargetMgMissing: 'true'
+          name: "governance-platform-management"
+          displayName: "Governance-Platform Management"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/platform/plat\
+            form-management/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/platform/platfo\
+            rm-management/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "true"
+          firstRunWhatIf: "false"
+          targetManagementGroupId: "management"
+          skipWhatIfIfTargetMgMissing: "true"
 
-      - name: 'Plan: Governance-Platform Security'
+      - name: "Plan: Governance-Platform Security"
         if: ${{ inputs.governance-platform-security && env.PLATFORM_MODE != 'simple' }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
-          name: 'governance-platform-security'
-          displayName: 'Governance-Platform Security'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-security/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/platform-security/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'true'
-          firstRunWhatIf: 'false'
-          targetManagementGroupId: 'security'
-          skipWhatIfIfTargetMgMissing: 'true'
+          name: "governance-platform-security"
+          displayName: "Governance-Platform Security"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/platform/plat\
+            form-security/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/platform/platfo\
+            rm-security/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "true"
+          firstRunWhatIf: "false"
+          targetManagementGroupId: "security"
+          skipWhatIfIfTargetMgMissing: "true"
 
-      - name: 'Plan: Governance-Sandbox'
+      - name: "Plan: Governance-Sandbox"
         if: ${{ inputs.governance-sandbox }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
-          name: 'governance-sandbox'
-          displayName: 'Governance-Sandbox'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/sandbox/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/sandbox/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'true'
-          firstRunWhatIf: 'false'
-          targetManagementGroupId: 'sandbox'
-          skipWhatIfIfTargetMgMissing: 'true'
+          name: "governance-sandbox"
+          displayName: "Governance-Sandbox"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/sandbox/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/sandbox/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "true"
+          firstRunWhatIf: "false"
+          targetManagementGroupId: "sandbox"
+          skipWhatIfIfTargetMgMissing: "true"
 
-      - name: 'Plan: Governance-Decommissioned'
+      - name: "Plan: Governance-Decommissioned"
         if: ${{ inputs.governance-decommissioned }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
-          name: 'governance-decommissioned'
-          displayName: 'Governance-Decommissioned'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/decommissioned/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/decommissioned/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'true'
-          firstRunWhatIf: 'false'
-          targetManagementGroupId: 'decommissioned'
-          skipWhatIfIfTargetMgMissing: 'true'
+          name: "governance-decommissioned"
+          displayName: "Governance-Decommissioned"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/decommissione\
+            d/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/decommissioned/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "true"
+          firstRunWhatIf: "false"
+          targetManagementGroupId: "decommissioned"
+          skipWhatIfIfTargetMgMissing: "true"
 
-      - name: 'Plan: Governance-Platform RBAC'
+      - name: "Plan: Governance-Platform RBAC"
         if: ${{ inputs.governance-platform-rbac }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
-          name: 'governance-platform-rbac'
-          displayName: 'Governance-Platform RBAC'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/main-rbac.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/main-rbac.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'true'
-          firstRunWhatIf: 'false'
-          targetManagementGroupId: 'platform'
-          skipWhatIfIfTargetMgMissing: 'true'
+          name: "governance-platform-rbac"
+          displayName: "Governance-Platform RBAC"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/platform/main\
+            -rbac.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/platform/main-rbac.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "true"
+          firstRunWhatIf: "false"
+          targetManagementGroupId: "platform"
+          skipWhatIfIfTargetMgMissing: "true"
 
-      - name: 'Plan: Governance-Platform Connectivity RBAC'
-        if: ${{ inputs.governance-platform-connectivity-rbac && env.PLATFORM_MODE != 'simple' }}
+      - name: "Plan: Governance-Platform Connectivity RBAC"
+        if: ${{ inputs.governance-platform-connectivity-rbac && env.PLATFORM_MODE !=
+          'simple' }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
-          name: 'governance-platform-connectivity-rbac'
-          displayName: 'Governance-Platform Connectivity RBAC'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-connectivity/main-rbac.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/platform-connectivity/main-rbac.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'true'
-          firstRunWhatIf: 'false'
-          targetManagementGroupId: 'connectivity'
-          skipWhatIfIfTargetMgMissing: 'true'
+          name: "governance-platform-connectivity-rbac"
+          displayName: "Governance-Platform Connectivity RBAC"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/platform/plat\
+            form-connectivity/main-rbac.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/platform/platfo\
+            rm-connectivity/main-rbac.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "true"
+          firstRunWhatIf: "false"
+          targetManagementGroupId: "connectivity"
+          skipWhatIfIfTargetMgMissing: "true"
 
-      - name: 'Plan: Governance-Landing Zones RBAC'
+      - name: "Plan: Governance-Landing Zones RBAC"
         if: ${{ inputs.governance-landingzones-rbac }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
-          name: 'governance-landingzones-rbac'
-          displayName: 'Governance-Landing Zones RBAC'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/landingzones/main-rbac.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/landingzones/main-rbac.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'true'
-          firstRunWhatIf: 'false'
-          targetManagementGroupId: 'landingzones'
-          skipWhatIfIfTargetMgMissing: 'true'
+          name: "governance-landingzones-rbac"
+          displayName: "Governance-Landing Zones RBAC"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/landingzones/\
+            main-rbac.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/landingzones/ma\
+            in-rbac.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "true"
+          firstRunWhatIf: "false"
+          targetManagementGroupId: "landingzones"
+          skipWhatIfIfTargetMgMissing: "true"
 
-      - name: 'Plan: Networking - Hub'
+      - name: "Plan: Networking - Hub"
         if: ${{ inputs.networking && env.NETWORK_TYPE == 'hubnetworking' }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
-          name: 'networking-hub'
-          displayName: 'Networking - Hub'
-          templateFilePath: 'platform/templates/networking/hubnetworking/main.bicep'
-          templateParametersFilePath: 'config/networking/hubnetworking/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_CONNECTIVITY }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'subscription'
-          whatIfEnabled: 'true'
-          firstRunWhatIf: 'false'
+          name: "networking-hub"
+          displayName: "Networking - Hub"
+          templateFilePath: "platform/templates/networking/hubnetworking/main.bicep"
+          templateParametersFilePath: "config/networking/hubnetworking/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_CONNECTIVITY }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "subscription"
+          whatIfEnabled: "true"
+          firstRunWhatIf: "false"
 
-      - name: 'Plan: Core-Logging'
+      - name: "Plan: Core-Logging"
         if: ${{ inputs.core-logging }}
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
         with:
-          name: 'core-logging'
-          displayName: 'Core-Logging'
-          templateFilePath: 'platform/templates/core/logging/main.bicep'
-          templateParametersFilePath: 'config/core/logging/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'subscription'
-          whatIfEnabled: 'true'
-          firstRunWhatIf: 'false'
+          name: "core-logging"
+          displayName: "Core-Logging"
+          templateFilePath: "platform/templates/core/logging/main.bicep"
+          templateParametersFilePath: "config/core/logging/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "subscription"
+          whatIfEnabled: "true"
+          firstRunWhatIf: "false"
 
   deploy:
     name: Deploy - Sequential Monolith (Stacks)
-    needs: [whatif]
-    if: ${{ always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    needs: [ whatif ]
+    if: ${{ always() && !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled') }}
     runs-on: ubuntu-latest
     concurrency: mgmt-tfstate
     environment: alz-mgmt-apply
@@ -419,30 +442,30 @@ jobs:
       contents: read
     env:
       PARAMETERS_FILE_NAME: ${{ inputs.parameters_file_name }}
-  
+
     steps:
       - name: Show inputs
         run: |
           echo '${{ toJson(inputs) }}'
-  
+
       - name: Checkout Config Repo
         uses: actions/checkout@v4
-  
+
       - name: Checkout Engine Repo (platform templates)
         uses: actions/checkout@v4
         with:
           repository: ExjobbOA/alz-mgmt-templates
           ref: ${{ inputs.platform_ref }}
           path: platform
-  
+
       - name: Get Bicep Variables
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-variables@main
         with:
           parameters_file_name: ${{ env.PARAMETERS_FILE_NAME }}
-  
+
       - name: Install Bicep and Update Az Module
         uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-installer@main
-  
+
       - name: Bicep Build & Lint All Modules
         shell: pwsh
         run: |
@@ -464,7 +487,7 @@ jobs:
           if ($output.length -gt 0) {
             throw $output
           }
-  
+
       - name: OIDC Login to Tenant
         uses: azure/login@v2
         with:
@@ -472,14 +495,14 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           enable-AzPSSession: true
-  
+
       # 0) Pre-create full ALZ MG hierarchy (cold-start safety)
       # Creating a NEW Deployment Stack requires ARM to validate permissions for every scope in
       # the template before executing any resources. On a post-cleanup tenant, no MGs exist yet,
       # so ARM fails at permission check before it can create any of them — circular deadlock.
       # Fix: pre-create the full MG skeleton in parent-first order so all scopes exist and RBAC
       # inheritance is resolvable when the stacks run. Idempotent — skips existing MGs.
-      - name: 'Pre-create ALZ MG hierarchy (cold-start)'
+      - name: "Pre-create ALZ MG hierarchy (cold-start)"
         shell: pwsh
         run: |
           $intRoot  = $env:INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID
@@ -545,302 +568,323 @@ jobs:
           }
 
       # 1) Intermediate Root (MG stack at Tenant Root MG)
-      - name: 'Apply: Governance-Intermediate Root'
+      - name: "Apply: Governance-Intermediate Root"
         if: ${{ inputs.governance-int-root }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
-          name: 'governance-int-root'
-          displayName: 'Governance-Intermediate Root'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/int-root/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/int-root.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'false'
-          firstRunWhatIf: 'false'
+          name: "governance-int-root"
+          displayName: "Governance-Intermediate Root"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/int-root/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/int-root.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "false"
+          firstRunWhatIf: "false"
           managementGroupId: ${{ env.MANAGEMENT_GROUP_ID }}
           stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: 'None'
-          actionOnUnmanage: 'DetachAll'
-  
+          denySettingsMode: "None"
+          actionOnUnmanage: "DeleteAll"
+
       # 2) Landing Zones (MG stacks at Intermediate Root MG)
-      - name: 'Apply: Governance-Landing Zones'
+      - name: "Apply: Governance-Landing Zones"
         if: ${{ inputs.governance-landingzones }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
-          name: 'governance-landingzones'
-          displayName: 'Governance-Landing Zones'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/landingzones/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/landingzones/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'false'
-          firstRunWhatIf: 'false'
+          name: "governance-landingzones"
+          displayName: "Governance-Landing Zones"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/landingzones/\
+            main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/landingzones/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "false"
+          firstRunWhatIf: "false"
           stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: 'None'
-          actionOnUnmanage: 'DetachAll'
-  
-      - name: 'Apply: Governance-Landing Zones Corp'
+          denySettingsMode: "None"
+          actionOnUnmanage: "DeleteAll"
+
+      - name: "Apply: Governance-Landing Zones Corp"
         if: ${{ inputs.governance-landingzones-corp }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
-          name: 'governance-landingzones-corp'
-          displayName: 'Governance-Landing Zones Corp'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/landingzones/landingzones-corp/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/landingzones/landingzones-corp/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'false'
-          firstRunWhatIf: 'false'
+          name: "governance-landingzones-corp"
+          displayName: "Governance-Landing Zones Corp"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/landingzones/\
+            landingzones-corp/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/landingzones/la\
+            ndingzones-corp/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "false"
+          firstRunWhatIf: "false"
           stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: 'None'
-          actionOnUnmanage: 'DetachAll'
-  
-      - name: 'Apply: Governance-Landing Zones Online'
+          denySettingsMode: "None"
+          actionOnUnmanage: "DeleteAll"
+
+      - name: "Apply: Governance-Landing Zones Online"
         if: ${{ inputs.governance-landingzones-online }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
-          name: 'governance-landingzones-online'
-          displayName: 'Governance-Landing Zones Online'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/landingzones/landingzones-online/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/landingzones/landingzones-online/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'false'
-          firstRunWhatIf: 'false'
+          name: "governance-landingzones-online"
+          displayName: "Governance-Landing Zones Online"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/landingzones/\
+            landingzones-online/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/landingzones/la\
+            ndingzones-online/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "false"
+          firstRunWhatIf: "false"
           stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: 'None'
-          actionOnUnmanage: 'DetachAll'
-  
+          denySettingsMode: "None"
+          actionOnUnmanage: "DeleteAll"
+
       # 3) Platform (Base)
-      - name: 'Apply: Governance-Platform'
+      - name: "Apply: Governance-Platform"
         if: ${{ inputs.governance-platform }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
-          name: 'governance-platform'
-          displayName: 'Governance-Platform'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'false'
-          firstRunWhatIf: 'false'
+          name: "governance-platform"
+          displayName: "Governance-Platform"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/platform/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/platform/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "false"
+          firstRunWhatIf: "false"
           stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: 'None'
-          actionOnUnmanage: 'DetachAll'
-  
+          denySettingsMode: "None"
+          actionOnUnmanage: "DeleteAll"
+
       # 4) Platform Connectivity (sub placement) — full mode only
-      - name: 'Apply: Governance-Platform Connectivity'
-        if: ${{ inputs.governance-platform-connectivity && env.PLATFORM_MODE != 'simple' }}
+      - name: "Apply: Governance-Platform Connectivity"
+        if: ${{ inputs.governance-platform-connectivity && env.PLATFORM_MODE != 'simple'
+          }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
-          name: 'governance-platform-connectivity'
-          displayName: 'Governance-Platform Connectivity'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-connectivity/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/platform-connectivity/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'false'
-          firstRunWhatIf: 'false'
+          name: "governance-platform-connectivity"
+          displayName: "Governance-Platform Connectivity"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/platform/plat\
+            form-connectivity/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/platform/platfo\
+            rm-connectivity/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "false"
+          firstRunWhatIf: "false"
           stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: 'None'
-          actionOnUnmanage: 'DetachAll'
-  
-  
+          denySettingsMode: "None"
+          actionOnUnmanage: "DeleteAll"
+
       # 5) Platform Identity — full mode only
-      - name: 'Apply: Governance-Platform Identity'
+      - name: "Apply: Governance-Platform Identity"
         if: ${{ inputs.governance-platform-identity && env.PLATFORM_MODE != 'simple' }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
-          name: 'governance-platform-identity'
-          displayName: 'Governance-Platform Identity'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-identity/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/platform-identity/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'false'
-          firstRunWhatIf: 'false'
+          name: "governance-platform-identity"
+          displayName: "Governance-Platform Identity"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/platform/plat\
+            form-identity/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/platform/platfo\
+            rm-identity/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "false"
+          firstRunWhatIf: "false"
           stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: 'None'
-          actionOnUnmanage: 'DetachAll'
-  
+          denySettingsMode: "None"
+          actionOnUnmanage: "DeleteAll"
+
       # 6) Platform Management — full mode only
-      - name: 'Apply: Governance-Platform Management'
-        if: ${{ inputs.governance-platform-management && env.PLATFORM_MODE != 'simple' }}
+      - name: "Apply: Governance-Platform Management"
+        if: ${{ inputs.governance-platform-management && env.PLATFORM_MODE != 'simple'
+          }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
-          name: 'governance-platform-management'
-          displayName: 'Governance-Platform Management'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-management/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/platform-management/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'false'
-          firstRunWhatIf: 'false'
+          name: "governance-platform-management"
+          displayName: "Governance-Platform Management"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/platform/plat\
+            form-management/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/platform/platfo\
+            rm-management/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "false"
+          firstRunWhatIf: "false"
           stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: 'None'
-          actionOnUnmanage: 'DetachAll'
-  
+          denySettingsMode: "None"
+          actionOnUnmanage: "DeleteAll"
+
       # 7) Platform Security — full mode only
-      - name: 'Apply: Governance-Platform Security'
+      - name: "Apply: Governance-Platform Security"
         if: ${{ inputs.governance-platform-security && env.PLATFORM_MODE != 'simple' }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
-          name: 'governance-platform-security'
-          displayName: 'Governance-Platform Security'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-security/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/platform-security/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'false'
-          firstRunWhatIf: 'false'
+          name: "governance-platform-security"
+          displayName: "Governance-Platform Security"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/platform/plat\
+            form-security/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/platform/platfo\
+            rm-security/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "false"
+          firstRunWhatIf: "false"
           stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: 'None'
-          actionOnUnmanage: 'DetachAll'
-  
+          denySettingsMode: "None"
+          actionOnUnmanage: "DeleteAll"
+
       # 8) Sandbox & Decommissioned
-      - name: 'Apply: Governance-Sandbox'
+      - name: "Apply: Governance-Sandbox"
         if: ${{ inputs.governance-sandbox }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
-          name: 'governance-sandbox'
-          displayName: 'Governance-Sandbox'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/sandbox/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/sandbox/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'false'
-          firstRunWhatIf: 'false'
+          name: "governance-sandbox"
+          displayName: "Governance-Sandbox"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/sandbox/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/sandbox/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "false"
+          firstRunWhatIf: "false"
           stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: 'None'
-          actionOnUnmanage: 'DetachAll'
-  
-      - name: 'Apply: Governance-Decommissioned'
+          denySettingsMode: "None"
+          actionOnUnmanage: "DeleteAll"
+
+      - name: "Apply: Governance-Decommissioned"
         if: ${{ inputs.governance-decommissioned }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
-          name: 'governance-decommissioned'
-          displayName: 'Governance-Decommissioned'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/decommissioned/main.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/decommissioned/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'false'
-          firstRunWhatIf: 'false'
+          name: "governance-decommissioned"
+          displayName: "Governance-Decommissioned"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/decommissione\
+            d/main.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/decommissioned/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "false"
+          firstRunWhatIf: "false"
           stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: 'None'
-          actionOnUnmanage: 'DetachAll'
-  
+          denySettingsMode: "None"
+          actionOnUnmanage: "DeleteAll"
+
       # 9) RBAC stages
-      - name: 'Apply: Governance-Platform RBAC'
+      - name: "Apply: Governance-Platform RBAC"
         if: ${{ inputs.governance-platform-rbac }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
-          name: 'governance-platform-rbac'
-          displayName: 'Governance-Platform RBAC'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/main-rbac.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/main-rbac.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'false'
-          firstRunWhatIf: 'false'
+          name: "governance-platform-rbac"
+          displayName: "Governance-Platform RBAC"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/platform/main\
+            -rbac.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/platform/main-rbac.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "false"
+          firstRunWhatIf: "false"
           stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: 'None'
-          actionOnUnmanage: 'DetachAll'
-  
-      - name: 'Apply: Governance-Platform Connectivity RBAC'
-        if: ${{ inputs.governance-platform-connectivity-rbac && env.PLATFORM_MODE != 'simple' }}
+          denySettingsMode: "None"
+          actionOnUnmanage: "DeleteAll"
+
+      - name: "Apply: Governance-Platform Connectivity RBAC"
+        if: ${{ inputs.governance-platform-connectivity-rbac && env.PLATFORM_MODE !=
+          'simple' }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
-          name: 'governance-platform-connectivity-rbac'
-          displayName: 'Governance-Platform Connectivity RBAC'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/platform/platform-connectivity/main-rbac.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/platform/platform-connectivity/main-rbac.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'false'
-          firstRunWhatIf: 'false'
+          name: "governance-platform-connectivity-rbac"
+          displayName: "Governance-Platform Connectivity RBAC"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/platform/plat\
+            form-connectivity/main-rbac.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/platform/platfo\
+            rm-connectivity/main-rbac.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "false"
+          firstRunWhatIf: "false"
           stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: 'None'
-          actionOnUnmanage: 'DetachAll'
-  
-      - name: 'Apply: Governance-Landing Zones RBAC'
+          denySettingsMode: "None"
+          actionOnUnmanage: "DeleteAll"
+
+      - name: "Apply: Governance-Landing Zones RBAC"
         if: ${{ inputs.governance-landingzones-rbac }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
-          name: 'governance-landingzones-rbac'
-          displayName: 'Governance-Landing Zones RBAC'
-          templateFilePath: 'platform/templates/core/governance/mgmt-groups/landingzones/main-rbac.bicep'
-          templateParametersFilePath: 'config/core/governance/mgmt-groups/landingzones/main-rbac.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'managementGroup'
-          whatIfEnabled: 'false'
-          firstRunWhatIf: 'false'
+          name: "governance-landingzones-rbac"
+          displayName: "Governance-Landing Zones RBAC"
+          templateFilePath: "platform/templates/core/governance/mgmt-groups/landingzones/\
+            main-rbac.bicep"
+          templateParametersFilePath: "config/core/governance/mgmt-groups/landingzones/ma\
+            in-rbac.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "managementGroup"
+          whatIfEnabled: "false"
+          firstRunWhatIf: "false"
           stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: 'None'
-          actionOnUnmanage: 'DetachAll'
-  
+          denySettingsMode: "None"
+          actionOnUnmanage: "DeleteAll"
+
       # 10) Networking (subscription stack)
-      - name: 'Apply: Networking - Hub'
+      - name: "Apply: Networking - Hub"
         if: ${{ inputs.networking && env.NETWORK_TYPE == 'hubnetworking' }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
-          name: 'networking-hub'
-          displayName: 'Networking - Hub'
-          templateFilePath: 'platform/templates/networking/hubnetworking/main.bicep'
-          templateParametersFilePath: 'config/networking/hubnetworking/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_CONNECTIVITY }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'subscription'
-          whatIfEnabled: 'false'
-          firstRunWhatIf: 'false'
+          name: "networking-hub"
+          displayName: "Networking - Hub"
+          templateFilePath: "platform/templates/networking/hubnetworking/main.bicep"
+          templateParametersFilePath: "config/networking/hubnetworking/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_CONNECTIVITY }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "subscription"
+          whatIfEnabled: "false"
+          firstRunWhatIf: "false"
           stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: 'None'
-          actionOnUnmanage: 'DetachAll'
-  
+          denySettingsMode: "None"
+          actionOnUnmanage: "DetachAll"
+
       # 11) Core-Logging (final step, subscription stack)
-      - name: 'Apply: Core-Logging'
+      - name: "Apply: Core-Logging"
         if: ${{ inputs.core-logging }}
         uses: ./platform/.github/actions/bicep-deploy
         with:
-          name: 'core-logging'
-          displayName: 'Core-Logging'
-          templateFilePath: 'platform/templates/core/logging/main.bicep'
-          templateParametersFilePath: 'config/core/logging/main.bicepparam'
-          subscriptionId: '${{ env.SUBSCRIPTION_ID_MANAGEMENT }}'
-          resourceGroupName: ''
-          location: '${{ env.LOCATION }}'
-          deploymentType: 'subscription'
-          whatIfEnabled: 'false'
-          firstRunWhatIf: 'false'
+          name: "core-logging"
+          displayName: "Core-Logging"
+          templateFilePath: "platform/templates/core/logging/main.bicep"
+          templateParametersFilePath: "config/core/logging/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_MANAGEMENT }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "subscription"
+          whatIfEnabled: "false"
+          firstRunWhatIf: "false"
           stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: 'None'
-          actionOnUnmanage: 'DetachAll'
+          denySettingsMode: "None"
+          actionOnUnmanage: "DetachAll"
