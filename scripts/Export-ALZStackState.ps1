@@ -1,25 +1,54 @@
 <#
 .SYNOPSIS
-    ALZ State Auditor - Final Thesis-Grade Edition.
+    Exports Azure Landing Zone Deployment Stack state for K5 change containment verification.
+
 .DESCRIPTION
-    Använder ARM REST API för att hämta den absoluta sanningen om ALZ-policys.
-    Fångar hela objekt (inte bara ID:n) för att möjliggöra djupgående diff-analys.
+    Captures two layers of data for each Deployment Stack:
+    1. Stack metadata  — ProvisioningState, DeploymentId, resource list
+    2. Resource snapshot — actual property values for key resources (e.g. policy assignment parameters)
+
+    Run BEFORE and AFTER a change, then diff the two JSON files.
+    Only the affected stack should show differences.
+
+.PARAMETER OutputFile
+    Path for the JSON export file.
+
+.PARAMETER SubscriptionId
+    The connectivity/platform subscription ID.
+
+.PARAMETER TenantIntRootMgId
+    The intermediate root management group ID (tenant-specific GUID).
+
+.EXAMPLE
+    # Before change
+    ./Export-ALZStackState.ps1 -OutputFile "state-before.json" -SubscriptionId "6f051987-..." -TenantIntRootMgId "3aadcd6c-..."
+
+    # After change
+    ./Export-ALZStackState.ps1 -OutputFile "state-after.json" -SubscriptionId "6f051987-..." -TenantIntRootMgId "3aadcd6c-..."
+
+    # Diff (PowerShell)
+    $before = Get-Content "state-before.json" | ConvertFrom-Json
+    $after  = Get-Content "state-after.json"  | ConvertFrom-Json
+    # Or use: git diff --no-index state-before.json state-after.json
 #>
 
 param(
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory)]
+    [string]$OutputFile,
+
+    [Parameter(Mandatory)]
     [string]$SubscriptionId,
 
-    [Parameter(Mandatory = $true)]
-    [string]$TenantIntRootMgId,
-
-    [Parameter(Mandatory = $false)]
-    [string]$OutputFile = "ALZ-FullState-Baseline-$(Get-Date -Format 'yyyyMMdd-HHmm').json"
+    [Parameter(Mandatory)]
+    [string]$TenantIntRootMgId
 )
 
 $ErrorActionPreference = "Stop"
 
-# 1. Definiera ALZ Stack-arkitekturen (Hela hierarkin)
+# ============================================================
+# 1. Define all stacks to export
+# ============================================================
+
 $mgStacks = @(
     @{ Scope = "mg"; MgId = $TenantIntRootMgId; Name = "$TenantIntRootMgId-governance-int-root" }
     @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-platform" }
@@ -37,123 +66,194 @@ $subStacks = @(
     @{ Scope = "sub"; Name = "alz-networking-hub" }
 )
 
-# 2. REST API Helper - Hämtar rå JSON direkt från Azure
-function Get-ArmResourceState {
-    param([string]$ResourceId)
-    
-    # API-versioner som stödjer alla moderna policy-funktioner
-    $apiVersion = "2021-06-01" 
-    if ($ResourceId -match "/policyAssignments/") { $apiVersion = "2024-04-01" }
+# ============================================================
+# 2. Helper: Get key resource properties for a stack
+# ============================================================
 
-    try {
-        $response = Invoke-AzRestMethod -Method GET -Path "$ResourceId`?api-version=$apiVersion"
-        if ($response.StatusCode -eq 200) {
-            return $response.Content | ConvertFrom-Json
+function Get-StackResourceSnapshot {
+    param(
+        [string]$StackName,
+        [array]$ResourceIds
+    )
+
+    $snapshots = @()
+
+    foreach ($rid in $ResourceIds) {
+        $snapshot = @{
+            ResourceId = $rid
         }
-        else {
-            return @{ Error = "HTTP $($response.StatusCode): $($response.Content)" }
+
+        # Policy assignments — capture parameter values (this is where email changes show up)
+        if ($rid -match "Microsoft.Authorization/policyAssignments/") {
+            try {
+                $assignmentName = ($rid -split "/")[-1]
+                $scope = $rid -replace "/providers/Microsoft.Authorization/policyAssignments/.*", ""
+
+                $assignment = Get-AzPolicyAssignment -Name $assignmentName -Scope $scope -ErrorAction SilentlyContinue
+                if ($assignment) {
+                    $snapshot.Type = "policyAssignment"
+                    $snapshot.DisplayName = $assignment.DisplayName
+                    $snapshot.Parameters = $assignment.Parameter | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+                    $snapshot.EnforcementMode = $assignment.EnforcementMode
+                }
+            }
+            catch {
+                $snapshot.Error = $_.Exception.Message
+            }
         }
+
+        # Policy definitions — capture the rule hash (not full rule, to keep diff clean)
+        elseif ($rid -match "Microsoft.Authorization/policyDefinitions/") {
+            try {
+                $defName = ($rid -split "/")[-1]
+                $scope = $rid -replace "/providers/Microsoft.Authorization/policyDefinitions/.*", ""
+
+                $def = Get-AzPolicyDefinition -Name $defName -ManagementGroupName ($scope -split "/")[-1] -ErrorAction SilentlyContinue
+                if ($def) {
+                    $snapshot.Type = "policyDefinition"
+                    $snapshot.DisplayName = $def.DisplayName
+                    # Hash the policy rule to detect changes without bloating the export
+                    $ruleJson = $def.PolicyRule | ConvertTo-Json -Depth 20 -Compress
+                    $snapshot.PolicyRuleHash = [System.BitConverter]::ToString(
+                        [System.Security.Cryptography.SHA256]::Create().ComputeHash(
+                            [System.Text.Encoding]::UTF8.GetBytes($ruleJson)
+                        )
+                    ).Replace("-", "").Substring(0, 16)
+                }
+            }
+            catch {
+                $snapshot.Error = $_.Exception.Message
+            }
+        }
+
+        # Policy set definitions (initiatives)
+        elseif ($rid -match "Microsoft.Authorization/policySetDefinitions/") {
+            try {
+                $setName = ($rid -split "/")[-1]
+                $scope = $rid -replace "/providers/Microsoft.Authorization/policySetDefinitions/.*", ""
+
+                $setDef = Get-AzPolicySetDefinition -Name $setName -ManagementGroupName ($scope -split "/")[-1] -ErrorAction SilentlyContinue
+                if ($setDef) {
+                    $snapshot.Type = "policySetDefinition"
+                    $snapshot.DisplayName = $setDef.DisplayName
+                    $snapshot.PolicyDefinitionCount = $setDef.PolicyDefinition.Count
+                    # Hash the full set definition structure to detect content changes
+                    $setJson = $setDef.PolicyDefinition | ConvertTo-Json -Depth 20 -Compress
+                    $snapshot.PolicySetHash = [System.BitConverter]::ToString(
+                        [System.Security.Cryptography.SHA256]::Create().ComputeHash(
+                            [System.Text.Encoding]::UTF8.GetBytes($setJson)
+                        )
+                    ).Replace("-", "").Substring(0, 16)
+                }
+            }
+            catch {
+                $snapshot.Error = $_.Exception.Message
+            }
+        }
+
+        $snapshots += $snapshot
     }
-    catch {
-        return @{ Error = "REST Call Failed: $($_.Exception.Message)" }
-    }
+
+    return $snapshots
 }
 
-# 3. Exekvering
-Write-Host "--- STARTAR FULLSTÄNDIG EXPORT (ALZ DEEP STATE) ---" -ForegroundColor Cyan
+# ============================================================
+# 3. Export each stack
+# ============================================================
+
+Write-Host "Starting ALZ stack state export..." -ForegroundColor Cyan
+Write-Host "Output: $OutputFile" -ForegroundColor Cyan
+
 Set-AzContext -SubscriptionId $SubscriptionId | Out-Null
 
-$results = @{
-    Timestamp = (Get-Date -Format "o")
-    Metadata  = @{
-        RootMg       = $TenantIntRootMgId
-        Subscription = $SubscriptionId
-    }
-    Stacks    = @()
+$export = @{
+    ExportTimestamp   = (Get-Date -Format "o")
+    SubscriptionId    = $SubscriptionId
+    TenantIntRootMgId = $TenantIntRootMgId
+    Stacks            = @()
 }
 
-foreach ($s in ($mgStacks + $subStacks)) {
-    Write-Host "Inventerar Stack: $($s.Name)..." -ForegroundColor Yellow
+# Management group stacks
+foreach ($s in $mgStacks) {
+    Write-Host "  Exporting MG stack: $($s.Name)..." -ForegroundColor Yellow
     try {
-        if ($s.Scope -eq "mg") {
-            $stack = Get-AzManagementGroupDeploymentStack -ManagementGroupId $s.MgId -Name $s.Name -ErrorAction SilentlyContinue
-        }
-        else {
-            $stack = Get-AzSubscriptionDeploymentStack -Name $s.Name -ErrorAction SilentlyContinue
-        }
+        $stack = Get-AzManagementGroupDeploymentStack -ManagementGroupId $s.MgId -Name $s.Name
 
-        if (-not $stack) {
-            Write-Host "  [!] Stacken hittades inte, hoppar över." -ForegroundColor Gray
-            continue
-        }
-
-        $resourceSnapshots = @()
-        $resourceIds = $stack.Resources | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.Id } }
-        
-        foreach ($rid in $resourceIds) {
-            # Filtrera för att bara hämta Policy-relaterade resurser (hjärtat i ALZ)
-            if ($rid -notmatch "Microsoft.Authorization") { continue }
-
-            $snapshot = @{ ResourceId = $rid; Type = "unknown" }
-            
-            # Identifiera typ för logikval
-            if ($rid -match "/policyAssignments/") { $snapshot.Type = "policyAssignment" }
-            elseif ($rid -match "/policyDefinitions/") { $snapshot.Type = "policyDefinition" }
-            elseif ($rid -match "/policySetDefinitions/") { $snapshot.Type = "policySetDefinition" }
-
-            # Hämta den djupa datan via REST
-            $armData = Get-ArmResourceState -ResourceId $rid
-
-            if ($armData.Error) {
-                $snapshot.Error = $armData.Error
+        $resourceIds = @()
+        if ($stack.Resources) {
+            $resourceIds = $stack.Resources | ForEach-Object {
+                if ($_ -is [string]) { $_ } else { $_.Id }
             }
-            else {
-                $snapshot.DisplayName = $armData.properties.displayName
-                
-                # --- POLICY ASSIGNMENTS: Fånga parametrar (här bor "deny"-buggen) ---
-                if ($snapshot.Type -eq "policyAssignment") {
-                    $snapshot.Parameters = $armData.properties.parameters
-                    $snapshot.EnforcementMode = $armData.properties.enforcementMode
-                    $snapshot.PolicyDefinitionId = $armData.properties.policyDefinitionId
-                }
-                
-                # --- POLICY SETS (Initiativ): Fånga hela strukturen ---
-                elseif ($snapshot.Type -eq "policySetDefinition") {
-                    $snapshot.Parameters = $armData.properties.parameters
-                    # Vi sparar HELA definitionen för att se om underliggande policys ändras
-                    $snapshot.FullDefinitions = $armData.properties.policyDefinitions 
-                }
-                
-                # --- POLICY DEFINITIONS: Fånga själva regeln och skapa hash ---
-                elseif ($snapshot.Type -eq "policyDefinition") {
-                    $snapshot.RawPolicyRule = $armData.properties.policyRule
-                    
-                    # Skapa en hash för att snabbt kunna jämföra stora mängder regler
-                    $ruleJson = $armData.properties.policyRule | ConvertTo-Json -Depth 20 -Compress
-                    $hashBytes = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($ruleJson))
-                    $snapshot.PolicyRuleHash = [System.BitConverter]::ToString($hashBytes).Replace("-", "").Substring(0, 16)
-                }
-            }
-            $resourceSnapshots += $snapshot
         }
 
-        $results.Stacks += @{
-            StackName         = $stack.Name
-            Scope             = $s.Scope
+        $stackExport = @{
+            Name              = $stack.Name
+            Scope             = "managementGroup"
+            ManagementGroupId = $s.MgId
             ProvisioningState = $stack.ProvisioningState
-            ResourceCount     = $resourceSnapshots.Count
-            ResourceSnapshots = $resourceSnapshots
+            DeploymentId      = $stack.DeploymentId
+            ResourceCount     = $resourceIds.Count
+            ResourceIds       = $resourceIds | Sort-Object
+            DeletedResources  = @($stack.DeletedResources | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.Id } })
+            DetachedResources = @($stack.DetachedResources | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.Id } })
+            ResourceSnapshots = @(Get-StackResourceSnapshot -StackName $s.Name -ResourceIds $resourceIds)
         }
+
+        $export.Stacks += $stackExport
+        Write-Host "    OK — $($resourceIds.Count) resources" -ForegroundColor Green
     }
     catch {
-        Write-Host "  [!] Fel vid åtkomst av stack: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "    FAILED: $($_.Exception.Message)" -ForegroundColor Red
+        $export.Stacks += @{
+            Name  = $s.Name
+            Scope = "managementGroup"
+            Error = $_.Exception.Message
+        }
     }
 }
 
-# 4. Spara till fil
-# Vi använder Depth 100 för att säkerställa att ingen data trunkeras till @{...}
-$results | ConvertTo-Json -Depth 100 | Out-File -FilePath $OutputFile -Encoding utf8
+# Subscription stacks
+foreach ($s in $subStacks) {
+    Write-Host "  Exporting Sub stack: $($s.Name)..." -ForegroundColor Yellow
+    try {
+        $stack = Get-AzSubscriptionDeploymentStack -Name $s.Name
 
-Write-Host "`nKLART!" -ForegroundColor Green
-Write-Host "Din baseline har sparats till: $OutputFile" -ForegroundColor White
-Write-Host "Antal stackar analyserade: $($results.Stacks.Count)" -ForegroundColor White
+        $resourceIds = @()
+        if ($stack.Resources) {
+            $resourceIds = $stack.Resources | ForEach-Object {
+                if ($_ -is [string]) { $_ } else { $_.Id }
+            }
+        }
+
+        $stackExport = @{
+            Name              = $stack.Name
+            Scope             = "subscription"
+            ProvisioningState = $stack.ProvisioningState
+            DeploymentId      = $stack.DeploymentId
+            ResourceCount     = $resourceIds.Count
+            ResourceIds       = $resourceIds | Sort-Object
+            DeletedResources  = @($stack.DeletedResources | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.Id } })
+            DetachedResources = @($stack.DetachedResources | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.Id } })
+            ResourceSnapshots = @(Get-StackResourceSnapshot -StackName $s.Name -ResourceIds $resourceIds)
+        }
+
+        $export.Stacks += $stackExport
+        Write-Host "    OK — $($resourceIds.Count) resources" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "    FAILED: $($_.Exception.Message)" -ForegroundColor Red
+        $export.Stacks += @{
+            Name  = $s.Name
+            Scope = "subscription"
+            Error = $_.Exception.Message
+        }
+    }
+}
+
+# ============================================================
+# 4. Write output
+# ============================================================
+
+$export | ConvertTo-Json -Depth 30 | Out-File -FilePath $OutputFile -Encoding utf8
+Write-Host "`nExport complete: $OutputFile" -ForegroundColor Cyan
+Write-Host "Stacks exported: $($export.Stacks.Count)" -ForegroundColor Cyan
