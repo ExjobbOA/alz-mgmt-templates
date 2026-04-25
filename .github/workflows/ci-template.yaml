@@ -363,3 +363,17 @@ jobs:
           deploymentType: "subscription"
           firstRunWhatIf: "false"
           whatIfEnabled: "true"
+
+      - name: "What If: Networking-Hub Networking"
+        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        with:
+          name: "networking-hubnetworking"
+          displayName: "Networking-Hub Networking"
+          templateFilePath: "platform/templates/networking/hubnetworking/main.bicep"
+          templateParametersFilePath: "config/networking/hubnetworking/main.bicepparam"
+          subscriptionId: "${{ env.SUBSCRIPTION_ID_CONNECTIVITY }}"
+          resourceGroupName: ""
+          location: "${{ env.LOCATION }}"
+          deploymentType: "subscription"
+          firstRunWhatIf: "false"
+          whatIfEnabled: "true"
