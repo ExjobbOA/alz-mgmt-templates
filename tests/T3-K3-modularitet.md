@@ -35,6 +35,8 @@ Förväntat:
 | `.bicepparam` | 0 |
 
 Resultat: 
+
+```powershell
 PS C:\Users\granl\repos\alz-mgmt> Get-ChildItem -Recurse -Include "*.bicep","*.bicepparam" |
 >>   Group-Object Extension |
 >>   Select-Object Name, Count
@@ -42,6 +44,7 @@ Name        Count
 ----        -----
 .bicepparam    19
 ---
+```
 
 ## Phase 2 — Resultat
 
