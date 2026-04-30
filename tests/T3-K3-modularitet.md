@@ -42,6 +42,7 @@ Name        Count
 ----        -----
 .bicepparam    19
 ---
+```
 
 ## Phase 2 — Resultat
 
