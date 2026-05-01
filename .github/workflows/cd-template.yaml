@@ -502,27 +502,49 @@ jobs:
       # so ARM fails at permission check before it can create any of them — circular deadlock.
       # Fix: pre-create the full MG skeleton in parent-first order so all scopes exist and RBAC
       # inheritance is resolvable when the stacks run. Idempotent — skips existing MGs.
+      #
+      # Brownfield: MG names are read from MG_NAME_* env vars (sourced from platform.json) so
+      # tenants with non-default names (e.g. 'ALZ-landingzones', 'ALZ-sandboxes') resolve to the
+      # existing MGs and the loop skips them. With hardcoded literals, Get-AzManagementGroup
+      # would miss the existing hierarchy and create parallel duplicates as siblings.
       - name: "Pre-create ALZ MG hierarchy (cold-start)"
         shell: pwsh
         run: |
           $intRoot  = $env:INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID
           $tenantRg = $env:MANAGEMENT_GROUP_ID
 
+          # Resolve MG names from platform.json env vars with greenfield defaults.
+          # IsNullOrWhiteSpace covers both unset and empty-string cases (Build-PlatformJson
+          # emits empty strings for archetypes it can't detect in simple-mode tenants).
+          function Get-MgName($val, $default) {
+            if ([string]::IsNullOrWhiteSpace($val)) { return $default } else { return $val }
+          }
+          $mgLandingzones   = Get-MgName $env:MG_NAME_LANDINGZONES   'landingzones'
+          $mgPlatform       = Get-MgName $env:MG_NAME_PLATFORM       'platform'
+          $mgSandbox        = Get-MgName $env:MG_NAME_SANDBOX        'sandbox'
+          $mgDecommissioned = Get-MgName $env:MG_NAME_DECOMMISSIONED 'decommissioned'
+          $mgCorp           = Get-MgName $env:MG_NAME_CORP           'corp'
+          $mgOnline         = Get-MgName $env:MG_NAME_ONLINE         'online'
+          $mgConnectivity   = Get-MgName $env:MG_NAME_CONNECTIVITY   'connectivity'
+          $mgIdentity       = Get-MgName $env:MG_NAME_IDENTITY       'identity'
+          $mgManagement     = Get-MgName $env:MG_NAME_MANAGEMENT     'management'
+          $mgSecurity       = Get-MgName $env:MG_NAME_SECURITY       'security'
+
           # ALZ MG hierarchy in parent-first order.
           # SubMgOnly = $true entries are skipped in simple mode (no sub-platform MGs needed).
           $platformMode = $env:PLATFORM_MODE
           $mgs = @(
-            [pscustomobject]@{ Name = $intRoot;         Parent = $tenantRg;      SubMgOnly = $false },
-            [pscustomobject]@{ Name = 'landingzones';   Parent = $intRoot;       SubMgOnly = $false },
-            [pscustomobject]@{ Name = 'platform';       Parent = $intRoot;       SubMgOnly = $false },
-            [pscustomobject]@{ Name = 'sandbox';        Parent = $intRoot;       SubMgOnly = $false },
-            [pscustomobject]@{ Name = 'decommissioned'; Parent = $intRoot;       SubMgOnly = $false },
-            [pscustomobject]@{ Name = 'corp';           Parent = 'landingzones'; SubMgOnly = $false },
-            [pscustomobject]@{ Name = 'online';         Parent = 'landingzones'; SubMgOnly = $false },
-            [pscustomobject]@{ Name = 'connectivity';   Parent = 'platform';     SubMgOnly = $true },
-            [pscustomobject]@{ Name = 'identity';       Parent = 'platform';     SubMgOnly = $true },
-            [pscustomobject]@{ Name = 'management';     Parent = 'platform';     SubMgOnly = $true },
-            [pscustomobject]@{ Name = 'security';       Parent = 'platform';     SubMgOnly = $true }
+            [pscustomobject]@{ Name = $intRoot;          Parent = $tenantRg;       SubMgOnly = $false },
+            [pscustomobject]@{ Name = $mgLandingzones;   Parent = $intRoot;        SubMgOnly = $false },
+            [pscustomobject]@{ Name = $mgPlatform;       Parent = $intRoot;        SubMgOnly = $false },
+            [pscustomobject]@{ Name = $mgSandbox;        Parent = $intRoot;        SubMgOnly = $false },
+            [pscustomobject]@{ Name = $mgDecommissioned; Parent = $intRoot;        SubMgOnly = $false },
+            [pscustomobject]@{ Name = $mgCorp;           Parent = $mgLandingzones; SubMgOnly = $false },
+            [pscustomobject]@{ Name = $mgOnline;         Parent = $mgLandingzones; SubMgOnly = $false },
+            [pscustomobject]@{ Name = $mgConnectivity;   Parent = $mgPlatform;     SubMgOnly = $true  },
+            [pscustomobject]@{ Name = $mgIdentity;       Parent = $mgPlatform;     SubMgOnly = $true  },
+            [pscustomobject]@{ Name = $mgManagement;     Parent = $mgPlatform;     SubMgOnly = $true  },
+            [pscustomobject]@{ Name = $mgSecurity;       Parent = $mgPlatform;     SubMgOnly = $true  }
           )
 
           $anyCreated = $false
