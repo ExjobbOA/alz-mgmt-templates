@@ -1,140 +1,200 @@
 <#
 .SYNOPSIS
-    ALZ State Auditor - REST API Edition.
+    Compares two ALZ stack state exports for change containment verification.
+
 .DESCRIPTION
-    Bypasses Get-AzPolicy cmdlets to query the ARM REST API directly.
-    This guarantees accurate JSON retrieval without PowerShell parsing errors.
+    Reads two JSON files produced by Export-ALZStackState.ps1 and reports:
+    - Which stacks had content changes (resource snapshots)
+    - Which stacks were redeployed without content changes (DeploymentId only)
+    - Which stacks were fully untouched
+    - Specific property changes in affected stacks
+
+    Ignores: ExportTimestamp, DeploymentId (expected to differ on redeployment)
+
+.EXAMPLE
+    ./Compare-ALZStackState.ps1 -BeforeFile "state-before.json" -AfterFile "state-after.json"
 #>
 
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$SubscriptionId,
+    [Parameter(Mandatory)]
+    [string]$BeforeFile,
 
-    [Parameter(Mandatory = $true)]
-    [string]$TenantIntRootMgId,
-
-    [Parameter(Mandatory = $false)]
-    [string]$OutputFile = "ALZ-State-REST-$(Get-Date -Format 'yyyyMMdd-HHmm').json"
+    [Parameter(Mandatory)]
+    [string]$AfterFile
 )
 
 $ErrorActionPreference = "Stop"
 
-# 1. Define the ALZ Stack Architecture
-$mgStacks = @(
-    @{ Scope = "mg"; MgId = $TenantIntRootMgId; Name = "$TenantIntRootMgId-governance-int-root" }
-    @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-platform" }
-    @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-landingzones" }
-    @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-landingzones-corp" }
-    @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-landingzones-online" }
-    @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-sandbox" }
-    @{ Scope = "mg"; MgId = "alz"; Name = "alz-governance-decommissioned" }
-)
+$before = Get-Content $BeforeFile -Raw | ConvertFrom-Json
+$after  = Get-Content $AfterFile -Raw  | ConvertFrom-Json
 
-$subStacks = @(
-    @{ Scope = "sub"; Name = "alz-core-logging" }
-    @{ Scope = "sub"; Name = "alz-networking-hub" }
-)
+Write-Host "============================================" -ForegroundColor Cyan
+Write-Host " ALZ Stack Diff Report" -ForegroundColor Cyan
+Write-Host "============================================" -ForegroundColor Cyan
+Write-Host "Before: $BeforeFile"
+Write-Host "After:  $AfterFile"
+Write-Host ""
 
-# 2. REST API Helper Function
-function Get-ArmResourceState {
-    param([string]$ResourceId)
-    
-    $apiVersion = "2021-06-01" 
-    if ($ResourceId -match "/policyAssignments/") { $apiVersion = "2024-04-01" }
+$changedStacks = @()
+$redeployedStacks = @()
+$unchangedStacks = @()
 
-    try {
-        $response = Invoke-AzRestMethod -Method GET -Path "$ResourceId`?api-version=$apiVersion"
-        
-        if ($response.StatusCode -eq 200) {
-            # THE FIX: Safely attempt JSON conversion
-            try {
-                return $response.Content | ConvertFrom-Json -ErrorAction Stop
-            }
-            catch {
-                # If ConvertFrom-Json fails with the '@' error, it means 
-                # PowerShell already parsed it natively! Just return the content.
-                return $response.Content
-            }
-        }
-        else {
-            return @{ Error = "HTTP $($response.StatusCode)" }
-        }
+foreach ($beforeStack in $before.Stacks) {
+    $afterStack = $after.Stacks | Where-Object { $_.Name -eq $beforeStack.Name }
+
+    if (-not $afterStack) {
+        Write-Host "  MISSING in after: $($beforeStack.Name)" -ForegroundColor Red
+        continue
     }
-    catch {
-        return @{ Error = "REST Call Failed: $($_.Exception.Message)" }
+
+    $differences = @()
+    $redeployed = $false
+
+    # Track DeploymentId separately — changes on every redeployment, not a content change
+    if ($beforeStack.DeploymentId -ne $afterStack.DeploymentId) {
+        $redeployed = $true
     }
-}
 
-# 3. Main Execution
-Write-Host "--- ALZ State Export Started (REST API Mode) ---" -ForegroundColor Cyan
-Set-AzContext -SubscriptionId $SubscriptionId | Out-Null
+    # Compare ProvisioningState
+    if ($beforeStack.ProvisioningState -ne $afterStack.ProvisioningState) {
+        $differences += "ProvisioningState changed: $($beforeStack.ProvisioningState) -> $($afterStack.ProvisioningState)"
+    }
 
-$results = @{
-    Timestamp = (Get-Date -Format "o")
-    Stacks    = @()
-}
+    # Compare resource counts
+    if ($beforeStack.ResourceCount -ne $afterStack.ResourceCount) {
+        $differences += "ResourceCount changed: $($beforeStack.ResourceCount) -> $($afterStack.ResourceCount)"
+    }
 
-foreach ($s in ($mgStacks + $subStacks)) {
-    Write-Host "Auditing Stack: $($s.Name)" -ForegroundColor Yellow
-    try {
-        if ($s.Scope -eq "mg") {
-            $stack = Get-AzManagementGroupDeploymentStack -ManagementGroupId $s.MgId -Name $s.Name
-        }
-        else {
-            $stack = Get-AzSubscriptionDeploymentStack -Name $s.Name
-        }
+    # Compare resource ID lists
+    $beforeIds = ($beforeStack.ResourceIds | Sort-Object) -join "`n"
+    $afterIds  = ($afterStack.ResourceIds | Sort-Object) -join "`n"
+    if ($beforeIds -ne $afterIds) {
+        $differences += "Resource ID list changed"
+    }
 
-        $stackSnapshots = @()
-        $resourceIds = $stack.Resources | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.Id } }
-        
-        foreach ($rid in $resourceIds) {
-            $snapshot = @{ ResourceId = $rid; Type = "unknown" }
-            
-            # Identify Type
-            if ($rid -match "/policyAssignments/") { $snapshot.Type = "policyAssignment" }
-            elseif ($rid -match "/policyDefinitions/") { $snapshot.Type = "policyDefinition" }
-            elseif ($rid -match "/policySetDefinitions/") { $snapshot.Type = "policySetDefinition" }
+    # Compare deleted/detached resources
+    if (($beforeStack.DeletedResources | ConvertTo-Json -Compress) -ne ($afterStack.DeletedResources | ConvertTo-Json -Compress)) {
+        $differences += "DeletedResources changed"
+    }
+    if (($beforeStack.DetachedResources | ConvertTo-Json -Compress) -ne ($afterStack.DetachedResources | ConvertTo-Json -Compress)) {
+        $differences += "DetachedResources changed"
+    }
 
-            # Fetch via REST
-            $armData = Get-ArmResourceState -ResourceId $rid
+    # Compare resource snapshots (the actual property values)
+    if ($beforeStack.ResourceSnapshots -and $afterStack.ResourceSnapshots) {
+        foreach ($beforeSnap in $beforeStack.ResourceSnapshots) {
+            $afterSnap = $afterStack.ResourceSnapshots | Where-Object { $_.ResourceId -eq $beforeSnap.ResourceId }
 
-            if ($armData.Error) {
-                $snapshot.Error = $armData.Error
+            if (-not $afterSnap) { continue }
+
+            # Use type-aware semantic comparison instead of full JSON string comparison.
+            # ConvertTo-Json -Compress produces non-deterministic property ordering, causing
+            # false positives for unchanged resources. Compare only the fields that matter.
+            $resourceChanged = $false
+            $resourceName = ($beforeSnap.ResourceId -split "/")[-1]
+
+            if ($beforeSnap.Type -eq "policyAssignment" -and $afterSnap.Type -eq "policyAssignment") {
+                # Compare enforcement mode
+                if ($beforeSnap.EnforcementMode -ne $afterSnap.EnforcementMode) {
+                    $resourceChanged = $true
+                    $differences += "Resource changed: $resourceName"
+                    $differences += "  -> EnforcementMode: $($beforeSnap.EnforcementMode) -> $($afterSnap.EnforcementMode)"
+                }
+
+                # Compare parameters key-by-key (sorted, value-serialized)
+                $bp = $beforeSnap.Parameters
+                $ap = $afterSnap.Parameters
+                $paramChanged = $false
+                $paramDiffs = @()
+
+                if ($bp -or $ap) {
+                    $allKeys = @()
+                    if ($bp) { $bp.PSObject.Properties | ForEach-Object { $allKeys += $_.Name } }
+                    if ($ap) { $ap.PSObject.Properties | ForEach-Object { if ($_.Name -notin $allKeys) { $allKeys += $_.Name } } }
+
+                    foreach ($key in ($allKeys | Sort-Object)) {
+                        $bv = ($bp.$key | ConvertTo-Json -Depth 5 -Compress)
+                        $av = ($ap.$key | ConvertTo-Json -Depth 5 -Compress)
+                        if ($bv -ne $av) {
+                            $paramChanged = $true
+                            $paramDiffs += "  -> Parameter '$key': $bv -> $av"
+                        }
+                    }
+                }
+
+                if ($paramChanged) {
+                    if (-not $resourceChanged) {
+                        $resourceChanged = $true
+                        $differences += "Resource changed: $resourceName"
+                    }
+                    $differences += "  -> Policy assignment parameters changed"
+                    $differences += $paramDiffs
+                }
+            }
+            elseif ($beforeSnap.Type -eq "policyDefinition" -and $afterSnap.Type -eq "policyDefinition") {
+                if ($beforeSnap.PolicyRuleHash -and $afterSnap.PolicyRuleHash) {
+                    if ($beforeSnap.PolicyRuleHash -ne $afterSnap.PolicyRuleHash) {
+                        $resourceChanged = $true
+                        $differences += "Resource changed: $resourceName"
+                        $differences += "  -> PolicyRule hash changed"
+                    }
+                }
+            }
+            elseif ($beforeSnap.Type -eq "policySetDefinition" -and $afterSnap.Type -eq "policySetDefinition") {
+                if ($beforeSnap.PolicyDefinitionCount -ne $afterSnap.PolicyDefinitionCount) {
+                    $resourceChanged = $true
+                    $differences += "Resource changed: $resourceName"
+                    $differences += "  -> PolicyDefinitionCount: $($beforeSnap.PolicyDefinitionCount) -> $($afterSnap.PolicyDefinitionCount)"
+                }
             }
             else {
-                $snapshot.DisplayName = $armData.properties.displayName
-                
-                # Extract specifics based on type
-                if ($snapshot.Type -eq "policyAssignment") {
-                    $snapshot.Parameters = $armData.properties.parameters
-                    $snapshot.EnforcementMode = $armData.properties.enforcementMode
-                }
-                elseif ($snapshot.Type -eq "policySetDefinition") {
-                    $snapshot.PolicyCount = @($armData.properties.policyDefinitions).Count
-                    $snapshot.Definitions = $armData.properties.policyDefinitions | Select-Object policyDefinitionId
-                }
-                elseif ($snapshot.Type -eq "policyDefinition") {
-                    # Create a reliable hash of the rule
-                    $ruleJson = $armData.properties.policyRule | ConvertTo-Json -Depth 20 -Compress
-                    $hashBytes = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($ruleJson))
-                    $snapshot.PolicyRuleHash = [System.BitConverter]::ToString($hashBytes).Replace("-", "").Substring(0, 16)
+                # For other resource types fall back to JSON comparison (ResourceId, Type, Name fields only)
+                $bSafe = [PSCustomObject]@{ ResourceId = $beforeSnap.ResourceId; Type = $beforeSnap.Type; Name = $beforeSnap.Name }
+                $aSafe = [PSCustomObject]@{ ResourceId = $afterSnap.ResourceId;  Type = $afterSnap.Type;  Name = $afterSnap.Name  }
+                if (($bSafe | ConvertTo-Json -Compress) -ne ($aSafe | ConvertTo-Json -Compress)) {
+                    $resourceChanged = $true
+                    $differences += "Resource changed: $resourceName"
                 }
             }
-            $stackSnapshots += $snapshot
-        }
-
-        $results.Stacks += @{
-            StackName         = $stack.Name
-            Scope             = $s.Scope
-            ProvisioningState = $stack.ProvisioningState
-            ResourceSnapshots = $stackSnapshots
         }
     }
-    catch {
-        Write-Host "  [!] Error accessing stack: $($_.Exception.Message)" -ForegroundColor Red
+
+    if ($differences.Count -gt 0) {
+        $changedStacks += $beforeStack.Name
+        Write-Host "  CHANGED: $($beforeStack.Name)" -ForegroundColor Yellow
+        foreach ($d in $differences) {
+            Write-Host "    $d" -ForegroundColor Yellow
+        }
+    }
+    elseif ($redeployed) {
+        $redeployedStacks += $beforeStack.Name
+        Write-Host "  REDEPLOYED (no content change): $($beforeStack.Name)" -ForegroundColor Cyan
+    }
+    else {
+        $unchangedStacks += $beforeStack.Name
+        Write-Host "  UNCHANGED: $($beforeStack.Name)" -ForegroundColor Green
     }
 }
 
-# 4. Final Save
-$results | ConvertTo-Json -Depth 100 | Out-File -FilePath $OutputFile -Encoding utf8
-Write-Host "Export complete! File saved to: $OutputFile" -ForegroundColor Green
+# Summary
+Write-Host ""
+Write-Host "============================================" -ForegroundColor Cyan
+Write-Host " Summary" -ForegroundColor Cyan
+Write-Host "============================================" -ForegroundColor Cyan
+$changedColor = if ($changedStacks.Count -eq 0) { "Green" } else { "Red" }
+Write-Host "Content changed:  $($changedStacks.Count)" -ForegroundColor $changedColor
+Write-Host "Redeployed only:  $($redeployedStacks.Count)" -ForegroundColor Cyan
+Write-Host "Unchanged:        $($unchangedStacks.Count)" -ForegroundColor Green
+Write-Host ""
+
+if ($changedStacks.Count -eq 0) {
+    Write-Host "RESULT: No content changes detected." -ForegroundColor Green
+}
+elseif ($changedStacks.Count -eq 1) {
+    $name = $changedStacks[0]
+    Write-Host "RESULT: Only '$name' had content changes." -ForegroundColor Yellow
+}
+else {
+    $affected = $changedStacks -join ', '
+    Write-Host "RESULT: Multiple stacks had content changes: $affected" -ForegroundColor Red
+}
