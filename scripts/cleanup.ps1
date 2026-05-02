@@ -107,11 +107,36 @@ function Resolve-Inputs {
         if ($TenantRootMgId         -eq '') { $Script:TenantRootMgId         = $p.MANAGEMENT_GROUP_ID }
         if ($BootstrapSubscriptionId -eq '') { $Script:BootstrapSubscriptionId = $p.SUBSCRIPTION_ID_MANAGEMENT }
         if ($Location               -eq '') { $Script:Location               = $p.LOCATION }
+
+        # MG names — read from platform.json with greenfield defaults so brownfield tenants
+        # (e.g. ALZ-landingzones, ALZ-sandboxes) target the correct existing hierarchy.
+        $Script:MgNameLandingzones   = if ($p.PSObject.Properties['MG_NAME_LANDINGZONES'])   { $p.MG_NAME_LANDINGZONES }   else { 'landingzones' }
+        $Script:MgNamePlatform       = if ($p.PSObject.Properties['MG_NAME_PLATFORM'])       { $p.MG_NAME_PLATFORM }       else { 'platform' }
+        $Script:MgNameSandbox        = if ($p.PSObject.Properties['MG_NAME_SANDBOX'])        { $p.MG_NAME_SANDBOX }        else { 'sandbox' }
+        $Script:MgNameDecommissioned = if ($p.PSObject.Properties['MG_NAME_DECOMMISSIONED']) { $p.MG_NAME_DECOMMISSIONED } else { 'decommissioned' }
+        $Script:MgNameCorp           = if ($p.PSObject.Properties['MG_NAME_CORP'])           { $p.MG_NAME_CORP }           else { 'corp' }
+        $Script:MgNameOnline         = if ($p.PSObject.Properties['MG_NAME_ONLINE'])         { $p.MG_NAME_ONLINE }         else { 'online' }
+        $Script:MgNameConnectivity   = if ($p.PSObject.Properties['MG_NAME_CONNECTIVITY'])   { $p.MG_NAME_CONNECTIVITY }   else { 'connectivity' }
+        $Script:MgNameIdentity       = if ($p.PSObject.Properties['MG_NAME_IDENTITY'])       { $p.MG_NAME_IDENTITY }       else { 'identity' }
+        $Script:MgNameManagement     = if ($p.PSObject.Properties['MG_NAME_MANAGEMENT'])     { $p.MG_NAME_MANAGEMENT }     else { 'management' }
+        $Script:MgNameSecurity       = if ($p.PSObject.Properties['MG_NAME_SECURITY'])       { $p.MG_NAME_SECURITY }       else { 'security' }
     } else {
         $Script:IntRootMgId            = $IntRootMgId
         $Script:TenantRootMgId         = $TenantRootMgId
         $Script:BootstrapSubscriptionId = $BootstrapSubscriptionId
         $Script:Location               = $Location
+
+        # MG names — defaults when no platform.json is available
+        $Script:MgNameLandingzones   = 'landingzones'
+        $Script:MgNamePlatform       = 'platform'
+        $Script:MgNameSandbox        = 'sandbox'
+        $Script:MgNameDecommissioned = 'decommissioned'
+        $Script:MgNameCorp           = 'corp'
+        $Script:MgNameOnline         = 'online'
+        $Script:MgNameConnectivity   = 'connectivity'
+        $Script:MgNameIdentity       = 'identity'
+        $Script:MgNameManagement     = 'management'
+        $Script:MgNameSecurity       = 'security'
     }
 
     # Interactive fallback
