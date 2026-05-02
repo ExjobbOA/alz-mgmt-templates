@@ -384,11 +384,11 @@ function Remove-ManagementGroupHierarchy {
     # Bottom-up deletion order (children before parents)
     $mgOrder = @(
         # Leaf level
-        'management', 'connectivity', 'identity', 'security'
-        'corp', 'online'
+        $Script:MgNameManagement, $Script:MgNameConnectivity, $Script:MgNameIdentity, $Script:MgNameSecurity
+        $Script:MgNameCorp, $Script:MgNameOnline
         # Intermediate level
-        'platform', 'landingzones'
-        'sandbox', 'decommissioned'
+        $Script:MgNamePlatform, $Script:MgNameLandingzones
+        $Script:MgNameSandbox, $Script:MgNameDecommissioned
         # Root of ALZ hierarchy — deleted last
         $Script:IntRootMgId
     )
