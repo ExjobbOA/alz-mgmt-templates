@@ -211,10 +211,10 @@ function Remove-SubscriptionsFromHierarchy {
     Write-Step 'Moving subscriptions out of ALZ management group hierarchy'
 
     $mgNames = @(
-        'connectivity', 'identity', 'management', 'security',
-        'corp', 'online',
-        'platform', 'landingzones',
-        'sandbox', 'decommissioned',
+        $Script:MgNameConnectivity, $Script:MgNameIdentity, $Script:MgNameManagement, $Script:MgNameSecurity,
+        $Script:MgNameCorp, $Script:MgNameOnline,
+        $Script:MgNamePlatform, $Script:MgNameLandingzones,
+        $Script:MgNameSandbox, $Script:MgNameDecommissioned,
         $Script:IntRootMgId
     )
 
