@@ -171,7 +171,7 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "true"
           firstRunWhatIf: "false"
-          targetManagementGroupId: "landingzones"
+          targetManagementGroupId: ${{ env.MG_NAME_LANDINGZONES }}
           skipWhatIfIfTargetMgMissing: "true"
 
       - name: "Plan: Governance-Landing Zones Corp"
@@ -190,7 +190,7 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "true"
           firstRunWhatIf: "false"
-          targetManagementGroupId: "corp"
+          targetManagementGroupId: ${{ env.MG_NAME_CORP }}
           skipWhatIfIfTargetMgMissing: "true"
 
       - name: "Plan: Governance-Landing Zones Online"
@@ -209,7 +209,7 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "true"
           firstRunWhatIf: "false"
-          targetManagementGroupId: "online"
+          targetManagementGroupId: ${{ env.MG_NAME_ONLINE }}
           skipWhatIfIfTargetMgMissing: "true"
 
       - name: "Plan: Governance-Platform"
@@ -226,7 +226,7 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "true"
           firstRunWhatIf: "false"
-          targetManagementGroupId: "platform"
+          targetManagementGroupId: ${{ env.MG_NAME_PLATFORM }}
           skipWhatIfIfTargetMgMissing: "true"
 
       - name: "Plan: Governance-Platform Connectivity"
@@ -246,7 +246,7 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "true"
           firstRunWhatIf: "false"
-          targetManagementGroupId: "connectivity"
+          targetManagementGroupId: ${{ env.MG_NAME_CONNECTIVITY }}
           skipWhatIfIfTargetMgMissing: "true"
 
       - name: "Plan: Governance-Platform Identity"
@@ -265,7 +265,7 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "true"
           firstRunWhatIf: "false"
-          targetManagementGroupId: "identity"
+          targetManagementGroupId: ${{ env.MG_NAME_IDENTITY }}
           skipWhatIfIfTargetMgMissing: "true"
 
       - name: "Plan: Governance-Platform Management"
@@ -285,7 +285,7 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "true"
           firstRunWhatIf: "false"
-          targetManagementGroupId: "management"
+          targetManagementGroupId: ${{ env.MG_NAME_MANAGEMENT }}
           skipWhatIfIfTargetMgMissing: "true"
 
       - name: "Plan: Governance-Platform Security"
@@ -304,7 +304,7 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "true"
           firstRunWhatIf: "false"
-          targetManagementGroupId: "security"
+          targetManagementGroupId: ${{ env.MG_NAME_SECURITY }}
           skipWhatIfIfTargetMgMissing: "true"
 
       - name: "Plan: Governance-Sandbox"
@@ -321,7 +321,7 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "true"
           firstRunWhatIf: "false"
-          targetManagementGroupId: "sandbox"
+          targetManagementGroupId: ${{ env.MG_NAME_SANDBOX }}
           skipWhatIfIfTargetMgMissing: "true"
 
       - name: "Plan: Governance-Decommissioned"
@@ -339,7 +339,7 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "true"
           firstRunWhatIf: "false"
-          targetManagementGroupId: "decommissioned"
+          targetManagementGroupId: ${{ env.MG_NAME_DECOMMISSIONED }}
           skipWhatIfIfTargetMgMissing: "true"
 
       - name: "Plan: Governance-Platform RBAC"
@@ -357,7 +357,7 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "true"
           firstRunWhatIf: "false"
-          targetManagementGroupId: "platform"
+          targetManagementGroupId: ${{ env.MG_NAME_PLATFORM }}
           skipWhatIfIfTargetMgMissing: "true"
 
       - name: "Plan: Governance-Platform Connectivity RBAC"
@@ -377,7 +377,7 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "true"
           firstRunWhatIf: "false"
-          targetManagementGroupId: "connectivity"
+          targetManagementGroupId: ${{ env.MG_NAME_CONNECTIVITY }}
           skipWhatIfIfTargetMgMissing: "true"
 
       - name: "Plan: Governance-Landing Zones RBAC"
@@ -396,7 +396,7 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "true"
           firstRunWhatIf: "false"
-          targetManagementGroupId: "landingzones"
+          targetManagementGroupId: ${{ env.MG_NAME_LANDINGZONES }}
           skipWhatIfIfTargetMgMissing: "true"
 
       - name: "Plan: Networking - Hub"
