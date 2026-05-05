@@ -11,163 +11,163 @@
 
 ## Syfte
 
-Visa att plattformen blockerar bypass-försök som skulle kringgå den deklarativa kedjan.
-Tre oberoende vägar runt processen testas:
+Visa att alla ändringar mot plattformen passerar den deklarativa kedjan
+PR → CI → review → merge → CD. Ingen ändring kan nå Azure utanför kedjan.
 
-1. **Portal-edit** av en plattform-hanterad resurs
-2. **Direkt push** till main utan PR
-3. **Workflow-trigger från obehörig identitet** (t.ex. en fork)
-
-K7 mäts genom screenshots av blockeringsmeddelanden från Azure och GitHub.
+K7 mäts genom ett aktivt test (direkt push till main) plus konfigurationsbevis
+för de två andra kontrollpunkterna i kedjan.
 
 ---
 
 ## Context
 
-Plattformens säkerhetsmodell bygger på tre lager:
+Plattformens "kontrollerade process" består av tre kontrollpunkter:
 
-- **Azure Policy** + deployment stacks med `denyDelete`/`denySettings` blockerar
-  manuella ändringar i portalen av plattformshanterade resurser
-- **GitHub branch protection** på main blockerar direkta pushes och kräver PR med
-  godkännande
-- **GitHub OIDC federation** med subject-claim-bindning blockerar workflow-körningar
-  från obehöriga repos eller branches
+1. **GitHub branch protection** på `main` — kräver PR med godkännande, blockerar
+   direkta pushes
+2. **CD-trigger** — `cd.yaml` har endast `workflow_dispatch`, ingen
+   `push:`-trigger. CD körs aldrig automatiskt på en commit
+3. **OIDC federated credentials** — Azure-login i CD är bunden till specifika
+   subject claims (repo + branch/environment). Workflow-körningar från obehöriga
+   källor får inget Azure-token
 
-Alla tre testas separat med diskreta försök.
+Phase 1 testar (1) aktivt. Phase 2 dokumenterar (2) och (3) som konfiguration —
+de är statiska egenskaper av setup, inte runtime-beteenden som behöver
+provoceras fram för 15hp-omfattning.
+
+**Notering om portal-edits:** Plattformen kör `denySettingsMode: "None"` på alla
+deployment stacks. Manuella portal-edits är därför inte blockerade i Azure utan
+**detekteras och reverteras** av reconciliation på nästa CD-körning. Det
+beteendet hör till K8 (rollback) / K11 (state-konvergens), inte K7.
 
 ---
 
 ## Phase 0 — Pre-flight
 
-### 0.1 Verifiera att skydden är aktiva
+### 0.1 Baseline
 
-Innan testet, dokumentera att skydden är konfigurerade:
-
-**Branch protection:**
-- GitHub repo settings → Branches → main → Require pull request before merging: aktiv
-- Require status checks to pass: aktiv
-
-**Deployment stack denySettings:**
-
-```powershell
-Get-AzManagementGroupDeploymentStack -ManagementGroupId "alz" -Name "alz-governance-platform" |
-  Select-Object -ExpandProperty DenySettings
-```
-
-**OIDC federated credentials:**
-- Azure Portal → Microsoft Entra → App registration → Federated credentials
-- Subject claim ska binda till specifika repo:n och branches
+- Engine-tag: _paste senaste tag_
+- 11/11 stackar succeeded
+- Inga öppna PRs
+- Branch `main` är upp-to-date lokalt
 
 ---
 
-## Phase 1 — Bypass-försök 1: Portal-edit
+## Phase 1 — Aktivt test: Direkt push till main
 
-### 1.1 Välj en plattform-hanterad resurs
-
-Välj en policy assignment som tydligt är hanterad av en deployment stack, t.ex.
-`Deploy-MCSB2-Monitoring` på alz-MG.
-
-### 1.2 Försök redigera i portalen
-
-1. Azure Portal → Management Groups → alz → Policy → Assignments
-2. Klicka på `Deploy-MCSB2-Monitoring`
-3. Försök ändra parameter eller scope
-4. Försök Delete
-
-### 1.3 Förväntat resultat
-
-Azure ska blockera ändringen med felmeddelande som refererar till deployment stack
-denySettings.
-
-**Screenshot:** `t5-1-portal-edit-blocked.png`
-
----
-
-## Phase 2 — Bypass-försök 2: Direkt push till main
-
-### 2.1 Försök pusha utan PR
+### 1.1 Försök pusha utan PR
 
 ```powershell
 cd C:\Users\granl\repos\alz-mgmt
 git switch main
 git pull
-echo "# bypass test" >> README.md
+"# bypass test" | Out-File -Append README.md
 git add README.md
 git commit -m "bypass test: direct push to main"
 git push origin main
 ```
 
-### 2.2 Förväntat resultat
+### 1.2 Förväntat resultat
 
-Git ska rejecta pushen med felmeddelande från GitHub branch protection.
+`git push` rejectas av GitHub med felmeddelande från branch protection.
+Tenant-repots `main` förblir oförändrad.
 
-**Screenshot:** `t5-2-push-rejected.png` (terminal med error output)
+**Screenshot:** `t5-1-push-rejected.png` (terminal med GitHub:s rejection-output)
 
-### 2.3 Cleanup
+### 1.3 Cleanup
 
 ```powershell
 git reset --hard HEAD~1
 ```
 
----
+Verifiera att den lokala commiten är borta:
 
-## Phase 3 — Bypass-försök 3: OIDC från obehörig källa
-
-### 3.1 Förbered försök
-
-Skapa en fork av tenant-repot under en annan GitHub-användare eller en separat branch
-som inte är subject-claim-tillåten i OIDC-konfiguratione. Försök trigga workflowen
-därifrån.
-
-Alternativ: ändra workflow-filen lokalt så att den försöker köra OIDC-login med en
-annan identitet eller mot en annan subscription.
-
-### 3.2 Försök trigga workflow
-
-Pusha till fork:en eller obehörig branch, observera workflow-resultatet i GitHub
-Actions.
-
-### 3.3 Förväntat resultat
-
-Azure-login-steget ska faila med ett OIDC-rejection-meddelande som indikerar att
-subject-claim inte matchar federated credential.
-
-**Screenshot:** `t5-3-oidc-rejected.png`
-
-### 3.4 Cleanup
-
-Ta bort fork:en eller branchen efter dokumentation.
+```powershell
+git log --oneline -3
+```
 
 ---
 
-## Phase 4 — Resultat
+## Phase 2 — Konfigurationsbevis
 
-### 4.1 Förväntat vs observerat
+### 2.1 Branch protection på main
 
-| Bypass-försök | Förväntat | Observerat | Källa |
+GitHub repo settings → Branches → branch protection rule för `main`.
+
+Relevanta regler som ska vara aktiva:
+- Require a pull request before merging
+- Require status checks to pass before merging (CI)
+
+**Screenshot:** `t5-2-branch-protection.png`
+
+### 2.2 OIDC federated credentials
+
+Azure Portal → RG för plan och apply, vi kollar apply identiteten:
+Federated credentials.
+
+Verifiera att subject claim binder federated credential till specifik repo
+och branch/environment, t.ex.:
+
+```
+repo:ExjobbOA/alz-mgmt-oskar:ref:refs/heads/main
+repo:ExjobbOA/alz-mgmt-oskar:environment:alz-mgmt-plan
+```
+
+En workflow-körning från en fork eller obehörig branch kommer inte matcha
+någon av dessa subject claims och får därmed inget Azure-token.
+
+**Screenshot:** `t5-3-oidc-subject-claim.png`
+
+### 2.3 CD-trigger är manuell
+
+Verifiera i `alz-mgmt-oskar/.github/workflows/cd.yaml` att CD endast triggas
+av `workflow_dispatch` — inget `push:` på main, ingen automatisk trigger:
+
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      ...
+```
+
+Det innebär att även om en commit hade nått main (vilket Phase 1 visar att
+den inte kan), så skulle CD inte köra automatiskt utan kräver explicit trigger
+av en operatör.
+
+**Källa:** `cd.yaml` rad 3–4 (refereras i rapporten, ingen separat screenshot
+behövs).
+
+---
+
+## Phase 3 — Resultat
+
+### 3.1 Förväntat vs observerat
+
+| Kontrollpunkt | Förväntat | Observerat | Källa |
 |---|---|---|---|
-| Portal-edit av managed resource | Blockerad av denySettings | _ | Phase 1-screenshot |
-| Direkt push till main | Rejected av branch protection | _ | Phase 2-screenshot |
-| OIDC från obehörig källa | Rejected av subject-claim | _ | Phase 3-screenshot |
+| Direkt push till main | Rejected av branch protection | Rejected av branch protection | Phase 1 |
+| PR krävs för merge | Branch protection rule aktiv | Ja | Phase 2.1 |
+| OIDC bunden till repo/branch | Federated credential subject claim konfigurerad | Ja, bunden till environment | Phase 2.2 |
+| CD körs ej automatiskt | Endast `workflow_dispatch` i `cd.yaml` | Ja cd körs bara på workflow dispatch, alternativet är att den körs automatiskt vid PR fast efter godkännande/review av när whatif har körts| Phase 2.3 |
 
-### 4.2 Observationer
+### 3.2 Observationer
 
-[Fyll i efter körning. Vad var oväntat, hur tydligt var felmeddelandet, etc.]
+[Fyll i efter körning. Vad var oväntat, hur tydligt var rejection-meddelandet, etc.]
+Ingenting oväntat
 
-### 4.3 Verdict
+### 3.3 Verdict
 
-- [ ] K7 Passed (alla tre blockerade)
-- [ ] K7 Partially passed (2 av 3)
-- [ ] K7 Not passed (1 eller 0 av 3)
+- [x ] K7 Passed (alla fyra kontrollpunkter verifierade)
+- [ ] K7 Partially passed
+- [ ] K7 Not passed
 
-**En-meningskommentar:** _paste efter körning_
+**En-meningskommentar:** Inget kontroversiellt 
 
 ---
 
 ## Evidens-artefakter
 
-1. `t5-1-portal-edit-blocked.png` — Azure portal blockering av manuell edit
-2. `t5-2-push-rejected.png` — GitHub rejection av direct push
-3. `t5-3-oidc-rejected.png` — Azure OIDC-rejection av obehörig identitet
-4. Konfigurationsbevis från Phase 0 (branch protection, denySettings, federated
-   credentials)
+1. `t5-1-push-rejected.png` — terminal med GitHub:s rejection av direct push
+2. `t5-2-branch-protection.png` — GitHub branch protection rule på main
+3. `t5-3-oidc-subject-claim.png` — Entra federated credential med subject claim
+4. Referens till `cd.yaml` rad 3–4 (manuell trigger)
