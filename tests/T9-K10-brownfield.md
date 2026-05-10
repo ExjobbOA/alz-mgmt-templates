@@ -247,6 +247,20 @@ Lämnas kvar i Sylaviken som T9-evidens:
 - Cleanup-first takeover-pipeline (delete + recreate-sekvens med risk-fönster)
 "En alternativ brownfield-strategi som inte kräver in-place takeover är parallell hierarchy-deployment med audit-only-effects och iterativ subscription-migration. Plattformen i denna avhandling stödjer denna modell tekniskt — engine kan deploya till godtyckligt namngiven intermediate root MG. Operationellt kräver den dock customer-koordinering, MG-restrukturering, och custom-policy-portation som ligger utanför thesis-scope. Det rekommenderas som primär migrationsväg för enterprise-kunder."
 
+OBS PÅ WIKI STÅR DETTA 
+Deployment Stacks Automatic Cleanup
+
+Unlike classic Bicep deployments, deployment stacks automatically remove resources that are no longer defined in your templates. This means:
+
+    Deprecated policies are automatically unassigned when you update the ALZ library
+    No manual cleanup required for removed policy assignments
+    Consistent state between your templates and deployed resources
+    Safe deletion - only removes resources managed by the deployment stack
+
+This is a major improvement over ALZ Bicep Classic, where you had to manually remove deprecated policy assignments before deploying updates.
+
+SÅ GREJEN ÄR ATT DET MAN MÅSTE GÖRA FÖR IN PLACE ÄR ATT MANUELLT RENSA ALLA 
+
 ---
 
 ## Referenser
