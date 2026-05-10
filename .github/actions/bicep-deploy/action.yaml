@@ -46,22 +46,10 @@ inputs:
     description: "If true, skip What-If when targetManagementGroupId does not exist yet"
     required: false
     default: "false"
-  denySettingsMode:
-    description: "Deployment stack deny settings mode (None, DenyDelete, DenyWriteAndDelete)"
-    required: false
-    default: "None"
   actionOnUnmanage:
     description: "Deployment stack action on unmanage (DeleteAll, DetachAll, etc.)"
     required: false
     default: "DeleteAll"
-  stackNamePrefix:
-    description: "Prefix prepended to the stack/deployment name (e.g. prod-)."
-    required: false
-    default: ""
-  stackNameOverride:
-    description: "If set, use this exact stack/deployment name (takes precedence)."
-    required: false
-    default: ""
 
 runs:
   using: "composite"
@@ -166,24 +154,7 @@ runs:
           if ($deploymentNameBase.Length -gt $deploymentNameMaxLength) {
             $deploymentNameBase = $deploymentNameBase.Substring(0, $deploymentNameMaxLength)
           }
-          # If override is provided, use it as-is
-          if (-not [string]::IsNullOrWhiteSpace($env:STACK_NAME_OVERRIDE)) {
-            $deploymentName = $env:STACK_NAME_OVERRIDE
-          }
-          else {
-            # Prefer workflow-provided prefix; fall back to existing computed prefix
-            $prefix = $env:STACK_NAME_PREFIX
-            if ([string]::IsNullOrWhiteSpace($prefix)) {
-              $prefix = $deploymentPrefix
-            }
-
-            # Normalize prefix so it ends with '-' if not empty
-            if (-not [string]::IsNullOrWhiteSpace($prefix) -and -not $prefix.EndsWith("-")) {
-              $prefix = "$prefix-"
-            }
-
-            $deploymentName = "$prefix$deploymentNameBase"
-          }
+          $deploymentName = "$deploymentPrefix-$deploymentNameBase"
 
           $modeText = if ($whatIfEnabled) { "What-If" } else { "Deployment Stack" }
 
@@ -282,7 +253,7 @@ runs:
               Name                  = $deploymentName
               TemplateFile          = $env:TEMPLATE_FILE_PATH
               TemplateParameterFile = $env:TEMPLATE_PARAMETERS_FILE_PATH
-              DenySettingsMode      = $env:DENY_SETTINGS_MODE
+              DenySettingsMode      = "None"
               ActionOnUnmanage      = $env:ACTION_ON_UNMANAGE
               Force                 = $true
               Verbose               = $true
@@ -453,7 +424,4 @@ runs:
         MANAGEMENT_GROUP_ID_PREFIX: ${{ env.MANAGEMENT_GROUP_ID_PREFIX }}
         INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID: ${{ env.INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID }}
         MANAGEMENT_GROUP_ID_POSTFIX: ${{ env.MANAGEMENT_GROUP_ID_POSTFIX }}
-        DENY_SETTINGS_MODE: ${{ inputs.denySettingsMode }}
         ACTION_ON_UNMANAGE: ${{ inputs.actionOnUnmanage }}
-        STACK_NAME_PREFIX: ${{ inputs.stackNamePrefix }}
-        STACK_NAME_OVERRIDE: ${{ inputs.stackNameOverride }}
