@@ -605,8 +605,6 @@ jobs:
           whatIfEnabled: "false"
           firstRunWhatIf: "false"
           managementGroupId: ${{ env.MANAGEMENT_GROUP_ID }}
-          stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: "None"
           actionOnUnmanage: "DeleteAll"
 
       # 2) Landing Zones (MG stacks at Intermediate Root MG)
@@ -625,8 +623,6 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "false"
           firstRunWhatIf: "false"
-          stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: "None"
           actionOnUnmanage: "DeleteAll"
 
       - name: "Apply: Governance-Landing Zones Corp"
@@ -645,8 +641,6 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "false"
           firstRunWhatIf: "false"
-          stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: "None"
           actionOnUnmanage: "DeleteAll"
 
       - name: "Apply: Governance-Landing Zones Online"
@@ -665,8 +659,6 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "false"
           firstRunWhatIf: "false"
-          stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: "None"
           actionOnUnmanage: "DeleteAll"
 
       # 3) Platform (Base)
@@ -684,8 +676,6 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "false"
           firstRunWhatIf: "false"
-          stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: "None"
           actionOnUnmanage: "DeleteAll"
 
       # 4) Platform Connectivity (sub placement) — full mode only
@@ -706,8 +696,6 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "false"
           firstRunWhatIf: "false"
-          stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: "None"
           actionOnUnmanage: "DeleteAll"
 
       # 5) Platform Identity — full mode only
@@ -727,8 +715,6 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "false"
           firstRunWhatIf: "false"
-          stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: "None"
           actionOnUnmanage: "DeleteAll"
 
       # 6) Platform Management — full mode only
@@ -749,8 +735,6 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "false"
           firstRunWhatIf: "false"
-          stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: "None"
           actionOnUnmanage: "DeleteAll"
 
       # 7) Platform Security — full mode only
@@ -770,8 +754,6 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "false"
           firstRunWhatIf: "false"
-          stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: "None"
           actionOnUnmanage: "DeleteAll"
 
       # 8) Sandbox & Decommissioned
@@ -789,8 +771,6 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "false"
           firstRunWhatIf: "false"
-          stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: "None"
           actionOnUnmanage: "DeleteAll"
 
       - name: "Apply: Governance-Decommissioned"
@@ -808,8 +788,6 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "false"
           firstRunWhatIf: "false"
-          stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: "None"
           actionOnUnmanage: "DeleteAll"
 
       # 9) RBAC stages
@@ -828,8 +806,6 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "false"
           firstRunWhatIf: "false"
-          stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: "None"
           actionOnUnmanage: "DeleteAll"
 
       - name: "Apply: Governance-Platform Connectivity RBAC"
@@ -849,8 +825,6 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "false"
           firstRunWhatIf: "false"
-          stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: "None"
           actionOnUnmanage: "DeleteAll"
 
       - name: "Apply: Governance-Landing Zones RBAC"
@@ -869,8 +843,6 @@ jobs:
           deploymentType: "managementGroup"
           whatIfEnabled: "false"
           firstRunWhatIf: "false"
-          stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: "None"
           actionOnUnmanage: "DeleteAll"
 
       # 10) Networking (subscription stack)
@@ -888,8 +860,6 @@ jobs:
           deploymentType: "subscription"
           whatIfEnabled: "false"
           firstRunWhatIf: "false"
-          stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: "None"
           actionOnUnmanage: "DetachAll"
 
       # 11) Core-Logging (final step, subscription stack)
@@ -907,6 +877,4 @@ jobs:
           deploymentType: "subscription"
           whatIfEnabled: "false"
           firstRunWhatIf: "false"
-          stackNamePrefix: ${{ env.STACK_PREFIX }}
-          denySettingsMode: "None"
           actionOnUnmanage: "DetachAll"
