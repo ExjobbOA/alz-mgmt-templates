@@ -95,12 +95,12 @@ jobs:
           path: platform
 
       - name: Get Bicep Variables
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-variables@main
+        uses: ./platform/.github/actions/bicep-variables
         with:
           parameters_file_name: ${{ env.PARAMETERS_FILE_NAME }}
 
       - name: Install Bicep and Update Az Module
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-installer@main
+        uses: ./platform/.github/actions/bicep-installer
 
       - name: Bicep Build & Lint All Modules
         shell: pwsh
@@ -133,7 +133,7 @@ jobs:
           enable-AzPSSession: true
 
       - name: Check for First Deployment
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-first-deployment-check@main
+        uses: ./platform/.github/actions/bicep-first-deployment-check
         with:
           managementGroupId: ${{ env.INTERMEDIATE_ROOT_MANAGEMENT_GROUP_ID }}
           parentManagementGroupId: ${{ env.MANAGEMENT_GROUP_ID }}
@@ -142,7 +142,7 @@ jobs:
 
       - name: "Plan: Governance-Intermediate Root"
         if: ${{ inputs.governance-int-root }}
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        uses: ./platform/.github/actions/bicep-deploy
         with:
           name: "governance-int-root"
           displayName: "Governance-Intermediate Root"
@@ -158,7 +158,7 @@ jobs:
 
       - name: "Plan: Governance-Landing Zones"
         if: ${{ inputs.governance-landingzones }}
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        uses: ./platform/.github/actions/bicep-deploy
         with:
           name: "governance-landingzones"
           displayName: "Governance-Landing Zones"
@@ -176,7 +176,7 @@ jobs:
 
       - name: "Plan: Governance-Landing Zones Corp"
         if: ${{ inputs.governance-landingzones-corp }}
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        uses: ./platform/.github/actions/bicep-deploy
         with:
           name: "governance-landingzones-corp"
           displayName: "Governance-Landing Zones Corp"
@@ -195,7 +195,7 @@ jobs:
 
       - name: "Plan: Governance-Landing Zones Online"
         if: ${{ inputs.governance-landingzones-online }}
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        uses: ./platform/.github/actions/bicep-deploy
         with:
           name: "governance-landingzones-online"
           displayName: "Governance-Landing Zones Online"
@@ -214,7 +214,7 @@ jobs:
 
       - name: "Plan: Governance-Platform"
         if: ${{ inputs.governance-platform }}
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        uses: ./platform/.github/actions/bicep-deploy
         with:
           name: "governance-platform"
           displayName: "Governance-Platform"
@@ -232,7 +232,7 @@ jobs:
       - name: "Plan: Governance-Platform Connectivity"
         if: ${{ inputs.governance-platform-connectivity && env.PLATFORM_MODE != 'simple'
           }}
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        uses: ./platform/.github/actions/bicep-deploy
         with:
           name: "governance-platform-connectivity"
           displayName: "Governance-Platform Connectivity"
@@ -251,7 +251,7 @@ jobs:
 
       - name: "Plan: Governance-Platform Identity"
         if: ${{ inputs.governance-platform-identity && env.PLATFORM_MODE != 'simple' }}
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        uses: ./platform/.github/actions/bicep-deploy
         with:
           name: "governance-platform-identity"
           displayName: "Governance-Platform Identity"
@@ -271,7 +271,7 @@ jobs:
       - name: "Plan: Governance-Platform Management"
         if: ${{ inputs.governance-platform-management && env.PLATFORM_MODE != 'simple'
           }}
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        uses: ./platform/.github/actions/bicep-deploy
         with:
           name: "governance-platform-management"
           displayName: "Governance-Platform Management"
@@ -290,7 +290,7 @@ jobs:
 
       - name: "Plan: Governance-Platform Security"
         if: ${{ inputs.governance-platform-security && env.PLATFORM_MODE != 'simple' }}
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        uses: ./platform/.github/actions/bicep-deploy
         with:
           name: "governance-platform-security"
           displayName: "Governance-Platform Security"
@@ -309,7 +309,7 @@ jobs:
 
       - name: "Plan: Governance-Sandbox"
         if: ${{ inputs.governance-sandbox }}
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        uses: ./platform/.github/actions/bicep-deploy
         with:
           name: "governance-sandbox"
           displayName: "Governance-Sandbox"
@@ -326,7 +326,7 @@ jobs:
 
       - name: "Plan: Governance-Decommissioned"
         if: ${{ inputs.governance-decommissioned }}
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        uses: ./platform/.github/actions/bicep-deploy
         with:
           name: "governance-decommissioned"
           displayName: "Governance-Decommissioned"
@@ -344,7 +344,7 @@ jobs:
 
       - name: "Plan: Governance-Platform RBAC"
         if: ${{ inputs.governance-platform-rbac }}
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        uses: ./platform/.github/actions/bicep-deploy
         with:
           name: "governance-platform-rbac"
           displayName: "Governance-Platform RBAC"
@@ -363,7 +363,7 @@ jobs:
       - name: "Plan: Governance-Platform Connectivity RBAC"
         if: ${{ inputs.governance-platform-connectivity-rbac && env.PLATFORM_MODE !=
           'simple' }}
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        uses: ./platform/.github/actions/bicep-deploy
         with:
           name: "governance-platform-connectivity-rbac"
           displayName: "Governance-Platform Connectivity RBAC"
@@ -382,7 +382,7 @@ jobs:
 
       - name: "Plan: Governance-Landing Zones RBAC"
         if: ${{ inputs.governance-landingzones-rbac }}
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        uses: ./platform/.github/actions/bicep-deploy
         with:
           name: "governance-landingzones-rbac"
           displayName: "Governance-Landing Zones RBAC"
@@ -401,7 +401,7 @@ jobs:
 
       - name: "Plan: Networking - Hub"
         if: ${{ inputs.networking && env.NETWORK_TYPE == 'hubnetworking' }}
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        uses: ./platform/.github/actions/bicep-deploy
         with:
           name: "networking-hub"
           displayName: "Networking - Hub"
@@ -416,7 +416,7 @@ jobs:
 
       - name: "Plan: Core-Logging"
         if: ${{ inputs.core-logging }}
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-deploy@main
+        uses: ./platform/.github/actions/bicep-deploy
         with:
           name: "core-logging"
           displayName: "Core-Logging"
@@ -459,12 +459,12 @@ jobs:
           path: platform
 
       - name: Get Bicep Variables
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-variables@main
+        uses: ./platform/.github/actions/bicep-variables
         with:
           parameters_file_name: ${{ env.PARAMETERS_FILE_NAME }}
 
       - name: Install Bicep and Update Az Module
-        uses: ExjobbOA/alz-mgmt-templates/.github/actions/bicep-installer@main
+        uses: ./platform/.github/actions/bicep-installer
 
       - name: Bicep Build & Lint All Modules
         shell: pwsh
