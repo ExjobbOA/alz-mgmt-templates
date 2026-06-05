@@ -117,6 +117,15 @@ function Test-Prerequisites {
     }
     Write-Ok 'az, gh, git — all present.'
 
+    # Bicep CLI is required to deploy the bootstrap .bicep directly.
+    # 'az bicep version' exits 0 when installed (and triggers auto-install on first use).
+    $null = az bicep version 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail 'Bicep CLI not available. Run: az bicep install'
+        exit 1
+    }
+    Write-Ok 'Bicep CLI present.'
+
     $account = az account show 2>$null | ConvertFrom-Json
     if (-not $account) { Write-Fail 'Not logged into Azure. Run: az login'; exit 1 }
     Write-Ok "Azure: logged in as $($account.user.name) (tenant $($account.tenantId))"
@@ -245,7 +254,7 @@ function Set-OidcSubjectClaim {
 function Invoke-Bootstrap {
     Write-Step 'Running bootstrap Bicep deployment'
 
-    $templateFile = Join-Path $TemplatesRoot 'bootstrap/plumbing/main.json'
+    $templateFile = Join-Path $TemplatesRoot 'bootstrap/plumbing/main.bicep'
     if (-not (Test-Path $templateFile)) {
         Write-Fail "Bootstrap template not found: $templateFile"; exit 1
     }
