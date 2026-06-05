@@ -7,9 +7,11 @@ param bootstrapSubscriptionId string
 param location string = 'swedencentral'
 
 @description('GitHub org.')
+// ADOPTION: change 'ExjobbOA' to <your-org>
 param githubOrg string = 'ExjobbOA'
 
 @description('Config/module repo (där environments finns).')
+// ADOPTION: change 'alz-mgmt' to <your-tenant-repo-name>
 param moduleRepo string = 'alz-mgmt'
 
 @description('GitHub environments.')

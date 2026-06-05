@@ -28,6 +28,7 @@ jobs:
       - name: Checkout platform templates
         uses: actions/checkout@v4
         with:
+          # ADOPTION: change ExjobbOA/alz-mgmt-templates to <your-org>/<your-engine-repo>
           repository: ExjobbOA/alz-mgmt-templates
           ref: ${{ inputs.platform_ref }}
           path: platform
@@ -84,6 +85,7 @@ jobs:
       - name: Checkout platform templates
         uses: actions/checkout@v4
         with:
+          # ADOPTION: change ExjobbOA/alz-mgmt-templates to <your-org>/<your-engine-repo>
           repository: ExjobbOA/alz-mgmt-templates
           ref: ${{ inputs.platform_ref }}
           path: platform
