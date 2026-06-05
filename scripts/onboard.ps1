@@ -10,7 +10,10 @@
     3. Captures deployment outputs (UAMI client IDs)
     4. Writes AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID
        as GitHub environment variables in both environments
-    5. Updates config/platform.json and config/bootstrap/plumbing.bicepparam
+    5. Updates config/platform.json with identity/location values
+
+    config/bootstrap/plumbing.bicepparam is NOT written by this script —
+    it is a manual-deploy aid only. See its header comment for usage.
 
 .PARAMETER ConfigRepoPath
     Path to the alz-mgmt config repo on disk.
@@ -23,10 +26,6 @@
 .PARAMETER ModuleRepo
     Config repo name in GitHub (e.g. alz-mgmt).
     Auto-detected from the config repo's git remote if not supplied.
-
-.PARAMETER TemplatesRepo
-    Templates repo name (e.g. alz-mgmt-templates).
-    Auto-detected from this repo's git remote if not supplied.
 
 .PARAMETER BootstrapSubscriptionId
     Subscription ID where the identity resource group and UAMIs are created.
@@ -42,9 +41,6 @@
 
 .PARAMETER EnvApply
     GitHub environment name for the apply/CD identity. Default: alz-mgmt-apply.
-
-.PARAMETER WorkflowRefBranch
-    Branch ref baked into OIDC subjects. Default: refs/heads/main.
 
 .PARAMETER DryRun
     Print every action without making any changes.
@@ -63,13 +59,11 @@ param(
     [string] $ConfigRepoPath        = '',
     [string] $GithubOrg             = '',
     [string] $ModuleRepo            = '',
-    [string] $TemplatesRepo         = '',
     [string] $BootstrapSubscriptionId = '',
     [string] $ManagementGroupId     = '',
     [string] $Location              = 'swedencentral',
     [string] $EnvPlan               = 'alz-mgmt-plan',
     [string] $EnvApply              = 'alz-mgmt-apply',
-    [string] $WorkflowRefBranch     = 'refs/heads/main',
     [switch] $DryRun
 )
 
@@ -126,6 +120,15 @@ function Test-Prerequisites {
     }
     Write-Ok 'az, gh, git — all present.'
 
+    # Bicep CLI is required to deploy the bootstrap .bicep directly.
+    # 'az bicep version' exits 0 when installed (and triggers auto-install on first use).
+    $null = az bicep version 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail 'Bicep CLI not available. Run: az bicep install'
+        exit 1
+    }
+    Write-Ok 'Bicep CLI present.'
+
     $account = az account show 2>$null | ConvertFrom-Json
     if (-not $account) { Write-Fail 'Not logged into Azure. Run: az login'; exit 1 }
     Write-Ok "Azure: logged in as $($account.user.name) (tenant $($account.tenantId))"
@@ -160,9 +163,6 @@ function Resolve-Inputs {
     Write-Info "Config repo: $Script:ConfigRepoPath"
 
     # Auto-detect from git remotes
-    if ($TemplatesRepo -eq '') { $Script:TemplatesRepo = Get-GitRemoteField $TemplatesRoot 'repo' }
-    if ($TemplatesRepo -eq '') { $Script:TemplatesRepo = 'alz-mgmt-templates' }
-
     if ($GithubOrg -eq '') { $Script:GithubOrg = Get-GitRemoteField $TemplatesRoot 'org' }
     if ($GithubOrg -eq '') { $Script:GithubOrg = Get-GitRemoteField $Script:ConfigRepoPath 'org' }
 
@@ -192,12 +192,10 @@ function Confirm-Plan {
     Write-Host ''
     Write-Host "  Config repo path    : $Script:ConfigRepoPath"
     Write-Host "  GitHub org/repo     : $Script:GithubOrg/$Script:ModuleRepo"
-    Write-Host "  Templates repo      : $Script:TemplatesRepo"
     Write-Host "  Bootstrap sub ID    : $Script:BootstrapSubscriptionId"
     Write-Host "  Root MG GUID        : $Script:ManagementGroupId"
     Write-Host "  Azure region        : $Script:Location"
     Write-Host "  GitHub environments : $Script:EnvPlan (plan)  $Script:EnvApply (apply)"
-    Write-Host "  Workflow branch     : $Script:WorkflowRefBranch"
     Write-Host ''
 
     if ($DryRun) { Write-Warn 'DRY RUN — no changes will be made.'; return }
@@ -259,7 +257,7 @@ function Set-OidcSubjectClaim {
 function Invoke-Bootstrap {
     Write-Step 'Running bootstrap Bicep deployment'
 
-    $templateFile = Join-Path $TemplatesRoot 'bootstrap/plumbing/main.json'
+    $templateFile = Join-Path $TemplatesRoot 'bootstrap/plumbing/main.bicep'
     if (-not (Test-Path $templateFile)) {
         Write-Fail "Bootstrap template not found: $templateFile"; exit 1
     }
@@ -270,10 +268,8 @@ function Invoke-Bootstrap {
         location                = @{ value = $Script:Location }
         githubOrg               = @{ value = $Script:GithubOrg }
         moduleRepo              = @{ value = $Script:ModuleRepo }
-        templatesRepo           = @{ value = $Script:TemplatesRepo }
         envPlan                 = @{ value = $Script:EnvPlan }
         envApply                = @{ value = $Script:EnvApply }
-        workflowRefBranch       = @{ value = $Script:WorkflowRefBranch }
     }
     $paramsJson = $paramObj | ConvertTo-Json -Depth 5 -Compress
 
@@ -421,39 +417,6 @@ function Update-PlatformJson {
     Write-Ok 'config/platform.json updated.'
 }
 
-# ─── Step 9: Update config/bootstrap/plumbing.bicepparam ──────────────────────
-function Update-BootstrapBicepparam {
-    Write-Step 'Updating config/bootstrap/plumbing.bicepparam'
-
-    $paramFile = Join-Path $Script:ConfigRepoPath 'config/bootstrap/plumbing.bicepparam'
-    if (-not (Test-Path $paramFile)) { Write-Warn 'config/bootstrap/plumbing.bicepparam not found — skipping.'; return }
-
-    if ($DryRun) {
-        Write-Dry "Would update bootstrapSubscriptionId, location, githubOrg,"
-        Write-Dry "moduleRepo, templatesRepo, envPlan, envApply in $paramFile"
-        return
-    }
-
-    $content = Get-Content $paramFile -Raw
-
-    $replacements = [ordered]@{
-        "param bootstrapSubscriptionId = '.*'" = "param bootstrapSubscriptionId = '$Script:BootstrapSubscriptionId'"
-        "param location = '.*'"                = "param location = '$Script:Location'"
-        "param githubOrg = '.*'"               = "param githubOrg = '$Script:GithubOrg'"
-        "param moduleRepo = '.*'"              = "param moduleRepo = '$Script:ModuleRepo'"
-        "param templatesRepo = '.*'"           = "param templatesRepo = '$Script:TemplatesRepo'"
-        "param envPlan = '.*'"                 = "param envPlan = '$Script:EnvPlan'"
-        "param envApply = '.*'"                = "param envApply = '$Script:EnvApply'"
-    }
-
-    foreach ($pattern in $replacements.Keys) {
-        $content = $content -replace $pattern, $replacements[$pattern]
-    }
-
-    Set-Content $paramFile $content -Encoding UTF8 -NoNewline
-    Write-Ok 'config/bootstrap/plumbing.bicepparam updated.'
-}
-
 # ─── Summary ──────────────────────────────────────────────────────────────────
 function Write-Summary {
     Write-Host ''
@@ -471,9 +434,8 @@ function Write-Summary {
     Write-Host "    '$Script:EnvPlan'  → AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID"
     Write-Host "    '$Script:EnvApply' → AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID"
     Write-Host ''
-    Write-Host '  Config files updated:'
+    Write-Host '  Config file updated:'
     Write-Host "    $Script:ConfigRepoPath\config\platform.json"
-    Write-Host "    $Script:ConfigRepoPath\config\bootstrap\plumbing.bicepparam"
     Write-Host ''
     Write-Host '  Next steps:'
     Write-Host "    1. cd $Script:ConfigRepoPath"
@@ -490,13 +452,11 @@ function Write-Summary {
 $Script:ConfigRepoPath         = $ConfigRepoPath
 $Script:GithubOrg              = $GithubOrg
 $Script:ModuleRepo             = $ModuleRepo
-$Script:TemplatesRepo          = $TemplatesRepo
 $Script:BootstrapSubscriptionId = $BootstrapSubscriptionId
 $Script:ManagementGroupId      = $ManagementGroupId
 $Script:Location               = $Location
 $Script:EnvPlan                = $EnvPlan
 $Script:EnvApply               = $EnvApply
-$Script:WorkflowRefBranch      = $WorkflowRefBranch
 $Script:PlanClientId           = ''
 $Script:ApplyClientId          = ''
 $Script:IdentityRg             = ''
@@ -516,6 +476,5 @@ Invoke-Bootstrap
 Get-AzureTenantId
 Set-GitHubEnvVars
 Update-PlatformJson
-Update-BootstrapBicepparam
 
 if (-not $DryRun) { Write-Summary } else { Write-Host ''; Write-Warn 'Dry run complete — no changes were made.' }

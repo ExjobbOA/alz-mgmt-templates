@@ -4,6 +4,8 @@
 |--------|---------|
 | [onboard.ps1](#onboardps1--tenant-onboarding) | Bootstrap a new tenant — one command |
 | [cleanup.ps1](#cleanupps1--tenant-cleanup) | Tear down a previous deployment so you can re-onboard |
+| [Export-ALZStackState.ps1](#export-alzstackstateps1--stack-state-export) | Snapshot all Deployment Stack state to JSON (run before/after a change) |
+| [Compare-ALZStackState.ps1](#compare-alzstackstateps1--stack-state-diff) | Diff two state snapshots to verify change containment |
 
 ---
 
@@ -67,14 +69,13 @@ Bootstraps a new Azure Landing Zone tenant end-to-end in a single command.
 
 | Step | Action |
 |------|--------|
-| 1 | Auto-detects `GithubOrg`, `ModuleRepo`, `TemplatesRepo` from git remotes; loads defaults from `config/platform.json`; prompts interactively for anything still missing |
+| 1 | Auto-detects `GithubOrg` and `ModuleRepo` from git remotes; loads defaults from `config/platform.json`; prompts interactively for anything still missing |
 | 2 | Prints the full plan and asks for confirmation |
 | 3 | Creates the two GitHub environments (`alz-mgmt-plan`, `alz-mgmt-apply`) in the config repo |
-| 4 | Runs `az deployment mg create` using the compiled `bootstrap/plumbing/main.json` — deploys UAMIs, OIDC federated credentials, and role assignments on the management group |
+| 4 | Runs `az deployment mg create` using `bootstrap/plumbing/main.bicep` — deploys UAMIs, OIDC federated credentials, and role assignments on the management group |
 | 5 | Reads the `tenantId` from `az account show` |
 | 6 | Writes `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and `AZURE_SUBSCRIPTION_ID` as GitHub **environment variables** in both environments |
 | 7 | Updates `config/platform.json` in the config repo |
-| 8 | Updates `config/bootstrap/plumbing.bicepparam` in the config repo |
 
 After the script finishes, commit the updated config files, push, and run the CD workflow.
 
@@ -124,13 +125,11 @@ gh repo clone <org>/<new-repo-name> ../alz-mgmt   # or your chosen path
 | `-ConfigRepoPath` | No | `../alz-mgmt` | Path to the tenant config repo on disk |
 | `-GithubOrg` | No* | git remote | GitHub organisation name |
 | `-ModuleRepo` | No* | git remote | Config repo name in GitHub |
-| `-TemplatesRepo` | No* | git remote | Templates repo name in GitHub |
 | `-BootstrapSubscriptionId` | **Yes** | `platform.json` | Subscription where identity RG + UAMIs are created |
 | `-ManagementGroupId` | **Yes** | `platform.json` | Tenant root management group GUID |
 | `-Location` | No | `swedencentral` | Azure region for identity resources |
 | `-EnvPlan` | No | `alz-mgmt-plan` | GitHub environment name for the plan/CI identity |
 | `-EnvApply` | No | `alz-mgmt-apply` | GitHub environment name for the apply/CD identity |
-| `-WorkflowRefBranch` | No | `refs/heads/main` | Branch ref baked into OIDC subjects |
 | `-DryRun` | No | — | Print every action; make no changes |
 
 \* Auto-detected from git remotes; prompted interactively if detection fails.
@@ -151,8 +150,10 @@ Both environments receive three **variables** (not secrets — OIDC needs no sec
 - `MANAGEMENT_GROUP_ID`, `LOCATION`, `LOCATION_PRIMARY`
 - `SUBSCRIPTION_ID_MANAGEMENT` (and the other three if they were all equal — common on a fresh repo)
 
-**`config/bootstrap/plumbing.bicepparam`**
-- `bootstrapSubscriptionId`, `location`, `githubOrg`, `moduleRepo`, `templatesRepo`, `envPlan`, `envApply`
+> `config/bootstrap/plumbing.bicepparam` is **not** written by this script.
+> It exists only for operators who want to run the OIDC bootstrap manually with
+> `az deployment mg create --parameters @config/bootstrap/plumbing.bicepparam`.
+> See the header comment in that file for usage.
 
 ### Idempotency
 
@@ -237,3 +238,56 @@ The script asks you to type `YES` before making any changes.
 - If a stack was only partially deployed, the script silently skips missing stacks.
 - If the identity RG was already gone when cleanup runs, the script falls back to listing
   orphaned (Unknown) role assignments at the tenant root MG so you can remove them manually.
+
+---
+
+## Export-ALZStackState.ps1 — Stack State Export
+
+Captures stack metadata (ProvisioningState, resource list) and key resource property snapshots
+for all ALZ Deployment Stacks. Used to produce evidence that only the intended stack changed
+after a deployment.
+
+### Usage
+
+```powershell
+# Before change
+./scripts/Export-ALZStackState.ps1 `
+    -OutputFile       "state-before.json" `
+    -SubscriptionId   "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" `
+    -TenantIntRootMgId "alz"
+
+# After change
+./scripts/Export-ALZStackState.ps1 `
+    -OutputFile       "state-after.json" `
+    -SubscriptionId   "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" `
+    -TenantIntRootMgId "alz"
+```
+
+Then diff with `Compare-ALZStackState.ps1` or `git diff --no-index state-before.json state-after.json`.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-OutputFile` | **Yes** | Path for the JSON export file |
+| `-SubscriptionId` | **Yes** | Connectivity/platform subscription ID |
+| `-TenantIntRootMgId` | **Yes** | Intermediate root MG ID (e.g. `alz`) |
+
+---
+
+## Compare-ALZStackState.ps1 — Stack State Diff
+
+Reads two JSON files produced by `Export-ALZStackState.ps1` and reports which stacks had
+content changes, which were redeployed without changes (DeploymentId only), and which were
+untouched. Used to verify change containment (only one stack should differ per change).
+
+### Usage
+
+```powershell
+./scripts/Compare-ALZStackState.ps1 `
+    -BeforeFile "state-before.json" `
+    -AfterFile  "state-after.json"
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-BeforeFile` | **Yes** | Pre-change snapshot (from `Export-ALZStackState.ps1`) |
+| `-AfterFile` | **Yes** | Post-change snapshot (from `Export-ALZStackState.ps1`) |

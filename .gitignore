@@ -1,3 +1,6 @@
+# Compiled bootstrap ARM artifacts — deploy from .bicep source directly
+bootstrap/plumbing/**/*.json
+
 # Tenant-specific state snapshots (may contain private subscription IDs)
 state-snapshots/
 
