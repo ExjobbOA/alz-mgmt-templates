@@ -12,17 +12,9 @@ param githubOrg string = 'ExjobbOA'
 @description('Config/module repo (där environments finns).')
 param moduleRepo string = 'alz-mgmt'
 
-@description('Templates/engine repo. Retained for backward compatibility — existing plumbing.bicepparam files may supply this value. No longer used in FIC subjects.')
-#disable-next-line no-unused-params
-param templatesRepo string = 'alz-mgmt-templates'
-
 @description('GitHub environments.')
 param envPlan string = 'alz-mgmt-plan'
 param envApply string = 'alz-mgmt-apply'
-
-@description('Workflow branch ref. Retained for backward compatibility — existing plumbing.bicepparam files may supply this value. No longer used in FIC subjects.')
-#disable-next-line no-unused-params
-param workflowRefBranch string = 'refs/heads/main'
 
 @description('Valfritt override. Tom sträng => derivation från location.')
 param identityRgName string = ''

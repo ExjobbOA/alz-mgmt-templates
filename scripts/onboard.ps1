@@ -24,10 +24,6 @@
     Config repo name in GitHub (e.g. alz-mgmt).
     Auto-detected from the config repo's git remote if not supplied.
 
-.PARAMETER TemplatesRepo
-    Templates repo name (e.g. alz-mgmt-templates).
-    Auto-detected from this repo's git remote if not supplied.
-
 .PARAMETER BootstrapSubscriptionId
     Subscription ID where the identity resource group and UAMIs are created.
 
@@ -42,9 +38,6 @@
 
 .PARAMETER EnvApply
     GitHub environment name for the apply/CD identity. Default: alz-mgmt-apply.
-
-.PARAMETER WorkflowRefBranch
-    Branch ref baked into OIDC subjects. Default: refs/heads/main.
 
 .PARAMETER DryRun
     Print every action without making any changes.
@@ -63,13 +56,11 @@ param(
     [string] $ConfigRepoPath        = '',
     [string] $GithubOrg             = '',
     [string] $ModuleRepo            = '',
-    [string] $TemplatesRepo         = '',
     [string] $BootstrapSubscriptionId = '',
     [string] $ManagementGroupId     = '',
     [string] $Location              = 'swedencentral',
     [string] $EnvPlan               = 'alz-mgmt-plan',
     [string] $EnvApply              = 'alz-mgmt-apply',
-    [string] $WorkflowRefBranch     = 'refs/heads/main',
     [switch] $DryRun
 )
 
@@ -160,9 +151,6 @@ function Resolve-Inputs {
     Write-Info "Config repo: $Script:ConfigRepoPath"
 
     # Auto-detect from git remotes
-    if ($TemplatesRepo -eq '') { $Script:TemplatesRepo = Get-GitRemoteField $TemplatesRoot 'repo' }
-    if ($TemplatesRepo -eq '') { $Script:TemplatesRepo = 'alz-mgmt-templates' }
-
     if ($GithubOrg -eq '') { $Script:GithubOrg = Get-GitRemoteField $TemplatesRoot 'org' }
     if ($GithubOrg -eq '') { $Script:GithubOrg = Get-GitRemoteField $Script:ConfigRepoPath 'org' }
 
@@ -192,12 +180,10 @@ function Confirm-Plan {
     Write-Host ''
     Write-Host "  Config repo path    : $Script:ConfigRepoPath"
     Write-Host "  GitHub org/repo     : $Script:GithubOrg/$Script:ModuleRepo"
-    Write-Host "  Templates repo      : $Script:TemplatesRepo"
     Write-Host "  Bootstrap sub ID    : $Script:BootstrapSubscriptionId"
     Write-Host "  Root MG GUID        : $Script:ManagementGroupId"
     Write-Host "  Azure region        : $Script:Location"
     Write-Host "  GitHub environments : $Script:EnvPlan (plan)  $Script:EnvApply (apply)"
-    Write-Host "  Workflow branch     : $Script:WorkflowRefBranch"
     Write-Host ''
 
     if ($DryRun) { Write-Warn 'DRY RUN — no changes will be made.'; return }
@@ -270,10 +256,8 @@ function Invoke-Bootstrap {
         location                = @{ value = $Script:Location }
         githubOrg               = @{ value = $Script:GithubOrg }
         moduleRepo              = @{ value = $Script:ModuleRepo }
-        templatesRepo           = @{ value = $Script:TemplatesRepo }
         envPlan                 = @{ value = $Script:EnvPlan }
         envApply                = @{ value = $Script:EnvApply }
-        workflowRefBranch       = @{ value = $Script:WorkflowRefBranch }
     }
     $paramsJson = $paramObj | ConvertTo-Json -Depth 5 -Compress
 
@@ -490,13 +474,11 @@ function Write-Summary {
 $Script:ConfigRepoPath         = $ConfigRepoPath
 $Script:GithubOrg              = $GithubOrg
 $Script:ModuleRepo             = $ModuleRepo
-$Script:TemplatesRepo          = $TemplatesRepo
 $Script:BootstrapSubscriptionId = $BootstrapSubscriptionId
 $Script:ManagementGroupId      = $ManagementGroupId
 $Script:Location               = $Location
 $Script:EnvPlan                = $EnvPlan
 $Script:EnvApply               = $EnvApply
-$Script:WorkflowRefBranch      = $WorkflowRefBranch
 $Script:PlanClientId           = ''
 $Script:ApplyClientId          = ''
 $Script:IdentityRg             = ''
