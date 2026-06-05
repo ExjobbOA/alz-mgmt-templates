@@ -10,7 +10,10 @@
     3. Captures deployment outputs (UAMI client IDs)
     4. Writes AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID
        as GitHub environment variables in both environments
-    5. Updates config/platform.json and config/bootstrap/plumbing.bicepparam
+    5. Updates config/platform.json with identity/location values
+
+    config/bootstrap/plumbing.bicepparam is NOT written by this script —
+    it is a manual-deploy aid only. See its header comment for usage.
 
 .PARAMETER ConfigRepoPath
     Path to the alz-mgmt config repo on disk.
@@ -414,39 +417,6 @@ function Update-PlatformJson {
     Write-Ok 'config/platform.json updated.'
 }
 
-# ─── Step 9: Update config/bootstrap/plumbing.bicepparam ──────────────────────
-function Update-BootstrapBicepparam {
-    Write-Step 'Updating config/bootstrap/plumbing.bicepparam'
-
-    $paramFile = Join-Path $Script:ConfigRepoPath 'config/bootstrap/plumbing.bicepparam'
-    if (-not (Test-Path $paramFile)) { Write-Warn 'config/bootstrap/plumbing.bicepparam not found — skipping.'; return }
-
-    if ($DryRun) {
-        Write-Dry "Would update bootstrapSubscriptionId, location, githubOrg,"
-        Write-Dry "moduleRepo, templatesRepo, envPlan, envApply in $paramFile"
-        return
-    }
-
-    $content = Get-Content $paramFile -Raw
-
-    $replacements = [ordered]@{
-        "param bootstrapSubscriptionId = '.*'" = "param bootstrapSubscriptionId = '$Script:BootstrapSubscriptionId'"
-        "param location = '.*'"                = "param location = '$Script:Location'"
-        "param githubOrg = '.*'"               = "param githubOrg = '$Script:GithubOrg'"
-        "param moduleRepo = '.*'"              = "param moduleRepo = '$Script:ModuleRepo'"
-        "param templatesRepo = '.*'"           = "param templatesRepo = '$Script:TemplatesRepo'"
-        "param envPlan = '.*'"                 = "param envPlan = '$Script:EnvPlan'"
-        "param envApply = '.*'"                = "param envApply = '$Script:EnvApply'"
-    }
-
-    foreach ($pattern in $replacements.Keys) {
-        $content = $content -replace $pattern, $replacements[$pattern]
-    }
-
-    Set-Content $paramFile $content -Encoding UTF8 -NoNewline
-    Write-Ok 'config/bootstrap/plumbing.bicepparam updated.'
-}
-
 # ─── Summary ──────────────────────────────────────────────────────────────────
 function Write-Summary {
     Write-Host ''
@@ -464,9 +434,8 @@ function Write-Summary {
     Write-Host "    '$Script:EnvPlan'  → AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID"
     Write-Host "    '$Script:EnvApply' → AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID"
     Write-Host ''
-    Write-Host '  Config files updated:'
+    Write-Host '  Config file updated:'
     Write-Host "    $Script:ConfigRepoPath\config\platform.json"
-    Write-Host "    $Script:ConfigRepoPath\config\bootstrap\plumbing.bicepparam"
     Write-Host ''
     Write-Host '  Next steps:'
     Write-Host "    1. cd $Script:ConfigRepoPath"
@@ -507,6 +476,5 @@ Invoke-Bootstrap
 Get-AzureTenantId
 Set-GitHubEnvVars
 Update-PlatformJson
-Update-BootstrapBicepparam
 
 if (-not $DryRun) { Write-Summary } else { Write-Host ''; Write-Warn 'Dry run complete — no changes were made.' }
