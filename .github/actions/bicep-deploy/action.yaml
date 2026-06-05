@@ -286,7 +286,11 @@ runs:
               try {
                 switch ($deploymentType) {
                   "managementGroup" {
-                    # Clean up all deployments before each deployment to avoid quota issues
+                    # ARM enforces a per-scope deployment-history limit (800 entries at MG scope).
+                    # Exceeding it causes all subsequent deployments to fail with a quota error.
+                    # We delete ALL existing deployment records before creating the new stack.
+                    # This removes history entries only — it does NOT touch deployed resources;
+                    # the Deployment Stack itself is what controls resource lifecycle (DeleteAll).
                     try {
                       Write-Host "Cleaning up existing deployments in management group..." -ForegroundColor Cyan
                       $allDeployments = Get-AzManagementGroupDeployment -ManagementGroupId $intRootMgId -ErrorAction SilentlyContinue
@@ -317,7 +321,11 @@ runs:
                       Select-AzSubscription -SubscriptionId $env:SUBSCRIPTION_ID | Out-Null
                     }
 
-                    # Clean up all deployments before each deployment to avoid quota issues
+                    # ARM enforces a per-scope deployment-history limit (800 entries at sub scope).
+                    # Exceeding it causes all subsequent deployments to fail with a quota error.
+                    # We delete ALL existing deployment records before creating the new stack.
+                    # This removes history entries only — it does NOT touch deployed resources;
+                    # the Deployment Stack itself is what controls resource lifecycle (DeleteAll).
                     try {
                       Write-Host "Cleaning up existing deployments in subscription..." -ForegroundColor Cyan
                       $allDeployments = Get-AzSubscriptionDeployment -ErrorAction SilentlyContinue
@@ -348,7 +356,11 @@ runs:
                       Select-AzSubscription -SubscriptionId $env:SUBSCRIPTION_ID | Out-Null
                     }
 
-                    # Clean up all deployments before each deployment to avoid quota issues
+                    # ARM enforces a per-scope deployment-history limit (800 entries at RG scope).
+                    # Exceeding it causes all subsequent deployments to fail with a quota error.
+                    # We delete ALL existing deployment records before creating the new stack.
+                    # This removes history entries only — it does NOT touch deployed resources;
+                    # the Deployment Stack itself is what controls resource lifecycle (DeleteAll).
                     try {
                       Write-Host "Cleaning up existing deployments in resource group..." -ForegroundColor Cyan
                       $allDeployments = Get-AzResourceGroupDeployment -ResourceGroupName $env:RESOURCE_GROUP_NAME -ErrorAction SilentlyContinue
