@@ -4,6 +4,8 @@
 |--------|---------|
 | [onboard.ps1](#onboardps1--tenant-onboarding) | Bootstrap a new tenant — one command |
 | [cleanup.ps1](#cleanupps1--tenant-cleanup) | Tear down a previous deployment so you can re-onboard |
+| [Export-ALZStackState.ps1](#export-alzstackstateps1--stack-state-export) | Snapshot all Deployment Stack state to JSON (run before/after a change) |
+| [Compare-ALZStackState.ps1](#compare-alzstackstateps1--stack-state-diff) | Diff two state snapshots to verify change containment |
 
 ---
 
@@ -236,3 +238,56 @@ The script asks you to type `YES` before making any changes.
 - If a stack was only partially deployed, the script silently skips missing stacks.
 - If the identity RG was already gone when cleanup runs, the script falls back to listing
   orphaned (Unknown) role assignments at the tenant root MG so you can remove them manually.
+
+---
+
+## Export-ALZStackState.ps1 — Stack State Export
+
+Captures stack metadata (ProvisioningState, resource list) and key resource property snapshots
+for all ALZ Deployment Stacks. Used to produce evidence that only the intended stack changed
+after a deployment.
+
+### Usage
+
+```powershell
+# Before change
+./scripts/Export-ALZStackState.ps1 `
+    -OutputFile       "state-before.json" `
+    -SubscriptionId   "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" `
+    -TenantIntRootMgId "alz"
+
+# After change
+./scripts/Export-ALZStackState.ps1 `
+    -OutputFile       "state-after.json" `
+    -SubscriptionId   "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" `
+    -TenantIntRootMgId "alz"
+```
+
+Then diff with `Compare-ALZStackState.ps1` or `git diff --no-index state-before.json state-after.json`.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-OutputFile` | **Yes** | Path for the JSON export file |
+| `-SubscriptionId` | **Yes** | Connectivity/platform subscription ID |
+| `-TenantIntRootMgId` | **Yes** | Intermediate root MG ID (e.g. `alz`) |
+
+---
+
+## Compare-ALZStackState.ps1 — Stack State Diff
+
+Reads two JSON files produced by `Export-ALZStackState.ps1` and reports which stacks had
+content changes, which were redeployed without changes (DeploymentId only), and which were
+untouched. Used to verify change containment (only one stack should differ per change).
+
+### Usage
+
+```powershell
+./scripts/Compare-ALZStackState.ps1 `
+    -BeforeFile "state-before.json" `
+    -AfterFile  "state-after.json"
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-BeforeFile` | **Yes** | Pre-change snapshot (from `Export-ALZStackState.ps1`) |
+| `-AfterFile` | **Yes** | Post-change snapshot (from `Export-ALZStackState.ps1`) |
